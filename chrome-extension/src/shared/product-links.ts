@@ -1,5 +1,6 @@
 /** Verified public destinations; never include account sessions or tracking data. */
 export const PRODUCT_LINKS = Object.freeze({
+  downloads: "https://music-mute.com/#downloads",
   companionRelease:
     "https://github.com/ahmed-dev-1/musicmute-downloads/releases/tag/macos-store-companion-2026-10-07",
 });

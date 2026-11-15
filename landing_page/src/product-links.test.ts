@@ -9,7 +9,9 @@ describe("public MusicMute destinations", () => {
       expect(url.protocol).toBe("https:");
       expect(url.username).toBe("");
       expect(url.password).toBe("");
+      expect(url.port).toBe("");
       expect(url.search).toBe("");
+      expect(url.hash).toBe("");
     },
   );
 
@@ -18,5 +20,15 @@ describe("public MusicMute destinations", () => {
     expect(new URL(PRODUCT_LINKS.canonicalSite).hostname).toBe(
       "music-mute.com",
     );
+  });
+
+  test("uses the verified Chrome Web Store item without account parameters", () => {
+    const url = new URL(PRODUCT_LINKS.chromeExtension);
+
+    expect(url.hostname).toBe("chromewebstore.google.com");
+    expect(url.pathname).toBe(
+      "/detail/musicmute-local/acmgefmmndomcpdlgnafkjbgobinllep",
+    );
+    expect(url.search).toBe("");
   });
 });

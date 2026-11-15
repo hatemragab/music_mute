@@ -49,6 +49,7 @@ export interface WorkerMachine {
     }>;
   } | null;
   runtime: {
+    installationProfile?: "windows-user";
     workerVersion: string;
     protocolVersion: number;
     manifestDigest: string;

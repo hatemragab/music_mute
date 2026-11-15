@@ -5,14 +5,43 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProcessingMediaPolicyTest {
-    private val fixture = """{
-      "schema_version":2,"revision":1,"accept_new_jobs":true,"accept_long_jobs":true,
-      "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,"max_local_source_bytes":200000000,
-      "max_preparation_seconds":120,
-      "long_job_threshold_seconds":600},
-      "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
-      "compatibility_revision":"unavailable","fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}}
-    }"""
+    private val fixture = processingPolicyFixture
+
+    @Test fun oldPolicyAndOfflineDefaultsHideLinkWithoutChangingFileLimits() {
+        val policy = ProcessingMediaPolicy.parse(ApiWireJson.response(fixture))
+        assertFalse(policy.linkImportVisible)
+        assertFalse(policy.linkImportEnabled)
+        assertTrue(policy.linkImportDisabledCountries.isEmpty())
+        assertNull(policy.visitorCountry)
+        assertNull(policy.linkImportPolicyRevision)
+        assertFalse(ProcessingMediaPolicy.STANDARD.linkImportVisible)
+        assertTrue(policy.localPreparationReady)
+    }
+
+    @Test fun parsesNativeVisibilityDecisionAndItsRevision() {
+        val policy = ProcessingMediaPolicy.parse(ApiWireJson.response(fixture.replace(
+            "\"revision\":1", "\"revision\":1,\"link_import_enabled\":true,\"link_import_visible\":true," +
+                "\"link_import_disabled_countries\":[\"EG\",\"EG\",\"CA\"],\"visitor_country\":\"US\"," +
+                "\"link_import_reason\":\"allowed\",\"link_import_policy_revision\":8",
+        )))
+        assertTrue(policy.linkImportVisible)
+        assertEquals(listOf("CA", "EG"), policy.linkImportDisabledCountries)
+        assertEquals("US", policy.visitorCountry)
+        assertEquals("allowed", policy.linkImportReason)
+        assertEquals(8, policy.linkImportPolicyRevision)
+    }
+
+    @Test fun onlyAnActualTrueBooleanShowsLinkAndHiddenPolicyDoesNotRestrictProcessing() {
+        for (value in listOf("false", "null", "\"true\"", "{}", "[]")) {
+            val policy = ProcessingMediaPolicy.parse(ApiWireJson.response(fixture.replace(
+                "\"revision\":1", "\"revision\":1,\"link_import_visible\":$value",
+            )))
+            assertFalse(policy.linkImportVisible)
+            assertTrue(policy.acceptNewJobs)
+            assertTrue(policy.acceptsPrepared(50_000_000, 1_200.0))
+            policy.requireLongJobAvailable(1_200.0)
+        }
+    }
 
     @Test fun serverPolicyParsesAsTheOnlyStandardPolicy() {
         val policy = ProcessingMediaPolicy.parse(ApiWireJson.response(fixture))
@@ -65,5 +94,14 @@ class ProcessingMediaPolicyTest {
         assertFalse(standardMediaPolicy().copy(maxPreparationSeconds = 0).localPreparationReady)
     }
 }
+
+internal val processingPolicyFixture = """{
+      "schema_version":2,"revision":1,"accept_new_jobs":true,"accept_long_jobs":true,
+      "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,"max_local_source_bytes":200000000,
+      "max_preparation_seconds":120,
+      "long_job_threshold_seconds":600},
+      "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
+      "compatibility_revision":"unavailable","fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}}
+    }"""
 
 internal fun standardMediaPolicy() = ProcessingMediaPolicy.STANDARD.copy(revision = 1)

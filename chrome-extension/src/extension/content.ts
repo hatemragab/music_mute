@@ -5,6 +5,7 @@ import {
   isVideoId,
   type MediaClock,
   type JobSnapshot,
+  type HelloPayload,
 } from "../shared/protocol";
 import {
   isExtensionMessage,
@@ -28,11 +29,32 @@ import {
 import { failureGuidance } from "./error-guidance";
 import { cloudHandoffUrl } from "../shared/app-handoff";
 import { isErrorContext, type ErrorContext } from "../shared/error-context";
+import { localProviderForHello } from "../shared/browser-platform";
+import { SEEK_DRIFT_SECONDS } from "./sync";
 
 const localizer = createLocalizer();
 const removeErrorCapture = installErrorCapture("content");
 let invalidated = false;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
+const CLOCK_INTERVAL_MS = 250;
+const CLOCK_STATE_FIELDS = [
+  "video_id",
+  "generation",
+  "duration_seconds",
+  "playback_rate",
+  "paused",
+  "seeking",
+  "ended",
+  "buffering",
+  "ad_active",
+  "volume",
+  "user_muted",
+] as const;
+let lastClockSample: {
+  video: HTMLVideoElement;
+  monotonic: number;
+  payload: MediaClock;
+} | null = null;
 let cleanupLifecycle: (() => void) | null = null;
 let cleanupControls: (() => void) | null = null;
 let video: HTMLVideoElement | null = null;
@@ -86,6 +108,9 @@ let progressBar: HTMLProgressElement | null = null;
 let progressLabel: HTMLSpanElement | null = null;
 let setupLink: HTMLAnchorElement | null = null;
 let cloudLink: HTMLAnchorElement | null = null;
+let windowsHost = false;
+let macHost = false;
+let guidanceHello: Pick<HelloPayload, "platform" | "arch"> | null = null;
 let errorDetails: HTMLSpanElement | null = null;
 let copyError: HTMLButtonElement | null = null;
 let lastFailure: {
@@ -121,10 +146,10 @@ function renderFailure(): void {
   if (countdownTimer) clearTimeout(countdownTimer);
   countdownTimer = null;
   const { code, context } = lastFailure;
-  const guidance = failureGuidance(code, context);
+  const guidance = failureGuidance(code, context, Date.now(), guidanceHello);
   text(
-    () => failureGuidance(code, context).message,
-    () => failureGuidance(code, context).title,
+    () => failureGuidance(code, context, Date.now(), guidanceHello).message,
+    () => failureGuidance(code, context, Date.now(), guidanceHello).title,
     code === "SESSION_STOPPED" ? "ready" : "error",
   );
   if (setupLink) setupLink.hidden = !guidance.openApp;
@@ -346,7 +371,7 @@ async function send(message: ExtensionMessage): Promise<{
   error?: string;
   error_context?: ErrorContext;
   handoff_url?: string;
-  processing_provider?: "LOCAL_MACOS" | "ONLINE_MUSICMUTE";
+  processing_provider?: "LOCAL_MACOS" | "LOCAL_WINDOWS" | "ONLINE_MUSICMUTE";
   cloud_confirmation_scope?: string;
 }> {
   if (invalidated) return { ok: false, error: "EXTENSION_CONTEXT_INVALIDATED" };
@@ -359,7 +384,8 @@ async function send(message: ExtensionMessage): Promise<{
           error?: string;
           error_context?: ErrorContext;
           handoff_url?: string;
-          processing_provider?: "LOCAL_MACOS" | "ONLINE_MUSICMUTE";
+          processing_provider?:
+            "LOCAL_MACOS" | "LOCAL_WINDOWS" | "ONLINE_MUSICMUTE";
           cloud_confirmation_scope?: string;
         })
       : { ok: false, error: "EXTENSION_CONNECTION_LOST" };
@@ -436,6 +462,7 @@ function teardown(pause = false, restoreOriginal = true): void {
   mode = "idle";
   if (clockTimer) clearInterval(clockTimer);
   clockTimer = null;
+  lastClockSample = null;
   generation = Math.max(Date.now(), generation + 1);
   startAccepted = false;
   preparation = null;
@@ -561,7 +588,7 @@ function fail(code: string, context?: ErrorContext): void {
     generation,
   };
   renderFailure();
-  emitDiagnostic("diagnostic_error", code, { stage: "content" });
+  emitDiagnostic("diagnostic_error", code, { stage: "content", generation });
   resumeOriginal(previous, clearedGeneration, resume);
 }
 function hasPlayableVideoBuffer(element: HTMLVideoElement): boolean {
@@ -592,7 +619,7 @@ function recoverBufferingFromProgress(): void {
     bufferingStartedAt = null;
   }
 }
-function clock(): MediaClock | undefined {
+function clock(force = false): MediaClock | undefined {
   recoverBufferingFromProgress();
   updatePlaybackWaveform();
   if (invalidated || !video || !videoId || mode === "idle") return;
@@ -622,6 +649,31 @@ function clock(): MediaClock | undefined {
   // element during SPA transitions. Do not turn that temporary state into a
   // malformed runtime message and a user-visible session failure.
   if (!isMediaClock(payload)) return;
+  const monotonic = performance.now();
+  const previous = lastClockSample;
+  if (!force && previous?.video === owner) {
+    const elapsed = monotonic - previous.monotonic;
+    const before = previous.payload;
+    const advancing =
+      !before.paused &&
+      !before.seeking &&
+      !before.ended &&
+      !before.buffering &&
+      !before.ad_active;
+    const expectedTime =
+      before.current_time +
+      (advancing ? (Math.max(0, elapsed) * before.playback_rate) / 1000 : 0);
+    // Player rendering and timeupdate can run at frame rate. Only the heartbeat,
+    // a real state transition or a discontinuous timeline needs another IPC frame.
+    if (
+      elapsed >= 0 &&
+      elapsed < CLOCK_INTERVAL_MS &&
+      CLOCK_STATE_FIELDS.every((key) => payload[key] === before[key]) &&
+      Math.abs(payload.current_time - expectedTime) < SEEK_DRIFT_SECONDS
+    )
+      return;
+  }
+  lastClockSample = { video: owner, monotonic, payload };
   sequence = nextSequence;
   void send({ type: "MM_CLOCK", payload }).then((reply) => {
     if (invalidated || video !== owner || generation !== ownerGeneration)
@@ -659,6 +711,7 @@ async function stopSession(dismiss = false): Promise<void> {
   stopDismissed = dismiss;
   emitDiagnostic("playback_stopped", "PLAYBACK_USER_STOP", {
     stage: "content",
+    generation,
   });
   const previous = mode;
   const oldGeneration = generation;
@@ -766,9 +819,17 @@ async function start(intent: "manual" | "automatic" = "manual"): Promise<void> {
   button?.setAttribute("aria-pressed", "true");
   if (setupLink) setupLink.hidden = true;
   text(() =>
-    t(
-      "The video is paused while MusicMute starts on this Mac. You can cancel anytime.",
-    ),
+    windowsHost
+      ? t(
+          "The video is paused while MusicMute starts on this PC. You can cancel anytime.",
+        )
+      : macHost
+        ? t(
+            "The video is paused while MusicMute starts on this Mac. You can cancel anytime.",
+          )
+        : t(
+            "The video is paused while MusicMute starts on this computer. You can cancel anytime.",
+          ),
   );
   progress();
   const owner = generation;
@@ -895,7 +956,7 @@ function attach(next: HTMLVideoElement, id: string): void {
       }
     }
     if (event.type === "seeking" && mode === "ready")
-      emitDiagnostic("playback_seek");
+      emitDiagnostic("playback_seek", undefined, { generation });
     clock();
     tryAutomaticStart();
   };
@@ -960,7 +1021,13 @@ function installControls(player: HTMLElement, controls: Element): void {
   heading.className = "musicmute-panel-heading";
   const brand = document.createElement("span");
   brand.className = "musicmute-panel-brand";
-  localizer.text(brand, () => t("MusicMute · On this Mac"));
+  localizer.text(brand, () =>
+    windowsHost
+      ? t("MusicMute · On this PC")
+      : macHost
+        ? t("MusicMute · On this Mac")
+        : t("MusicMute · On this computer"),
+  );
   panelTitle = document.createElement("span");
   panelTitle.className = "musicmute-panel-title";
   heading.append(brand, panelTitle);
@@ -1062,7 +1129,13 @@ function installControls(player: HTMLElement, controls: Element): void {
   setupLink = document.createElement("a");
   setupLink.href = "musicmute-local://setup";
   setupLink.className = "musicmute-setup-link";
-  localizer.text(setupLink, () => t("Open Mac app"));
+  localizer.text(setupLink, () =>
+    windowsHost
+      ? t("Open Windows app")
+      : macHost
+        ? t("Open Mac app")
+        : t("Open MusicMute app"),
+  );
   setupLink.hidden = true;
   cloudLink = document.createElement("a");
   cloudLink.className = "musicmute-cloud-link";
@@ -1142,7 +1215,12 @@ function installControls(player: HTMLElement, controls: Element): void {
   const onCopyError = () => {
     if (!lastFailure) return;
     const failure = lastFailure;
-    const guidance = failureGuidance(failure.code, failure.context);
+    const guidance = failureGuidance(
+      failure.code,
+      failure.context,
+      Date.now(),
+      guidanceHello,
+    );
     const summary = [
       "MusicMute local error",
       failure.timestamp,
@@ -1219,6 +1297,7 @@ function stopForNavigation(pausePrevious = false): void {
   const oldMode = mode;
   emitDiagnostic("playback_stopped", "PLAYBACK_NAVIGATION", {
     stage: "content",
+    generation,
   });
   // Retire old READY replies immediately. A reused player may already be
   // playing the incoming video, so preserve its playback intent here.
@@ -1274,7 +1353,10 @@ function rebindVideo(next: HTMLVideoElement, id: string): void {
     next.muted = tabMuteMode ? userMuted : true;
     observedMuted = next.muted;
   }
-  emitDiagnostic("stage_completed", undefined, { stage: "player_rebound" });
+  emitDiagnostic("stage_completed", undefined, {
+    stage: "player_rebound",
+    generation,
+  });
   if (resume && next.paused) {
     const owner = generation;
     void next.play().catch(() => {
@@ -1303,6 +1385,7 @@ function reconcile(): void {
             replacementTimer = null;
             emitDiagnostic("diagnostic_error", "PLAYBACK_SOURCE_CHANGED", {
               stage: "content",
+              generation,
             });
             stopForNavigation(true);
             scheduleReconcile();
@@ -1400,7 +1483,7 @@ function receiveMessage(
   )
     return;
   if (message.type === "MM_PAGE_PROBE") {
-    sendResponse({ clock: clock() });
+    sendResponse({ clock: clock(true) });
     return;
   }
   if (message.type === "MM_JOB") {
@@ -1418,10 +1501,11 @@ function receiveMessage(
       return;
     }
     if (message.payload.state !== "READY") {
-      const percent = progress(
-        message.payload.completed,
-        message.payload.total,
-      );
+      const percent = ["waiting-for-worker", "gpu-busy", "recovering"].includes(
+        message.payload.stage,
+      )
+        ? ""
+        : progress(message.payload.completed, message.payload.total);
       if (message.payload.stage === "account-restore") {
         text(
           () =>
@@ -1440,7 +1524,11 @@ function receiveMessage(
             percent,
             message.payload.provider === "ONLINE_MUSICMUTE"
               ? t("processing with MusicMute cloud")
-              : t("processing on this Mac"),
+              : message.payload.provider === "LOCAL_WINDOWS"
+                ? t("processing on this PC")
+                : message.payload.provider === "LOCAL_MACOS" || macHost
+                  ? t("processing on this Mac")
+                  : t("processing on this computer"),
           ]),
         () =>
           message.payload.state === "DOWNLOADING"
@@ -1486,7 +1574,7 @@ function receiveMessage(
         video.muted = tabMuteMode ? userMuted : true;
         observedMuted = video.muted;
         renderPlaybackStatus();
-        emitDiagnostic("playback_started");
+        emitDiagnostic("playback_started", undefined, { generation });
       }
       clock();
     } else if (!adSuspended) renderPlaybackStatus();
@@ -1593,6 +1681,26 @@ cleanupLifecycle = () => {
   }
 };
 function startClockTimer(): void {
-  if (!clockTimer && !invalidated) clockTimer = setInterval(clock, 250);
+  if (!clockTimer && !invalidated)
+    clockTimer = setInterval(clock, CLOCK_INTERVAL_MS);
 }
 reconcile();
+// Optional platform discovery; native app visibility policy never changes Chrome.
+void chrome.runtime
+  .sendMessage({ type: "MM_STATUS" })
+  .then((value: unknown) => {
+    if (invalidated || !value || typeof value !== "object") return;
+    const hello = (value as { hello?: unknown }).hello;
+    if (!hello || typeof hello !== "object") return;
+    const row = hello as {
+      platform?: unknown;
+      arch?: unknown;
+    };
+    if (typeof row.platform === "string" && typeof row.arch === "string") {
+      guidanceHello = { platform: row.platform, arch: row.arch };
+      windowsHost = localProviderForHello(guidanceHello) === "LOCAL_WINDOWS";
+      macHost = localProviderForHello(guidanceHello) === "LOCAL_MACOS";
+    }
+    localizer.refresh();
+  })
+  .catch(() => {});

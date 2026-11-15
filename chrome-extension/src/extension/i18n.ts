@@ -122,12 +122,14 @@ export function createLocalizer() {
     fields.set(attribute, render);
     apply(element, attribute, render);
   }
-  const unsubscribe = subscribeLanguage(() => {
+  const refresh = () => {
     for (const [element, fields] of bindings)
       for (const [attribute, render] of fields)
         apply(element, attribute, render);
-  });
+  };
+  const unsubscribe = subscribeLanguage(refresh);
   return {
+    refresh,
     text: (element: Element, render: () => string) =>
       bind(element, "textContent", render),
     attribute: bind,
@@ -211,6 +213,8 @@ export function localizePage(
 }
 
 export function localizedStage(stage: string): string {
+  if (stage === "gpu-busy") return t("GPU busy");
+  if (stage === "recovering") return t("Recovering local processing");
   if (language() === "en")
     return stage.replaceAll("_", " ").replaceAll("-", " ");
   if (stage.startsWith("cloud_")) return t("processing with MusicMute cloud");

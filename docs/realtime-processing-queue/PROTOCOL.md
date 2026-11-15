@@ -19,7 +19,9 @@ HTTP polling fallback for live resources. Existing REST routes remain compatible
    `musicmute.realtime.v1` and `ticket.<ticket>`. The server selects only the first.
    Never put the bearer token or ticket in a URL, log, analytics event or storage.
    Browser Origin must match the ticket and configured CORS allowlist. Native
-   clients omit Origin. Cross-origin redirects are not supported.
+   macOS and Windows clients omit Origin. Windows device reports use platform
+   `windows`; account/session revalidation and installation ownership remain the
+   same. Cross-origin redirects are not supported.
 4. Wait for `ready`, then subscribe. A new connection always receives complete
    snapshots. Session lifetime is bounded by Firebase expiry and 15 minutes;
    reconnect obtains a fresh ticket. Firebase revocation and current owner/admin
@@ -46,6 +48,7 @@ Mongo expressions or write commands are accepted.
 | Owner    | `worker_registration`                        | No parameters; current user's registration permission only           |
 | Owner    | `policy`                                     | Optional `schema_version`                                            |
 | Admin    | `admin.jobs`, `admin.job`                    | Existing list filters / `id`; `jobs.read`                            |
+| Admin    | `admin.user_devices`                         | `id`, optional `before`, `limit` 1–50/default 20; `users.read`       |
 | Admin    | `admin.overview`                             | Existing range; `overview.read` and existing field-level permissions |
 | Admin    | `admin.health`, `admin.alerts`               | No parameters / existing alert filters; `health.read`                |
 | Admin    | `admin.workers`, `admin.worker`              | Existing list filters / `id`; `workers.read`                         |
@@ -58,6 +61,25 @@ Owner subscriptions cannot use administrator resources and vice versa. Job/impor
 not-found behavior does not reveal another account's data. Administrative writes
 still use existing HTTP authorization, reasons, revisions and operation receipts.
 
+### Administrator user devices
+
+`admin.user_devices` requires `users.read` and parameters `id` (account Mongo ID),
+optional `before` (exclusive device record Mongo ID) and `limit` (1–50/default 20).
+Unknown parameters are rejected. Its complete snapshot matches
+`GET /admin/users/{id}/devices`: `{items, next_cursor, as_of}`. Device fields reuse
+the owner device view and add nullable `last_authenticated_at` and
+`history_hidden_at`. Reads are scoped to the selected existing user, ordered by
+device record ID descending and bounded to one page. Records hidden from the
+user's own history remain available to authorized administrators.
+
+Committed changes in `user_devices` and `device_installation_owners` invalidate
+device snapshots. Existing user/admin access invalidations and before/after-read
+authorization fences remain in place; reconnect recovers a fresh full snapshot.
+The dashboard uses its shared socket with no periodic HTTP reads or Refresh
+control. Session status remains `signed_out` or `unknown`; last seen is recorded
+activity, not online presence. Location is the latest stored Cloudflare-derived
+connection observation, not a confirmed home address or location history.
+
 `worker_registration` returns a complete
 `{ "worker_registration_allowed": true }` or false snapshot. Missing saved user
 values mean false. User-document changes invalidate this resource. No caller
@@ -69,6 +91,54 @@ can trigger first setup while another screen is visible. Reconnect obtains curre
 state through the normal snapshot sequence/session fences; HTTP polling is not
 used. The private enrollment credential is issued separately by the authenticated
 HTTP command described in the client contract.
+
+## Native link-import UI visibility
+
+The owner `policy` snapshot retains schema version 2 and adds
+`link_import_enabled`, `link_import_disabled_countries`, `visitor_country`,
+`link_import_visible`, `link_import_reason`, and `link_import_policy_revision`.
+Android, iOS, macOS and Windows use the visible boolean for link-entry controls only;
+missing fields mean hidden. Web and the Chrome browser panel ignore these fields.
+No import endpoint, cached delivery, queue, retry, running job or active download
+uses the visibility decision as an authorization rule.
+
+Country is observed on this connection's authenticated realtime-ticket request,
+normalized to an assigned ISO alpha-2 code or null and retained in its principal.
+Each connection evaluates the current standard policy against its authenticated
+`userId` and its own country. Selected-user IDs stay admin-only: the owner
+snapshot exposes only the resolved visible boolean and `user_hidden` reason.
+It does not query the latest user device. `account_policies` already invalidates
+`policy`, so saving the switch/list pushes a full snapshot under the existing
+sequence and session fences. Device writes never invalidate this resource.
+
+The effective switch also respects the existing `URL_IMPORT_ENABLED` process
+flag. Off produces `globally_hidden`. Otherwise a selected owner produces
+`user_hidden`, before country evaluation. Removing that owner from the saved
+list restores the existing country/global rules. On with an empty country list is `allowed`
+even with null country. With a nonempty list, null country is `unknown_country`,
+a selected country is `country_hidden`, and others are `allowed`. Country changes
+are picked up at the next ticket or public policy checkout; a current connection
+keeps its original ticket observation. Only country is included, never coordinates.
+Header trust requires origin protection through Cloudflare.
+
+The same owner `policy` full snapshot now includes optional `app_policy`, the
+existing public app-policy projection: `require_verified_email`, `platforms`
+with `minimum_build` for Android/iOS/macOS/Windows, independent global `revision`
+and `updated_at`. It exposes no release selection, installer URL, credential or
+account selector. Missing persisted desktop gates remain null. Clients that do
+not use this additive field retain their existing schema-version-2 behavior.
+`app_policies` committed changes invalidate this established subscription through
+the shared feed. The processing-policy and app-policy revisions are independent;
+clients must process a newer app gate even when processing-policy revision is
+unchanged. Apply only current owner/live snapshots, fence delayed explicit
+app-open checkouts and lower app-policy revisions, and retain stale/offline
+cloud admission blocking. This adds no HTTP polling or socket command path.
+
+Every native app open performs the existing public HTTP checkout and caches its
+last good payload. Offline apps use that cache, with hidden as the no-cache
+default. Signed-out Macs update on their next public checkout; they have no owner
+socket. Connected signed-in native apps apply the next complete snapshot without
+polling, a Refresh control, or interrupting existing work.
 
 ## Queue meaning
 
@@ -211,3 +281,13 @@ Redis leases and revalidate authentication; pending lease expiry wakes a snapsho
 Clients wait on snapshots and do not add recurring HTTP status reads. See
 [the complete guest contract](../url-imports/youtube-community.md) for capacity,
 privacy and producer recovery details.
+
+## Nullable Library thumbnail projection
+
+Owner job history/detail snapshots use the same job projection as HTTP. Its
+`thumbnail_url` is the validated original public YouTube image URL or null; older
+servers/records may omit it and clients must treat omission as null. It is carried
+inside existing full snapshots without another subscription, query or metadata
+request. Other acquisition `extra_data` stays private. Client image loading keeps
+the existing placeholder for loading, missing, invalid or failed URLs and never
+attaches API credentials to the image request.

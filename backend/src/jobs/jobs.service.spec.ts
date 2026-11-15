@@ -2,7 +2,7 @@ import type { EffectiveAccountPolicy } from '../admin-settings/account-policy.se
 import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../admin-settings/account-policy.schema.js';
 import type { ProcessingTransactionDiagnostics } from '../processing/processing-diagnostics.js';
 import { Types } from 'mongoose';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { jobError } from './job-errors.js';
 import { JobsService } from './jobs.service.js';
 import type { SharedJobInput } from './jobs.service.js';
@@ -57,14 +57,20 @@ const sessionLean = (value: unknown) => ({
 function fixture() {
   const purged = { findOne: vi.fn(() => sessionLean(null)) };
   const outbox = { updateOne: vi.fn().mockResolvedValue({ upsertedCount: 1 }) };
+  const imports = {
+    findOne: vi.fn(() => sessionLean(null)),
+    updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+  };
   const jobs = {
     findOne: vi.fn(),
     create: vi.fn(),
     updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
     db: {
-      model: vi.fn((name: string) =>
-        name === 'NotificationOutbox' ? outbox : purged,
-      ),
+      model: vi.fn((name: string) => {
+        if (name === 'NotificationOutbox') return outbox;
+        if (name === 'MediaImport') return imports;
+        return purged;
+      }),
     },
   };
   const storage = {
@@ -129,6 +135,7 @@ function fixture() {
     usage,
     cleanup,
     outbox,
+    imports,
     purged,
   };
 }
@@ -185,19 +192,40 @@ function olderRecipe() {
 
 function sharedFixture() {
   const f = fixture();
-  f.jobs.findOne
-    .mockReturnValueOnce(directLean(null))
-    .mockReturnValueOnce(sessionLean(null));
+  const records: Record<string, unknown>[] = [];
+  const matches = (
+    record: Record<string, unknown>,
+    filter: Record<string, unknown>,
+  ) =>
+    Object.entries(filter).every(([path, expected]) => {
+      const actual = path.split('.').reduce<unknown>((value, key) => {
+        if (!value || typeof value !== 'object') return undefined;
+        return (value as Record<string, unknown>)[key];
+      }, record);
+      return expected instanceof Types.ObjectId
+        ? actual instanceof Types.ObjectId && expected.equals(actual)
+        : actual === expected;
+    });
+  f.jobs.findOne.mockImplementation((filter: Record<string, unknown>) => {
+    const found = records.find((record) => matches(record, filter)) ?? null;
+    return { ...directLean(found), ...sessionLean(found) };
+  });
   f.jobs.create.mockImplementation(async ([value]) => {
+    const record = { ...value, deletedAt: null };
+    records.push(record);
     const created = {
-      ...value,
-      deletedAt: null,
-      toObject: () => ({ ...value, deletedAt: null }),
+      ...record,
+      toObject: () => ({ ...record }),
     };
-    f.jobs.findOne.mockReturnValue(directLean(created.toObject()));
     return [created];
   });
-  return f;
+  f.jobs.updateOne.mockImplementation(async (filter, update) => {
+    const record = records.find((candidate) => matches(candidate, filter));
+    if (!record) return { modifiedCount: 0 };
+    Object.assign(record, update.$set);
+    return { modifiedCount: 1 };
+  });
+  return { ...f, records };
 }
 
 describe('shared URL job creation', () => {
@@ -328,6 +356,220 @@ describe('shared URL job creation', () => {
     expect(f.jobs.create).toHaveBeenCalledOnce();
     expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledOnce();
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
+  });
+
+  it('returns the owned ready output for a fresh request without changing its title or accounting', async () => {
+    const f = sharedFixture();
+    const first = await f.service.createFromCache(
+      ownerId.toHexString(),
+      requestId,
+      shared,
+    );
+    const retained = f.records[0]!;
+    retained.displayName = 'My chosen title';
+    // A producer keeps its full worker recipe/result reference while delivering
+    // a derived trimmed output. The delivered object identifies that rendition.
+    retained.sharedResultKey = 'c'.repeat(64);
+    retained.recipeSnapshot = workerRecipeSnapshot(
+      DEFAULT_WORKER_RECIPE_ID,
+      false,
+    );
+    retained.requestedTrimEnabled = true;
+    f.jobs.findOne.mockClear();
+    f.access.assertActive.mockClear();
+
+    await expect(
+      f.service.createFromCache(ownerId.toHexString(), randomUUID(), shared),
+    ).resolves.toEqual(first);
+
+    expect(f.jobs.create).toHaveBeenCalledOnce();
+    expect(f.admission.assertCachedWorkWithPolicy).toHaveBeenCalledOnce();
+    expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledOnce();
+    expect(f.outbox.updateOne).toHaveBeenCalledOnce();
+    expect(f.jobs.updateOne).not.toHaveBeenCalled();
+    expect(retained.displayName).toBe('My chosen title');
+    const historyRead = f.jobs.findOne.mock.calls.findIndex(
+      ([filter]) => filter['outputObject.key'] !== undefined,
+    );
+    expect(historyRead).toBeGreaterThanOrEqual(0);
+    expect(f.access.assertActive).toHaveBeenCalledWith(
+      ownerId,
+      expect.anything(),
+    );
+    expect(f.access.assertActive.mock.invocationCallOrder[0]).toBeLessThan(
+      f.jobs.findOne.mock.invocationCallOrder[historyRead]!,
+    );
+  });
+
+  it('releases a recovered import hold when its ready output is already in owner history', async () => {
+    const f = sharedFixture();
+    const first = await f.service.createFromCache(
+      ownerId.toHexString(),
+      requestId,
+      shared,
+    );
+    const importId = new Types.ObjectId();
+    await expect(
+      f.service.createFromCache(
+        ownerId.toHexString(),
+        randomUUID(),
+        shared,
+        undefined,
+        importId,
+      ),
+    ).resolves.toEqual(first);
+    expect(f.usage.releaseImport).toHaveBeenCalledWith(
+      importId,
+      ownerId,
+      expect.anything(),
+    );
+    expect(f.jobs.create).toHaveBeenCalledOnce();
+    expect(f.usage.reserveUploadGrant).not.toHaveBeenCalled();
+    expect(f.usage.confirmUploadBytes).not.toHaveBeenCalled();
+    expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { deletedAt: new Date() },
+    { status: 'failed' },
+    { status: 'cancelled' },
+    { status: 'queued' },
+    { sourceKind: 'file' },
+    { userId: new Types.ObjectId() },
+    { inputObject: { ...shared.inputObject, key: 'different-input' } },
+    { outputObject: { ...shared.outputObject, key: 'different-output' } },
+  ])(
+    'creates a new owned job when the historical row differs: %j',
+    async (change) => {
+      const f = sharedFixture();
+      const first = await f.service.createFromCache(
+        ownerId.toHexString(),
+        requestId,
+        shared,
+      );
+      Object.assign(f.records[0]!, change);
+      const second = await f.service.createFromCache(
+        ownerId.toHexString(),
+        randomUUID(),
+        shared,
+      );
+      expect(second.jobId).not.toBe(first.jobId);
+      expect(f.jobs.create).toHaveBeenCalledTimes(2);
+      expect(f.usage.recordRetainedCachedMedia).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('binds cache delivery to an existing job in the same transaction and replays that receipt', async () => {
+    const f = sharedFixture();
+    const first = await f.service.createFromCache(
+      ownerId.toHexString(),
+      requestId,
+      shared,
+    );
+    const importId = new Types.ObjectId();
+    const deliveryRequestId = randomUUID();
+    const delivery = {
+      jobId: null as Types.ObjectId | null,
+      status: 'queued',
+    };
+    f.imports.findOne.mockImplementation(() => sessionLean(delivery));
+    f.imports.updateOne.mockImplementation(async (_filter, update) => {
+      delivery.jobId = update.$set.jobId;
+      return { modifiedCount: 1 };
+    });
+    const args: Parameters<JobsService['createFromCache']> = [
+      ownerId.toHexString(),
+      deliveryRequestId,
+      shared,
+      undefined,
+      undefined,
+      importId,
+    ];
+    await expect(f.service.createFromCache(...args)).resolves.toEqual(first);
+    expect(f.imports.updateOne).toHaveBeenCalledWith(
+      {
+        _id: importId,
+        userId: ownerId,
+        jobRequestId: deliveryRequestId,
+        jobId: null,
+        status: 'queued',
+      },
+      { $set: { jobId: new Types.ObjectId(first.jobId) } },
+      { session: expect.anything(), runValidators: true },
+    );
+    delivery.status = 'submitted';
+    await expect(f.service.createFromCache(...args)).resolves.toEqual(first);
+    expect(f.imports.updateOne).toHaveBeenCalledOnce();
+    expect(f.jobs.create).toHaveBeenCalledOnce();
+
+    f.records[0]!.deletedAt = new Date();
+    await expect(f.service.createFromCache(...args)).rejects.toMatchObject({
+      response: { code: 'JOB_NOT_FOUND' },
+    });
+    // Physical retention of the deleted job is not required by this receipt.
+    f.records.length = 0;
+    await expect(f.service.createFromCache(...args)).rejects.toMatchObject({
+      response: { code: 'JOB_NOT_FOUND' },
+    });
+    expect(f.jobs.create).toHaveBeenCalledOnce();
+  });
+
+  it('attaches a newly created cache job before committing its delivery', async () => {
+    const f = sharedFixture();
+    const importId = new Types.ObjectId();
+    f.imports.findOne.mockReturnValue(
+      sessionLean({ jobId: null, status: 'queued' }),
+    );
+    const result = await f.service.createFromCache(
+      ownerId.toHexString(),
+      requestId,
+      shared,
+      undefined,
+      undefined,
+      importId,
+    );
+    expect(f.imports.updateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: importId, jobRequestId: requestId }),
+      { $set: { jobId: new Types.ObjectId(result.jobId) } },
+      { session: expect.anything(), runValidators: true },
+    );
+  });
+
+  it('does not persist a cache delivery without its matching owned import receipt', async () => {
+    const f = sharedFixture();
+    await expect(
+      f.service.createFromCache(
+        ownerId.toHexString(),
+        requestId,
+        shared,
+        undefined,
+        undefined,
+        new Types.ObjectId(),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'JOB_STATE_CONFLICT' } });
+    expect(f.jobs.create).not.toHaveBeenCalled();
+    expect(f.admission.assertCachedWorkWithPolicy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { status: 'failed', jobId: null },
+    { status: 'failed', jobId },
+    { status: 'submitted', jobId: null },
+  ])('rejects an inactive unaccepted cache delivery: %j', async (delivery) => {
+    const f = sharedFixture();
+    f.imports.findOne.mockReturnValue(sessionLean(delivery));
+    await expect(
+      f.service.createFromCache(
+        ownerId.toHexString(),
+        requestId,
+        shared,
+        undefined,
+        undefined,
+        new Types.ObjectId(),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'JOB_STATE_CONFLICT' } });
+    expect(f.jobs.create).not.toHaveBeenCalled();
+    expect(f.imports.updateOne).not.toHaveBeenCalled();
   });
 
   it('exchanges a recovered acquisition hold when its shared result became ready', async () => {

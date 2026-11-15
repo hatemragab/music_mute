@@ -167,6 +167,39 @@ function renderPage(page: ReactNode, initialEntry: string) {
 }
 
 describe("worker dashboard pagination", () => {
+  it("shows trusted consumer identity/support independently of account registration permission", async () => {
+    const fixture = createDashboardFixture();
+    fixture.workerMachine.runtime = {
+      ...fixture.workerMachine.runtime!,
+      installationProfile: "windows-user",
+    };
+    fixture.workerDetail.machine = fixture.workerMachine;
+    fixture.user.workerRegistrationAllowed = false;
+    dashboardServer.use(...createDashboardHandlers(fixture));
+    renderPage(
+      createElement(
+        Routes,
+        null,
+        createElement(Route, {
+          path: "/workers/:id",
+          element: createElement(WorkerMachinePage),
+        }),
+      ),
+      `/workers/${FIXTURE_IDS.workerMachine}`,
+    );
+    expect(
+      await screen.findByText("Windows per-user worker"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Windows 10 22H2 x64.*build 19045/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Backend qualification outcome and current machine policy remain separate/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+  });
   it("keeps machine controls independent of the registering account", async () => {
     const fixture = createDashboardFixture();
     fixture.user.status = "deleting";

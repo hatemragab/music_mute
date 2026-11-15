@@ -41,6 +41,28 @@ import Foundation
   }
 
   private static func sparkleInstallerActive() -> Bool? {
+    #if MUSICMUTE_NATIVE_TESTS
+      // Tests isolate the guardian's quiet-period state machine from unrelated applications'
+      // Sparkle processes. This input branch is absent from every shipping helper build.
+      if let path = ProcessInfo.processInfo.environment["MUSICMUTE_TEST_SPARKLE_SNAPSHOT"] {
+        let descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+          info.st_uid == getuid(), info.st_nlink == 1, info.st_mode & 0o777 == 0o600,
+          info.st_size > 0, info.st_size <= 16
+        else { return nil }
+        var bytes = [UInt8](repeating: 0, count: 16)
+        let count = read(descriptor, &bytes, bytes.count)
+        guard count > 0 else { return nil }
+        switch String(decoding: bytes.prefix(count), as: UTF8.self) {
+        case "active": return true
+        case "quiet": return false
+        default: return nil
+        }
+      }
+    #endif
     let stride = MemoryLayout<kinfo_proc>.stride
     for _ in 0..<3 {
       var query: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]

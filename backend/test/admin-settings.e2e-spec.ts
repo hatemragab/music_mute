@@ -5,6 +5,8 @@ import {
 } from '../src/admin-settings/admin-settings.controller.js';
 import { AccountPolicyService } from '../src/admin-settings/account-policy.service.js';
 import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../src/admin-settings/account-policy.schema.js';
+import { UsersService } from '../src/users/users.service.js';
+import { Types } from 'mongoose';
 import {
   createAdminHarness,
   type AdminHarness,
@@ -16,6 +18,11 @@ describe('account policy HTTP boundary', () => {
   afterEach(async () => harness?.close());
 
   async function setup() {
+    const owner = {
+      _id: new Types.ObjectId('507f1f77bcf86cd799439011'),
+      status: 'active',
+      sessionsRevokedAfterSec: 0,
+    };
     const value = {
       plan: 'standard',
       revision: 0,
@@ -46,9 +53,15 @@ describe('account policy HTTP boundary', () => {
     };
     harness = await createAdminHarness({
       controllers: [AdminSettingsController, ProcessingPolicyController],
-      providers: [{ provide: AccountPolicyService, useValue: policies }],
+      providers: [
+        { provide: AccountPolicyService, useValue: policies },
+        {
+          provide: UsersService,
+          useValue: { findByFirebaseUid: async () => owner },
+        },
+      ],
     });
-    return { harness, policies };
+    return { harness, policies, owner };
   }
 
   const update = {
@@ -84,7 +97,7 @@ describe('account policy HTTP boundary', () => {
         '/processing-policy?schema_version=2&media_limits_version=2',
       )
       .expect(200);
-    expect(policies.publicPolicy).toHaveBeenCalledWith('2', '2');
+    expect(policies.publicPolicy).toHaveBeenCalledWith('2', '2', null, null);
     await harness
       .request(
         'get',
@@ -92,6 +105,157 @@ describe('account policy HTTP boundary', () => {
       )
       .expect(409);
     await harness.request('get', '/processing-policy?unknown=2').expect(409);
+  });
+
+  it('uses Cloudflare country from this public request and rejects client country input', async () => {
+    const { harness, policies } = await setup();
+    await harness
+      .request('get', '/processing-policy?schema_version=2')
+      .set('CF-IPCountry', 'EG')
+      .expect(200);
+    expect(policies.publicPolicy).toHaveBeenLastCalledWith(
+      '2',
+      undefined,
+      'EG',
+      null,
+    );
+    for (const country of ['XX', 'T1', 'ZZ', '']) {
+      await harness
+        .request('get', '/processing-policy')
+        .set('CF-IPCountry', country)
+        .expect(200);
+      expect(policies.publicPolicy).toHaveBeenLastCalledWith(
+        undefined,
+        undefined,
+        null,
+        null,
+      );
+    }
+    await harness
+      .request('get', '/processing-policy?visitor_country=US')
+      .set('CF-IPCountry', 'EG')
+      .expect(409);
+  });
+
+  it('uses only the verified bearer account for policy checkout and keeps guest access', async () => {
+    const { harness, policies, owner } = await setup();
+    await harness
+      .request(
+        'get',
+        '/processing-policy?schema_version=2',
+        undefined,
+        'ordinary-google-token',
+      )
+      .set('CF-IPCountry', 'EG')
+      .expect(200);
+    expect(policies.publicPolicy).toHaveBeenLastCalledWith(
+      '2',
+      undefined,
+      'EG',
+      owner._id.toHexString(),
+    );
+    await harness
+      .request(
+        'get',
+        '/processing-policy?user_id=507f1f77bcf86cd799439012',
+        undefined,
+        'ordinary-google-token',
+      )
+      .expect(409);
+    policies.publicPolicy.mockClear();
+    for (const token of ['unknown-token', 'revoked-token', 'disabled-token'])
+      await harness
+        .request('get', '/processing-policy', undefined, token)
+        .expect(token === 'disabled-token' ? 403 : 401);
+    await harness
+      .request('get', '/processing-policy')
+      .set('Authorization', 'Basic fixture')
+      .expect(401);
+    owner.status = 'disabled';
+    await harness
+      .request('get', '/processing-policy', undefined, 'ordinary-google-token')
+      .expect(403);
+    expect(policies.publicPolicy).not.toHaveBeenCalled();
+    await harness.request('get', '/processing-policy').expect(200);
+    expect(policies.publicPolicy).toHaveBeenLastCalledWith(
+      undefined,
+      undefined,
+      null,
+      null,
+    );
+  });
+
+  it('validates native visibility and country values using existing write permissions', async () => {
+    const { harness, policies } = await setup();
+    const token = harness.signInAs('owner');
+    await harness
+      .request(
+        'put',
+        '/admin/settings/account-policy',
+        wireJson({
+          ...update,
+          linkImportEnabled: true,
+          linkImportDisabledCountries: ['US', 'EG'],
+          linkImportDisabledUserIds: ['507f1f77bcf86cd799439011'],
+        }),
+        token,
+      )
+      .expect(200);
+    expect(policies.update).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        linkImportEnabled: true,
+        linkImportDisabledCountries: ['US', 'EG'],
+        linkImportDisabledUserIds: ['507f1f77bcf86cd799439011'],
+      }),
+    );
+    policies.update.mockClear();
+    for (const extra of [
+      { linkImportEnabled: 'true' },
+      { linkImportEnabled: null },
+      { linkImportDisabledCountries: ['XX'] },
+      { linkImportDisabledCountries: ['T1'] },
+      { linkImportDisabledCountries: ['ZZ'] },
+      { linkImportDisabledCountries: ['eg'] },
+      { linkImportDisabledCountries: ['EG', 'EG'] },
+      { linkImportDisabledCountries: null },
+      { linkImportDisabledUserIds: null },
+      { linkImportDisabledUserIds: ['not-an-account'] },
+      { linkImportDisabledUserIds: ['507f1f77bcf86cd799439011\n'] },
+      { linkImportDisabledUserIds: ['507F1F77BCF86CD799439011'] },
+      {
+        linkImportDisabledUserIds: [
+          '507f1f77bcf86cd799439011',
+          '507f1f77bcf86cd799439011',
+        ],
+      },
+      {
+        linkImportDisabledUserIds: Array.from({ length: 1001 }, (_, i) =>
+          i.toString(16).padStart(24, '0'),
+        ),
+      },
+    ])
+      await harness
+        .request(
+          'put',
+          '/admin/settings/account-policy',
+          wireJson({ ...update, ...extra }),
+          token,
+        )
+        .expect(400);
+    expect(policies.update).not.toHaveBeenCalled();
+    await harness
+      .request(
+        'put',
+        '/admin/settings/account-policy',
+        wireJson({
+          ...update,
+          linkImportEnabled: false,
+          linkImportDisabledCountries: [],
+        }),
+        harness.signInAs('viewer'),
+      )
+      .expect(403);
   });
 
   it('removes the old processing settings administrator routes', async () => {

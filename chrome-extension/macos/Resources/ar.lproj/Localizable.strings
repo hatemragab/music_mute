@@ -108,6 +108,14 @@
 "MusicMute prepares the full vocals track locally, then plays it with the original YouTube video." = "يجهّز MusicMute الصوت الكامل محلياً ثم يشغّله مع فيديو YouTube الأصلي.";
 "MusicMute voice waveform" = "موجة الصوت في MusicMute";
 "Newest" = "الأحدث";
+"Most Played" = "الأكثر تشغيلًا";
+"Show starred" = "عرض المميزة بنجمة";
+"Show only starred songs in this list" = "عرض الأغاني المميزة بنجمة فقط في هذه القائمة";
+"No played songs yet" = "لم تُشغّل أي أغنية بعد";
+"No songs match your filters" = "لا توجد أغانٍ تطابق عوامل التصفية";
+"Try another search or change the filters." = "جرّب بحثًا آخر أو غيّر عوامل التصفية.";
+"Play songs to build your Most Played list. Listening history stays on this Mac." = "شغّل الأغاني لإنشاء قائمة الأكثر تشغيلًا. يبقى سجل الاستماع على هذا الـ Mac.";
+"Listening history stays on this Mac." = "يبقى سجل الاستماع على هذا الـ Mac.";
 "Next account page" = "الصفحة التالية من الحساب";
 "Next track" = "المقطع التالي";
 "No retained app events are available." = "لا توجد أحداث محفوظة للتطبيق.";
@@ -590,7 +598,7 @@
 "This video is unavailable to the guest downloader. Use audio you can access and have permission to process." = "هذا الفيديو غير متاح لأداة تنزيل الزائر. استخدم صوتًا يمكنك الوصول إليه ولديك إذن لمعالجته.";
 "There is not enough free space. Free space on your Mac, then retry. Saved voices remain available." = "لا توجد مساحة كافية. أخلِ مساحة على Mac ثم حاول مجددًا. تظل الأصوات المحفوظة متاحة.";
 
-"Check YouTube tools" = "التحقق من أدوات YouTube";
+"Prepare local tools" = "تجهيز الأدوات المحلية";
 "Cancel the update download or wait until it is ready to install before quitting." = "ألغِ تنزيل التحديث أو انتظر جاهزيته للتثبيت قبل الخروج.";
 
 "Local tools are prepared. Add the Chrome extension to finish. YouTube access is checked when you use a video." = "تم تجهيز الأدوات المحلية. أضف إضافة Chrome لإكمال الإعداد. يتم التحقق من إمكانية الوصول إلى YouTube عند استخدام فيديو.";
@@ -615,6 +623,24 @@
 
 /* Independent macOS worker controls. */
 "Worker" = "عامل المعالجة";
+"Advanced" = "خيارات متقدمة";
+"Start" = "بدء";
+"Resume" = "استئناف";
+"Connecting…" = "جارٍ الاتصال…";
+"Checking…" = "جارٍ التحقق…";
+"Needs attention" = "يحتاج إلى مراجعة";
+"Finishing jobs" = "جارٍ إنهاء المهام";
+"Working…" = "جارٍ التنفيذ…";
+"Sign in with Google to continue." = "سجّل الدخول باستخدام Google للمتابعة.";
+"Waiting for approval" = "في انتظار الموافقة";
+"Could not connect" = "تعذّر الاتصال";
+"Connection needs attention" = "الاتصال يحتاج إلى مراجعة";
+"Check connection" = "التحقق من الاتصال";
+"Setup interrupted" = "توقف الإعداد";
+"Retry registration" = "إعادة محاولة التسجيل";
+"Registration needs attention" = "التسجيل يحتاج إلى مراجعة";
+"Open details" = "فتح التفاصيل";
+"Set up" = "إعداد";
 "INDEPENDENT BACKGROUND PROCESSING" = "معالجة مستقلة في الخلفية";
 "Overview" = "نظرة عامة";
 "Worker setup" = "إعداد العامل";
@@ -790,6 +816,7 @@
 "Report display is limited. Narrow the filters or export diagnostics for more detail." = "عرض التقرير محدود. ضيّق المرشحات أو صدّر التشخيص لمزيد من التفاصيل.";
 "macOS controls background permissions and may show a notice or ask you to enable MusicMute in Login Items & Extensions. Audio jobs do not require individual approval." = "يتحكم macOS في أذونات الخلفية وقد يعرض إشعارًا أو يطلب تفعيل MusicMute في عناصر الدخول والملحقات. لا تتطلب مهام الصوت موافقة لكل مهمة.";
 "Open macOS background settings" = "فتح إعدادات الخلفية في macOS";
+"macOS could not start the background worker. Allow MusicMute in Login Items & Extensions, then retry worker setup." = "تعذر على macOS تشغيل العامل في الخلفية. اسمح لـ MusicMute في عناصر تسجيل الدخول والملحقات، ثم أعد محاولة إعداد العامل.";
 "Attempt ID" = "معرّف المحاولة";
 "Worker ID" = "معرّف العامل";
 "Machine ID" = "معرّف الجهاز";
@@ -970,6 +997,7 @@
 "Open Worker setup to check registration or restore a preserved installation." = "افتح إعداد العامل للتحقق من التسجيل أو استعادة التثبيت المحفوظ.";
 "Worker registration could not resume. Check administrator approval and retry registration." = "تعذّر استئناف تسجيل العامل. تحقّق من موافقة المسؤول ثم أعد محاولة التسجيل.";
 "Worker registration was refused or could not complete. Retry the preserved installation, or review Worker health." = "رُفض تسجيل العامل أو تعذّر إكماله. أعد محاولة التثبيت المحفوظ أو راجع صحة العامل.";
+"Worker setup expired. Retry registration when offered; an uncertain activation must be recovered first." = "انتهت صلاحية إعداد العامل. أعد محاولة التسجيل عند ظهور الخيار؛ ويجب أولًا استعادة أي تفعيل لم تتأكد نتيجته.";
 "Administrator approval is required to register this Mac." = "موافقة المسؤول مطلوبة لتسجيل هذا الـ Mac.";
 "The existing worker installation could not be safely inspected. Review Worker health before making changes." = "تعذّر فحص تثبيت العامل الموجود بأمان. راجع صحة العامل قبل إجراء تغييرات.";
 "The worker was removed on this Mac. Automatic registration remains off until you choose to register again." = "أُزيل العامل من هذا الـ Mac. يظل التسجيل التلقائي متوقفًا حتى تختار التسجيل مرة أخرى.";
@@ -1007,3 +1035,7 @@
 "Installed Voice processing engine" = "تم تثبيت محرك معالجة الصوت";
 "MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare." = "لا يستطيع MusicMute تحديث مجلد الإضافة بأمان. راجع مجلد دعم التطبيق الخاص بـ MusicMute، ثم أعد محاولة الإعداد.";
 "The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare." = "إضافة Chrome المرفقة غير مكتملة أو غير آمنة. أعد تثبيت MusicMute أو حدّثه، ثم أعد محاولة الإعداد.";
+
+"Choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio." = "اختر ملفًا صوتيًا. يحافظ MusicMute على المدة الكاملة ويجهز الصوت دون الموسيقى.";
+"Updating library…" = "جارٍ تحديث المكتبة…";
+"Updating local library…" = "جارٍ تحديث المكتبة المحلية…";

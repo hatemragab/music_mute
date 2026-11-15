@@ -1,15 +1,25 @@
 import { t } from "./i18n";
 import type { ErrorContext } from "../shared/error-context";
+import type { HelloPayload } from "../shared/protocol";
+import { localProviderForHello } from "../shared/browser-platform";
+type GuidanceHost = Pick<HelloPayload, "platform" | "arch"> | null;
+type TextKey = Parameters<typeof t>[0];
+function hostText(mac: boolean, macKey: TextKey, otherKey: TextKey): string {
+  return t(mac ? macKey : otherKey);
+}
 
 function acquisitionFailure(
   code: string,
+  mac: boolean,
 ): { title: string; message: string } | null {
   switch (code) {
     case "WORKER_UPDATE_REQUIRED":
       return {
         title: t("Update the background worker"),
-        message: t(
+        message: hostText(
+          mac,
           "Open MusicMute and select Worker to update or move the paired worker into the app. Local separation can share this Mac's GPU once the worker supports coordination. Saved vocals remain available.",
+          "Open MusicMute and select Worker to update or move the paired worker into the app. Local separation can share this computer's GPU once the worker supports coordination. Saved vocals remain available.",
         ),
       };
     case "WORKER_MAINTENANCE_BUSY":
@@ -41,8 +51,10 @@ function acquisitionFailure(
     case "ENGINE_EXIT_UNCONFIRMED":
       return {
         title: t("Processing coordination needs attention"),
-        message: t(
+        message: hostText(
+          mac,
           "MusicMute could not confirm that the GPU is available for local separation. Open Worker diagnostics in the Mac app and check the failed operation before trying again. Saved vocals remain available.",
+          "MusicMute could not confirm that the GPU is available for local separation. Open Worker diagnostics in the MusicMute app and check the failed operation before trying again. Saved vocals remain available.",
         ),
       };
     case "ENGINE_SERVICE_REQUIRED":
@@ -62,8 +74,10 @@ function acquisitionFailure(
     case "ENOENT":
       return {
         title: t("Local file missing"),
-        message: t(
+        message: hostText(
+          mac,
           "MusicMute could not find a required local file. Open the MusicMute extension and select Check again. The results will help you check or repair setup in the Mac app.",
+          "MusicMute could not find a required local file. Open the MusicMute extension and select Check again. The results will help you check or repair setup in the MusicMute app.",
         ),
       };
     case "SOURCE_BOT_CHALLENGE":
@@ -168,8 +182,10 @@ function acquisitionFailure(
     case "ACQUISITION_STORAGE_FAILED":
       return {
         title: t("Audio storage failed"),
-        message: t(
+        message: hostText(
+          mac,
           "MusicMute could not save the downloaded audio on this Mac. Check free disk space and the MusicMute app diagnostics before trying again.",
+          "MusicMute could not save the downloaded audio on this computer. Check free disk space and the MusicMute app diagnostics before trying again.",
         ),
       };
     case "SOURCE_POSTPROCESSING_FAILED":
@@ -230,8 +246,14 @@ export function failureGuidance(
   code: string,
   context?: ErrorContext,
   now = Date.now(),
+  hello?: GuidanceHost,
 ): FailureGuidance {
-  let result = acquisitionFailure(code);
+  // Omitted argument retains the existing pure API's Mac behavior. Receiving
+  // browser views always pass their actual HELLO or null; absence is not a Mac.
+  const provider = localProviderForHello(hello);
+  const mac = hello === undefined || provider === "LOCAL_MACOS";
+  const windows = provider === "LOCAL_WINDOWS";
+  let result = acquisitionFailure(code, mac);
   if (!result) {
     if (code === "INSTALLATION_CHECK_BUSY")
       result = {
@@ -247,8 +269,10 @@ export function failureGuidance(
     )
       result = {
         title: t("Check local processing tools"),
-        message: t(
+        message: hostText(
+          mac,
           "MusicMute could not start local processing. Open the MusicMute extension and select Check again. If a check fails, open the Mac app to repair setup.",
+          "MusicMute could not start local processing. Open the MusicMute extension and select Check again. If a check fails, open the MusicMute app to repair setup.",
         ),
       };
     else if (code === "EXTENSION_CONNECTION_LOST")
@@ -275,8 +299,10 @@ export function failureGuidance(
     else if (code === "ACCOUNT_REQUIRED")
       result = {
         title: t("Sign in for MusicMute cloud"),
-        message: t(
+        message: hostText(
+          mac,
           "Open the MusicMute app and sign in to the account you want to use for cloud processing, then click the waveform again. You can choose On this Mac in the app for local processing.",
+          "Open the MusicMute app and sign in to the account you want to use for cloud processing, then click the waveform again. You can select local processing in the app.",
         ),
       };
     else if (code === "ACCOUNT_SESSION_UNAVAILABLE")
@@ -293,22 +319,34 @@ export function failureGuidance(
     )
       result = {
         title: t("YouTube tools need repair"),
-        message: t(
+        message: hostText(
+          mac,
           "Open the MusicMute extension and select Check again. If the YouTube tools check fails, open the Mac app and use Prepare my Mac or install an app update.",
+          "Open the MusicMute extension and select Check again. If the YouTube tools check fails, open the MusicMute app and use Setup to repair the tools or install an app update.",
         ),
       };
     else if (/MODEL|RUNTIME|SETUP|PLATFORM|ARCH/.test(code))
       result = {
-        title: t("Finish Mac setup"),
-        message: t(
-          "Open the MusicMute extension and select Check again. If a check fails or setup is missing, open the Mac app and use Prepare my Mac. Local processing requires an Apple Silicon Mac.",
-        ),
+        title: hostText(mac, "Finish Mac setup", "Finish local setup"),
+        message: mac
+          ? t(
+              "Open the MusicMute extension and select Check again. If a check fails or setup is missing, open the Mac app and use Prepare my Mac. Local processing requires an Apple Silicon Mac.",
+            )
+          : windows
+            ? t(
+                "Open the MusicMute extension and select Check again. If a check fails or setup is missing, open the MusicMute app and use Prepare this PC. Local processing requires supported native x64 Windows and a qualified GPU.",
+              )
+            : t(
+                "Open the MusicMute extension and select Check again. Open MusicMute and use Setup to check or repair local processing. A supported installation and qualified GPU are required.",
+              ),
       };
     else if (/COMPANION/.test(code))
       result = {
         title: t("Connect the MusicMute app"),
-        message: t(
+        message: hostText(
+          mac,
           "Open the MusicMute extension and select Check again. If the helper cannot connect, open the Mac app to complete setup or Repair Chrome connection. Install MusicMute first if it is missing.",
+          "Open the MusicMute extension and select Check again. If the helper cannot connect, open the MusicMute app to complete setup or repair the Chrome connection. Install MusicMute first if it is missing.",
         ),
       };
     else if (code === "APP_UPDATE_REQUIRED")
@@ -437,8 +475,10 @@ export function failureGuidance(
     (!context?.retry_at || context.retry_at > now);
   if (cloudPrimary)
     message =
-      t(
+      hostText(
+        mac,
         "Use MusicMute cloud to review and confirm cloud processing in the Mac app. ",
+        "Use MusicMute cloud to review and confirm cloud processing in the MusicMute app. ",
       ) + message;
   return {
     ...result,

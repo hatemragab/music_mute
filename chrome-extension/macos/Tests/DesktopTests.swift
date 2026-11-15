@@ -1,8 +1,10 @@
 import AVFoundation
+import AppKit
 import Combine
 import CryptoKit
 import Darwin
 import Foundation
+import SwiftUI
 
 private enum DesktopTestFailure: Error { case failed(String) }
 private func require(_ value: @autoclosure () -> Bool, _ label: String) throws {
@@ -159,6 +161,39 @@ private final class DesktopUpdateLockStartGate: @unchecked Sendable {
   func release() {
     blocked?.resume()
     blocked = nil
+  }
+}
+@MainActor private final class PlaybackSeekFixtureGate {
+  private struct Completion {
+    let finished: Bool
+    let callback: @Sendable (Bool) -> Void
+  }
+  private var completions: [Completion] = []
+  private(set) var player: AVPlayer?
+  func seek(
+    _ player: AVPlayer, to time: CMTime, completion: @escaping @Sendable (Bool) -> Void
+  ) {
+    self.player = player
+    player.seek(to: time) { finished in
+      Task { @MainActor in
+        precondition(self.completions.count < 4)
+        self.completions.append(Completion(finished: finished, callback: completion))
+      }
+    }
+  }
+  func waitForCompletions(_ count: Int) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while completions.count < count {
+      guard ContinuousClock.now < deadline else {
+        throw DesktopTestFailure.failed("The real synthetic AVPlayer seek must complete")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+  }
+  func releaseFirst(finished: Bool? = nil) {
+    precondition(!completions.isEmpty)
+    let completion = completions.removeFirst()
+    completion.callback(finished ?? completion.finished)
   }
 }
 @MainActor private final class MemoryVault: DesktopCredentialVault {
@@ -363,6 +398,10 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       firebaseProjectID: project, googleDesktopClientID: "123-fixture.apps.googleusercontent.com")
   }
   @MainActor static func main() async throws {
+    if ProcessInfo.processInfo.environment["MUSICMUTE_ARTWORK_PREVIEW_DIRECTORY"] != nil {
+      try artworkRenderingChecks()
+      return
+    }
     defer {
       for name in preferenceSuites {
         UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
@@ -392,6 +431,7 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try await boundedTransportChecks()
     try visualPreferenceChecks()
     try await processingSelectionChecks()
+    try await linkImportPolicyChecks()
     try homeLibraryConnectionChecks()
     try libraryCountPresentationChecks()
     try librarySnapshotReadinessChecks()
@@ -406,18 +446,239 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     try await cachePlaybackLeaseChecks()
     try await playbackJournalChecks()
     try await playbackPreparationChecks()
+    try await playbackSeekChecks()
     try await libraryPlaybackQueueChecks()
+    try libraryPlayHistoryChecks()
+    try await libraryPreferenceIsolationChecks()
     try accountStateChecks()
     try await outboxWatcherChecks()
     try silenceChecks()
     try comparisonChecks()
     try syncNoticeChecks()
     try libraryTitleChecks()
+    try libraryThumbnailChecks()
+    try artworkRenderingChecks()
     try await updateLockCreationChecks()
     try await runtimeExecutionGateChecks()
     try await bridgeChecks()
     print(
       "Native desktop checks passed: Firebase credentials and Mac bootstrap, local owner scope without network refresh, reset privacy, stale login and token refresh fences, secure logout failure recovery, project identity fence, PKCE callback state and public config validation."
+    )
+  }
+  @MainActor static func artworkRenderingChecks() throws {
+    let context = CGContext(
+      data: nil, width: 480, height: 270, bitsPerComponent: 8, bytesPerRow: 480 * 4,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setFillColor(CGColor(red: 0.09, green: 0.38, blue: 0.62, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: 480, height: 270))
+    context.setFillColor(CGColor(red: 1, green: 0.7, blue: 0.25, alpha: 1))
+    context.fillEllipse(in: CGRect(x: 250, y: 139, width: 86, height: 86))
+    let fixture = Image(
+      nsImage: NSImage(cgImage: context.makeImage()!, size: CGSize(width: 480, height: 270)))
+    let original = URL(string: "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg")!
+    func bytes<V: View>(_ view: V) throws -> Data {
+      let renderer = ImageRenderer(content: view)
+      renderer.scale = 1
+      guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+        let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+      else { throw DesktopTestFailure.failed("Static artwork render is unavailable") }
+      return png
+    }
+    func artwork(_ url: URL?, _ phase: AsyncImagePhase, size: CGFloat = 96, radius: CGFloat = 14)
+      -> some View
+    {
+      DesktopTrackArtwork(url: url, cornerRadius: radius) {
+        Color.orange.overlay { Image(systemName: "waveform").foregroundStyle(.black) }
+      }
+      .frame(width: size, height: size)
+      .environment(\.desktopArtworkFixturePhase, phase)
+    }
+    let placeholder = try bytes(artwork(nil, .empty))
+    let loading = try bytes(artwork(original, .empty))
+    let failed = try bytes(artwork(original, .failure(URLError(.cannotDecodeContentData))))
+    let unsafe = try bytes(
+      artwork(URL(string: "https://unsafe.invalid/image.jpg"), .success(fixture)))
+    let loaded = try bytes(artwork(original, .success(fixture)))
+    func color(_ data: Data) throws -> [Int] {
+      guard let bitmap = NSBitmapImageRep(data: data),
+        let value = bitmap.colorAt(x: 20, y: 20)?.usingColorSpace(.deviceRGB)
+      else { throw DesktopTestFailure.failed("Artwork pixel is unavailable") }
+      try require(bitmap.pixelsWide == 96 && bitmap.pixelsHigh == 96, "Artwork stays square")
+      return [value.redComponent, value.greenComponent, value.blueComponent].map {
+        Int(($0 * 255).rounded())
+      }
+    }
+    let placeholderColor = try color(placeholder)
+    let loadingColor = try color(loading)
+    let failedColor = try color(failed)
+    let unsafeColor = try color(unsafe)
+    let loadedColor = try color(loaded)
+    try require(
+      loadingColor == placeholderColor,
+      "Loading keeps the current artwork fallback")
+    try require(
+      failedColor == placeholderColor,
+      "Image failure keeps the current artwork fallback")
+    try require(
+      unsafeColor == placeholderColor,
+      "Unsafe URLs cannot display a fixture or initiate image loading")
+    try require(
+      loadedColor != placeholderColor,
+      "An original landscape image fills the clipped square artwork")
+    if let path = ProcessInfo.processInfo.environment["MUSICMUTE_ARTWORK_PREVIEW_DIRECTORY"] {
+      let destination = URL(fileURLWithPath: path, isDirectory: true)
+      try require(
+        destination.path.hasPrefix("/tmp/musicmute-player-thumbnails-20261009/"),
+        "Use the task-owned artwork output directory")
+      try FileManager.default.createDirectory(
+        at: destination, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+      for language in ["en", "ar"] {
+        for (state, url, phase) in [
+          ("loaded", original as URL?, AsyncImagePhase.success(fixture)),
+          ("loading", original as URL?, AsyncImagePhase.empty),
+          ("failed", original as URL?, AsyncImagePhase.failure(URLError(.cannotDecodeContentData))),
+          ("missing", nil as URL?, AsyncImagePhase.empty),
+        ] {
+          let preview = VStack(alignment: .leading, spacing: 22) {
+            Text(language == "ar" ? "المشغل" : "Now playing").font(.headline)
+            artwork(url, phase, size: 240, radius: 24)
+              .shadow(color: .black.opacity(0.2), radius: 18, y: 9)
+            HStack(spacing: 14) {
+              artwork(url, phase, size: 44, radius: 14)
+                .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
+              Text(language == "ar" ? "أغنية في المكتبة" : "Library song")
+            }
+            HStack(spacing: 14) {
+              artwork(url, phase, size: 42, radius: 10)
+              Text(language == "ar" ? "المشغل المصغّر" : "Mini-player")
+            }
+          }
+          .padding(32).frame(width: 340, height: 490)
+          .environment(\.layoutDirection, language == "ar" ? .rightToLeft : .leftToRight)
+          .environment(\.colorScheme, .dark)
+          .foregroundStyle(.white).background(Color.black)
+          try bytes(preview).write(
+            to: destination.appendingPathComponent("mac-artwork-\(language)-\(state).png"),
+            options: .atomic)
+        }
+      }
+    }
+    print(
+      "Artwork rendering checks passed: original image, missing, unsafe, loading and failure; no image requests"
+    )
+  }
+
+  @MainActor static func linkImportPolicyChecks() async throws {
+    func payload(_ visible: Bool?, revision: Double = 1) -> DesktopJSON {
+      var data: [String: DesktopJSON] = [
+        "schema_version": .number(2), "revision": .number(revision),
+      ]
+      if let visible { data["link_import_visible"] = .bool(visible) }
+      return .object(data)
+    }
+    let defaults = testPreferences()
+    defaults.set("youtube", forKey: DesktopPreferenceKey.importSource)
+    let account = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(),
+      transport: FixtureTransport([]), installationId: installation, preferences: defaults)
+    try require(!account.linkImportVisible, "First launch without cache must hide links")
+    try require(
+      defaults.string(forKey: DesktopPreferenceKey.importSource) == "file",
+      "Hidden policy must repair saved YouTube source")
+    account.receiveProcessingPolicy(payload(nil))
+    try require(!account.linkImportVisible, "Old policy fixture must decode file-only")
+    account.receiveProcessingPolicy(payload(true, revision: 2))
+    try require(account.linkImportVisible, "Later snapshot must show native links without restart")
+    try require(
+      DesktopImportSourcePreference.resolved(
+        "youtube", linkImportVisible: account.linkImportVisible) == .youtube,
+      "Visible policy must expose YouTube source")
+    let reopened = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(),
+      transport: FixtureTransport([]), installationId: installation, preferences: defaults)
+    await reopened.loadProcessingPolicy()
+    try require(reopened.linkImportVisible, "Offline reopen must retain valid installation policy")
+    reopened.receiveProcessingPolicy(payload(false, revision: 3))
+    try require(!reopened.linkImportVisible, "Snapshot must hide links while open")
+    reopened.receiveProcessingPolicy(payload(true, revision: 2))
+    try require(
+      !reopened.linkImportVisible, "Older snapshot must not replace current hidden policy")
+    try require(
+      DesktopImportSourcePreference.resolved(
+        "youtube", linkImportVisible: reopened.linkImportVisible) == .file,
+      "Hidden source presentation must keep the file picker")
+    let delayed = FixtureTransport(replies: [
+      .init(value: payload(true, revision: 4), status: 200, pause: true)
+    ])
+    let racing = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(),
+      transport: delayed, installationId: installation, preferences: defaults)
+    let checkout = Task { @MainActor in await racing.loadProcessingPolicy() }
+    await delayed.waitUntilBlocked()
+    racing.receiveProcessingPolicy(payload(false, revision: 5))
+    await delayed.release()
+    await checkout.value
+    try require(!racing.linkImportVisible, "Late HTTP must not overwrite a newer policy snapshot")
+    let requests = await delayed.recorded()
+    try require(
+      requests.count == 1 && requests[0].url?.path == "/processing-policy"
+        && requests[0].url?.query == "schema_version=2"
+        && requests[0].value(forHTTPHeaderField: "Authorization") == nil,
+      "Public policy checkout must run without sign-in")
+    let transport = FixtureTransport([payload(true, revision: 6)])
+    let unconfigured = DesktopAccountModel(
+      vault: MemoryVault(), transport: transport,
+      installationId: installation, preferences: testPreferences())
+    await unconfigured.loadProcessingPolicy()
+    try require(
+      unconfigured.linkImportVisible, "Signed-out unconfigured Mac must fetch public visibility")
+    let other = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(),
+      transport: FixtureTransport([]), installationId: UUID().uuidString, preferences: defaults)
+    try require(!other.linkImportVisible, "Policy cache must be scoped to the installation")
+
+    let ownerPreferences = testPreferences()
+    let firstCredentials = try credentials()
+    let ownerTransport = FixtureTransport([
+      firstCredentials, profile, payload(false, revision: 9),
+      try credentials("second-owner"), profile, payload(true, revision: 4),
+    ])
+    let owners = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: ownerTransport,
+      installationId: installation, preferences: ownerPreferences)
+    owners.receiveProcessingPolicy(payload(true, revision: 3))
+    await owners.signIn(email: "fixture@example.invalid", password: "password")
+    try require(!owners.linkImportVisible, "Sign-in must not reuse a guest visibility cache")
+    await owners.loadProcessingPolicy()
+    try require(!owners.linkImportVisible, "Owner checkout must preserve user suppression")
+    let ownerRequests = await ownerTransport.recorded()
+    let ownerToken = firstCredentials["idToken"].string ?? ""
+    try require(
+      ownerRequests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer \(ownerToken)",
+      "Signed-in processing policy must send the owner's bearer token")
+    await owners.logout()
+    try require(owners.linkImportVisible, "Sign-out must restore guest visibility")
+    await owners.signIn(email: "other@example.invalid", password: "password")
+    try require(!owners.linkImportVisible, "Another owner starts file-only without a cache")
+    await owners.loadProcessingPolicy()
+    try require(
+      owners.linkImportVisible,
+      "Another owner's lower policy revision must not be rejected by the previous owner's cache")
+    await owners.logout()
+    let ownerVault = MemoryVault()
+    try ownerVault.save(
+      DesktopCredential(
+        firebaseUid: uid, idToken: try token(), refreshToken: String(repeating: "r", count: 30),
+        expiresAt: Date().addingTimeInterval(3600), user: nil))
+    ownerPreferences.set(false, forKey: "desktop.signedOut.\(project)")
+    let restoredOwner = DesktopAccountModel(
+      configuration: configuration(), vault: ownerVault, transport: FixtureTransport([]),
+      installationId: installation, preferences: ownerPreferences)
+    try require(
+      restoredOwner.linkImportVisible, "Before restoring identity, only guest cache applies")
+    await restoredOwner.restore()
+    try require(
+      !restoredOwner.linkImportVisible, "Offline account restore must load the matching owner cache"
     )
   }
   @MainActor static func runtimePreparationFailureChecks() throws {
@@ -450,6 +711,32 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         && DesktopWorkspace.visibleCacheLoadFailure(DesktopAuthFailure.malformedResponse)
           == DesktopAuthFailure.malformedResponse.message,
       "Runtime readiness must preserve unrelated media and real cache failures")
+    for cancellation: Error in [
+      CancellationError(), DesktopAuthFailure.cancelled, DesktopAuthFailure.sessionChanged,
+      DesktopAuthFailure.service("ACCOUNT_CHANGED"),
+    ] {
+      try require(
+        DesktopWorkspace.visibleCacheLoadFailure(cancellation) == nil,
+        "Expected cache-load session cancellation must not become a stale account-action banner")
+    }
+    for code in [
+      "APP_RUNTIME_NOT_PREPARED", "APP_RUNTIME_INCOMPATIBLE", "APP_RUNTIME_MISSING",
+      "DESKTOP_RUNTIME_UNAVAILABLE", "MODEL_INVALID", "YT_DLP_MISSING", "DENO_MISSING",
+      "PO_TOKEN_PROVIDER_MISSING",
+    ] {
+      try require(
+        DesktopBridge.preparationFailure(DesktopAuthFailure.service(code))?.code == code,
+        "Only actual unavailable installation components may request an automatic setup check")
+    }
+    for error in [
+      DesktopAuthFailure.cancelled, .sessionChanged, .malformedResponse,
+      .service("SOURCE_AUDIO_FORMAT_UNAVAILABLE"), .service("RUNTIME_ACTIVE_INVALID"),
+      .service("DISK_SPACE_LOW"), .service("APP_OPERATION_BUSY"),
+    ] {
+      try require(
+        DesktopBridge.preparationFailure(error) == nil,
+        "Cancellation, media, unsafe installation and resource errors must not start setup")
+    }
     workspace.shutdown()
   }
   @MainActor static func homeLibraryConnectionChecks() throws {
@@ -2633,7 +2920,8 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     let started = await workspace.play(missing)
     try require(
       !started && !workspace.playing && workspace.currentTrack == missing
-        && workspace.playbackPreparation == .failed(.startFailed),
+        && workspace.playbackPreparation == .failed(.startFailed)
+        && workspace.playCount(missing) == 0,
       "A failed playback attempt must retain the selected voice and a retryable error")
     workspace.notice = "This voice is saved to your account."
     workspace.recordPlaybackFailure(.cachePinUnavailable)
@@ -2668,6 +2956,45 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         && !text.contains("SIGN_IN_CANCELLED") && !text.contains(root.path),
       "Playback/authentication diagnostics must exclude titles, paths, email, passwords and raw service errors"
     )
+  }
+  private static func compressedPlaybackEndFixture() throws -> Data {
+    // Fourteen seconds of synthetic stereo silence, encoded with the local output recipe:
+    // ffmpeg -f lavfi -i anullsrc=r=44100:cl=stereo -t 14 -c:a libmp3lame
+    //   -compression_level 7 -b:a 160k -ar 44100 -ac 2 fixture.mp3
+    // Foundation zlib compression keeps this fixture small and independent of installed tools.
+    let encoded = """
+      7dV/pO8HHcfxb9tkZb+MqEg/jIncdrszMWK2S3c20hqLMbNrGbOamIhMjImUjET0w2hERiQSiZFIYiRiJjJGRlpsZvvePV8UbS79
+      V3s8HL7n+885H9/zOs/3mZtOXXQ450Ofue2208fXyw6HC2+5+6F7rzt14uSJk9d87PAvr778/cP5nHng3s8fXy4/HC54z+GiM/84
+      XPj2d7zz0iuufNe73/u+93/wqqs//JGPnjx13cev/8QNN57+5M23furTt9/x2Tvvuvvs5+67/4EvfPGhL335Kw9/9ZFHv/b1b37r
+      sW9/57vf+8HjP3rixz958qc/+/kvfvmrXz/1m9/+7vd/ePqPf/rzM8/+5a/PPf+3F/7+4j9feuXc7z0+8j2vP/K/P8xVFzz6+uvx
+      OZ686cEX//Np+e8cl3D2cPkLh8N9xzcXHw6XfuBweNvx6/Hj2+O31z58/MxvueHW09eeuOZ2/h+82V/z1Zd/ePaS8yzhDX4c/7Pe
+      9P/6XBQu+YYpvHWIAhEFRhSIKDCiQESBEQUiCsQSGOeBiAIjCkQUGFEgosCIAhEFYgmM80BEgREFIgqMKBBRYESBiAIjCkQUiCUw
+      zgMRBUYUiCgwokBEgREFIgrEEhjngYgCIwpEFBhRIKLAiAIRBWIJjPNARIERBSIKjCgQUWBEgYgCIwpEFIglMM4DEQVGFIgoMKJA
+      RIERBSIKxBIY54GIAiMKRBQYUSCiwIgCEQVGFIgoEEtgnAciCowoEFFgRIGIAiMKRBSIJTDOAxEFRhSIKDCiQESBEQUiCsQSGOeB
+      iAIjCkQUGFEgosCIAhEFRhSIKBBLYJwHIgqMKBBRYESBiAIjCkQUiCUwzgMRBUYUiCgwokBEgREFIgqMKBBRIJbAOA9EFBhRIKLA
+      iAIRBUYUiCgQS2CcByIKjCgQUWBEgYgCIwpEFIglMM4DEQVGFIgoMKJARIERBSIKjCgQUSCWwDgPRBQYUSCiwIgCEQVGFIgoEEtg
+      nAciCowoEFFgRIGIAiMKRBQYUSCiQCyBcR6IKDCiQESBEQUiCowoEFEglsA4D0QUGFEgosCIAhEFRhSIKBBLYJwHIgqMKBBRYESB
+      iAIjCkQUGFEgokAsgXEeiCgwokBEgREFIgqMKBBRIJbAOA9EFBhRIKLAiAIRBUYUiCgwokBEgVgC4zwQUWBEgYgCIwpEFBhRIKJA
+      LIFxHogoMKJARIERBSIKjCgQUSCWwDgPRBQYUSCiwIgCEQVGFIgoMKJARIFYAuM8EFFgRIGIAiMKRBQYUSCiQCyBcR6IKDCiQESB
+      EQUiCowoEFFgRIGIArEExnkgosCIAhEFRhSIKDCiQESBWALjPBBRYESBiAIjCkQUGFEgokAsgXEeiCgwokBEgREFIgqMKBBRYESB
+      iAKxBMZ5IKLAiAIRBUYUiCgwokBEgVgC4zwQUWBEgYgCIwpEFBhRIKLAiAIRBWIJjPNARIERBSIKjCgQUWBEgYgCsQTGeSCiwIgC
+      EQVGFIgoMKJARIFYAuM8EFFgRIGIAiMKRBQYUSCiwIgCEQViCYzzQESBEQUiCowoEFFgRIGIArEExnkgosCIAhEFRhSIKDCiQESB
+      EQUiCsQSGOeBiAIjCkQUGFEgosCIAhEFYgmM80BEgREFIgqMKBBRYESBiAKxBMZ5IKLAiAIRBUYUiCgwokBEgREFIgrEEhjngYgC
+      IwpEFBhRIKLAiAIRBWIJjPNARIERBSIKjCgQUWBEgYgCIwpEFIglMM4DEQVGFIgoMKJARIERBSIKxBIY54GIAiMKRBQYUSCiwIgC
+      EQViCYzzQESBEQUiCowoEFFgRIGIAiMKRBSIJTDOAxEFRhSIKDCiQESBEQUiCsQSGOeBiAIjCkQUGFEgosCIAhEFRhSIKBBLYJwH
+      IgqMKBBRYESBiAIjCkQUiCUwzgMRBUYUiCgwokBEgREFIgrEEhjngYgCIwpEFBhRIKLAiAIRBUYUiCgQS2CcByIKjCgQUWBEgYgC
+      IwpEFIglMM4DEQVGFIgoMKJARIERBSIKjCgQUSCWwDgPRBQYUSCiwIgCEQVGFIgoEEtgnAciCowoEFFgRIGIAufxGg==
+      """
+    guard let compressed = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) else {
+      throw DesktopTestFailure.failed("The compressed playback fixture must decode")
+    }
+    let data = try (compressed as NSData).decompressed(using: .zlib) as Data
+    let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    try require(
+      data.count == 281_121
+        && hash == "a14f6cc21a0824d25f49a3150c39b2aa2f248a2e16706c4f25a7b4d8ce2b9c63",
+      "The bounded synthetic MP3 fixture must retain its exact encoded frames")
+    return data
   }
   @MainActor static func playbackPreparationChecks() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -2809,6 +3136,345 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         && retryWorkspace.failure == nil,
       "Retry must prepare and automatically play the retained selected voice")
     retryWorkspace.shutdown()
+
+    let compressedURL = root.appendingPathComponent("stereo-eof.mp3")
+    try compressedPlaybackEndFixture().write(to: compressedURL)
+    let compressedAsset = AVURLAsset(url: compressedURL)
+    let replayTrack = DesktopTrack(
+      id: first.id, title: first.title, duration: 14, path: nil, jobId: first.jobId,
+      bytes: 0, sourceVideoId: nil)
+    var completedItem: AVPlayerItem?
+    let endObserver = NotificationCenter.default.addObserver(
+      forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
+    ) { notification in
+      guard let item = notification.object as? AVPlayerItem else { return }
+      MainActor.assumeIsolated {
+        if item.asset === compressedAsset {
+          completedItem = item
+        }
+      }
+    }
+    defer { NotificationCenter.default.removeObserver(endObserver) }
+    let replayTransport = FixtureTransport([try credentials(), profile, grant])
+    let replayAccount = try await signedInAccount(replayTransport)
+    let replayWorkspace = DesktopWorkspace(
+      account: replayAccount, resources: nil, preferences: testPreferences(),
+      playbackAssetLoader: { _ in compressedAsset })
+    defer { replayWorkspace.shutdown() }
+    replayWorkspace.setVolume(0)
+    replayWorkspace.changeRate(3)
+    let replayStarted = await replayWorkspace.play(replayTrack)
+    try require(replayStarted, "The silent EOF fixture must start through the real AVPlayer path")
+    let endDeadline = ContinuousClock.now.advanced(by: .seconds(8))
+    while replayWorkspace.playing || replayWorkspace.position < 13.9 || completedItem == nil {
+      guard ContinuousClock.now < endDeadline else {
+        throw DesktopTestFailure.failed("The real AVPlayer fixture did not reach natural EOF")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    try require(
+      replayWorkspace.currentTrack == replayTrack && replayWorkspace.playCount(replayTrack) == 1
+        && replayWorkspace.duration - replayWorkspace.position > 1.0 / 600.0,
+      "Encoded stereo EOF must retain the selected voice even when the decoded end precedes its item duration"
+    )
+    replayWorkspace.togglePlayback()
+    if let completedItem {
+      NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: completedItem)
+    }
+    let replayDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while replayWorkspace.preparingPlayback || !replayWorkspace.playing
+      || replayWorkspace.playCount(replayTrack) != 2
+    {
+      guard ContinuousClock.now < replayDeadline else {
+        throw DesktopTestFailure.failed(
+          "Manual Play at encoded EOF must rewind and start the retained asset")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    try require(
+      replayWorkspace.position < 1 && replayWorkspace.currentTrack == replayTrack,
+      "Manual EOF replay must start at zero using the same selected voice")
+    replayWorkspace.togglePlayback()
+    let pausedPosition = replayWorkspace.position
+    replayWorkspace.togglePlayback()
+    try await Task.sleep(for: .milliseconds(100))
+    try require(
+      replayWorkspace.playCount(replayTrack) == 2 && replayWorkspace.position >= pausedPosition,
+      "Ordinary pause/resume must preserve position and must not increment the EOF restart count")
+    replayWorkspace.seek(replayWorkspace.duration)
+    let secondEndDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while replayWorkspace.playing {
+      guard ContinuousClock.now < secondEndDeadline else {
+        throw DesktopTestFailure.failed("Seeking the replay fixture to EOF must settle")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    guard let completedItem else {
+      throw DesktopTestFailure.failed("The synthetic item must report its natural end")
+    }
+    // The main-queue notification can enqueue advancement just before an explicit seek.
+    replayWorkspace.queue = [second]
+    NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: completedItem)
+    replayWorkspace.seek(1)
+    replayWorkspace.togglePlayback()
+    let seekDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while !replayWorkspace.playing || completedItem.currentTime().seconds < 1
+      || completedItem.currentTime().seconds > 2
+    {
+      guard ContinuousClock.now < seekDeadline else {
+        throw DesktopTestFailure.failed("The explicit synthetic item seek must complete")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    try require(
+      replayWorkspace.currentTrack == replayTrack && replayWorkspace.queue == [second]
+        && replayWorkspace.playCount(replayTrack) == 2,
+      "Immediate Play after an explicit seek must keep its target and invalidate queued end advancement"
+    )
+    replayWorkspace.queue = []
+    try await Task.sleep(for: .milliseconds(100))
+    try require(
+      replayWorkspace.playing && replayWorkspace.position >= 1
+        && replayWorkspace.playCount(replayTrack) == 2,
+      "An explicit seek must clear EOF and fence queued end advancement without rewinding or recounting"
+    )
+    NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: completedItem)
+    replayWorkspace.restartLoopForTesting(at: 1)
+    let loopDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while replayWorkspace.playCount(replayTrack) != 3 {
+      guard ContinuousClock.now < loopDeadline else {
+        throw DesktopTestFailure.failed("An admitted loop seek must survive queued end advancement")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    try require(
+      replayWorkspace.playing && replayWorkspace.position >= 1,
+      "A queued end notification must not pause the same item after its loop seek")
+    replayWorkspace.togglePlayback()
+    let loopPosition = replayWorkspace.position
+    replayWorkspace.togglePlayback()
+    try await Task.sleep(for: .milliseconds(100))
+    try require(
+      replayWorkspace.playing && replayWorkspace.position >= loopPosition
+        && replayWorkspace.playCount(replayTrack) == 3,
+      "An admitted loop seek must clear EOF so pause/resume neither rewinds nor recounts")
+    replayWorkspace.seek(replayWorkspace.duration)
+    let finalEndDeadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while replayWorkspace.playing {
+      guard ContinuousClock.now < finalEndDeadline else {
+        throw DesktopTestFailure.failed("The cancellation fixture must settle at EOF")
+      }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    replayWorkspace.togglePlayback()
+    replayWorkspace.stop()
+    NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: completedItem)
+    try await Task.sleep(for: .milliseconds(100))
+    try require(
+      replayWorkspace.currentTrack == nil && !replayWorkspace.playing
+        && replayWorkspace.playCount(replayTrack) == 3,
+      "Stop must cancel a pending EOF replay and reject late end notifications without counting a play"
+    )
+  }
+  @MainActor static func playbackSeekChecks() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "musicmute-seek-intent-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    let audioURL = root.appendingPathComponent("fixture.wav")
+    let format = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 64_000)!
+    buffer.frameLength = 64_000
+    do {
+      let audio = try AVAudioFile(forWriting: audioURL, settings: format.settings)
+      try audio.write(from: buffer)
+    }
+    let first = DesktopTrack(
+      id: "000000000000000000000051", title: "Seek fixture", duration: 4,
+      path: nil, jobId: "000000000000000000000051", bytes: 0, sourceVideoId: nil)
+    let second = DesktopTrack(
+      id: "000000000000000000000052", title: "Replacement fixture", duration: 4,
+      path: nil, jobId: "000000000000000000000052", bytes: 0, sourceVideoId: nil)
+    let grant = DesktopJSON.object([
+      "url": .string("https://media.example.invalid/synthetic-seek-output")
+    ])
+    @MainActor func waitUntil(_ label: String, _ condition: () -> Bool) async throws {
+      let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+      while !condition() {
+        guard ContinuousClock.now < deadline else { throw DesktopTestFailure.failed(label) }
+        try await Task.sleep(for: .milliseconds(10))
+      }
+    }
+    @MainActor func makeFixture() async throws -> (
+      DesktopAccountModel, DesktopWorkspace, PlaybackSeekFixtureGate
+    ) {
+      let transport = FixtureTransport([try credentials(), profile, grant, grant, grant])
+      let account = DesktopAccountModel(
+        configuration: configuration(), vault: MemoryVault(), transport: transport,
+        installationId: installation, preferences: testPreferences())
+      await account.signIn(email: "fixture@example.invalid", password: "fixture-password")
+      try require(account.signedIn, "The seek fixture must use a synthetic authenticated owner")
+      let workspace = DesktopWorkspace(
+        account: account, resources: nil, preferences: testPreferences(),
+        playbackAssetLoader: { _ in AVURLAsset(url: audioURL) })
+      workspace.setVolume(0)
+      let gate = PlaybackSeekFixtureGate()
+      workspace.playbackSeekForTesting = { player, time, completion in
+        gate.seek(player, to: time, completion: completion)
+      }
+      let started = await workspace.play(first)
+      try require(started, "The seek fixture must prepare a real silent AVPlayer")
+      try await waitUntil("The seek fixture must actually start") {
+        workspace.playCount(first) == 1 && workspace.canControlPlayback
+      }
+      return (account, workspace, gate)
+    }
+
+    let (_, workspace, gate) = try await makeFixture()
+    defer { workspace.shutdown() }
+    workspace.seek(1)
+    workspace.togglePlayback()
+    try require(
+      !workspace.playing && workspace.canControlPlayback && !workspace.preparingPlayback,
+      "Pause remains available while an explicit seek is pending")
+    try await gate.waitForCompletions(1)
+    gate.releaseFirst()
+    try await Task.sleep(for: .milliseconds(30))
+    try require(
+      !workspace.playing && abs(workspace.position - 1) < 0.05 && workspace.playCount(first) == 1,
+      "A seek completion must retain a Pause requested while it was pending")
+
+    workspace.seek(1.5)
+    workspace.togglePlayback()
+    try await gate.waitForCompletions(1)
+    workspace.seek(2)
+    try await gate.waitForCompletions(2)
+    gate.releaseFirst(finished: false)
+    try await Task.sleep(for: .milliseconds(30))
+    try require(
+      workspace.playing && workspace.position == 2 && workspace.failure == nil,
+      "A superseded failed seek must not clear the latest target, fail it or lose Play intent")
+    gate.releaseFirst()
+    try await waitUntil("The latest seek must resume at its requested target") {
+      gate.player?.timeControlStatus == .playing && (gate.player?.currentTime().seconds ?? 0) > 2
+    }
+    try require(workspace.playCount(first) == 1, "Ordinary seeks must not recount the voice")
+
+    workspace.togglePlayback()
+    workspace.seek(workspace.duration)
+    workspace.togglePlayback()
+    try await gate.waitForCompletions(1)
+    try await waitUntil("Play requested at a pending EOF target must restart at zero") {
+      workspace.playing && workspace.position < 1 && workspace.playCount(first) == 2
+    }
+    gate.releaseFirst(finished: false)
+    try await Task.sleep(for: .milliseconds(30))
+    try require(
+      workspace.playing && workspace.failure == nil && workspace.playCount(first) == 2,
+      "The old EOF-target seek completion must not fail an accepted zero replay")
+
+    workspace.seek(1)
+    try await gate.waitForCompletions(1)
+    gate.releaseFirst(finished: false)
+    try await waitUntil("An active failed seek must settle in a retryable state") {
+      workspace.playbackPreparation == .failed(.startFailed)
+    }
+    try require(
+      !workspace.playing && !workspace.canControlPlayback && workspace.currentTrack == first,
+      "A failed current seek must release its player and retain the selected voice")
+    await workspace.retryPlayback()
+    try await waitUntil("Retry after a failed seek must start the retained voice") {
+      workspace.playing && workspace.canControlPlayback && workspace.failure == nil
+    }
+    try require(workspace.playCount(first) == 2, "A seek retry must not count an ordinary resume")
+
+    workspace.stop()
+
+    let (_, loopWorkspace, loopGate) = try await makeFixture()
+    defer { loopWorkspace.shutdown() }
+    loopWorkspace.restartLoopForTesting(at: 0.5)
+    try await loopGate.waitForCompletions(1)
+    loopWorkspace.seek(1.5)
+    try await loopGate.waitForCompletions(2)
+    loopGate.releaseFirst()
+    try await Task.sleep(for: .milliseconds(30))
+    try require(
+      loopWorkspace.position == 1.5 && loopWorkspace.playCount(first) == 1,
+      "A late loop completion must not overwrite an explicit replacement seek or count it")
+    loopGate.releaseFirst()
+    try await waitUntil("An explicit replacement of a loop seek must resume its own target") {
+      loopGate.player?.timeControlStatus == .playing
+        && (loopGate.player?.currentTime().seconds ?? 0) > 1.5
+    }
+    loopWorkspace.restartLoopForTesting(at: 0.5)
+    try await loopGate.waitForCompletions(1)
+    if let item = loopGate.player?.currentItem {
+      NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: item)
+    }
+    loopGate.releaseFirst()
+    try await waitUntil("A replaced loop must release its old pending state for a later loop") {
+      loopWorkspace.playing && loopWorkspace.playCount(first) == 2
+    }
+    loopWorkspace.togglePlayback()
+    let loopPosition = loopWorkspace.position
+    loopWorkspace.togglePlayback()
+    try await Task.sleep(for: .milliseconds(30))
+    try require(
+      loopWorkspace.playing && loopWorkspace.position >= loopPosition
+        && loopWorkspace.playCount(first) == 2,
+      "An EOF notification during an accepted loop must not poison later pause/resume")
+    loopWorkspace.stop()
+
+    let (_, tickWorkspace, tickSeekGate) = try await makeFixture()
+    defer { tickWorkspace.shutdown() }
+    var delayedTick: (@MainActor @Sendable () -> Void)?
+    tickWorkspace.playbackTickForTesting = { update in
+      if delayedTick == nil { delayedTick = update } else { update() }
+    }
+    try await waitUntil("The real periodic observer must admit a synthetic playback time") {
+      delayedTick != nil
+    }
+    tickWorkspace.playbackTickForTesting = nil
+    tickWorkspace.togglePlayback()
+    tickWorkspace.seek(2)
+    try await tickSeekGate.waitForCompletions(1)
+    tickSeekGate.releaseFirst()
+    try await Task.sleep(for: .milliseconds(30))
+    delayedTick?()
+    try require(
+      !tickWorkspace.playing && tickWorkspace.position == 2 && tickWorkspace.playCount(first) == 1,
+      "A periodic time admitted before a seek must not overwrite its completed target")
+    tickWorkspace.stop()
+
+    for cancellation in ["stop", "logout", "replacement"] {
+      let (account, fencedWorkspace, fencedGate) = try await makeFixture()
+      defer { fencedWorkspace.shutdown() }
+      fencedWorkspace.togglePlayback()
+      fencedWorkspace.seek(1)
+      fencedWorkspace.togglePlayback()
+      try await fencedGate.waitForCompletions(1)
+      if cancellation == "stop" {
+        fencedWorkspace.stop()
+      } else if cancellation == "logout" {
+        await account.logout()
+      } else {
+        let replaced = await fencedWorkspace.play(second)
+        try require(replaced, "A new selection must replace a held old seek")
+      }
+      fencedGate.releaseFirst(finished: cancellation != "replacement")
+      try await Task.sleep(for: .milliseconds(50))
+      if cancellation == "replacement" {
+        try require(
+          fencedWorkspace.currentTrack == second && fencedWorkspace.playing
+            && fencedWorkspace.position < 1 && fencedWorkspace.failure == nil,
+          "A late old-player seek completion must not move, pause or fail the new voice")
+      } else {
+        try require(
+          fencedWorkspace.currentTrack == nil && !fencedWorkspace.playing
+            && fencedWorkspace.position == 0 && fencedWorkspace.playbackPreparation == nil,
+          "Stop and account changes must reject late seek completions without restoring a player")
+      }
+    }
   }
   @MainActor static func libraryPlaybackQueueChecks() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -2835,14 +3501,15 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     let grant = DesktopJSON.object([
       "url": .string("https://media.example.invalid/synthetic-output")
     ])
-    let transport = FixtureTransport([try credentials(), profile, grant, grant, grant])
+    let transport = FixtureTransport([try credentials(), profile, grant, grant, grant, grant])
     let account = DesktopAccountModel(
       configuration: configuration(), vault: MemoryVault(), transport: transport,
       installationId: installation, preferences: testPreferences())
     await account.signIn(email: "fixture@example.invalid", password: "fixture-password")
     try require(account.signedIn, "Playback queue fixtures must use an authenticated owner")
+    let preferences = testPreferences()
     let workspace = DesktopWorkspace(
-      account: account, resources: nil, playbackSupport: root, preferences: testPreferences(),
+      account: account, resources: nil, playbackSupport: root, preferences: preferences,
       playbackAssetLoader: { _ in AVURLAsset(url: audioURL) })
     defer { workspace.shutdown() }
     workspace.setVolume(0)
@@ -2852,6 +3519,12 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       }
       try require(workspace.canControlPlayback, label)
     }
+    func waitUntilCount(_ track: DesktopTrack, _ count: Int, _ label: String) async throws {
+      for _ in 0..<200 where workspace.playCount(track) < count {
+        try await Task.sleep(for: .milliseconds(10))
+      }
+      try require(workspace.playCount(track) == count, label)
+    }
 
     let started = await workspace.playFromLibrary(
       first, orderedTracks: [first, second, third])
@@ -2860,23 +3533,150 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         && workspace.playing,
       "Playing a Library row must start it and snapshot the later visible tracks as Up Next")
     try await waitUntilControllable("The first Library track must become controllable")
+    try await waitUntilCount(
+      first, 1, "A selected song must count once when AVPlayer actually plays")
+    workspace.togglePlayback()
+    workspace.seek(10)
+    try await Task.sleep(for: .milliseconds(100))
+    workspace.togglePlayback()
+    try await Task.sleep(for: .milliseconds(100))
+    try require(
+      workspace.playCount(first) == 1, "Pause, resume and manual seek must not count as plays")
 
     await workspace.next()
     try require(
       workspace.currentTrack == second && workspace.queue == [third] && workspace.playing,
       "Next must start the first queued Library track and retain the remaining order")
     try await waitUntilControllable("The second Library track must become controllable")
+    try await waitUntilCount(second, 1, "Advancing the visible queue must record the started song")
 
     await workspace.next()
     try require(
       workspace.currentTrack == third && workspace.queue.isEmpty && workspace.playing,
       "Next must advance through the final queued Library track exactly once")
     try await waitUntilControllable("The final Library track must become controllable")
+    try await waitUntilCount(third, 1, "The last queued song must count once")
 
     await workspace.next()
     try require(
       workspace.currentTrack == third && workspace.queue.isEmpty && !workspace.playing,
       "Next after the Library queue is exhausted must pause without changing the current track")
+    workspace.repeatMode = "Track"
+    await workspace.next()
+    try await waitUntilControllable("Repeated songs must become controllable")
+    try await waitUntilCount(
+      third, 2, "A successful repeat restart must count even after queue exhaustion")
+    workspace.seek(0.2)
+    workspace.markLoopStart()
+    workspace.seek(0.7)
+    workspace.markLoopEnd()
+    try await waitUntilCount(third, 3, "A successful A/B loop restart must count")
+    workspace.clearLoop()
+    workspace.stop()
+    let restored = DesktopWorkspace(
+      account: account, resources: nil, preferences: preferences)
+    try require(
+      restored.playCount(first) == 1 && restored.playCount(second) == 1
+        && restored.playCount(third) >= 3,
+      "Actual plays and loops must survive reopening on this device")
+    restored.shutdown()
+  }
+  @MainActor static func libraryPlayHistoryChecks() throws {
+    func track(_ id: String, title: String, jobID: String? = nil, path: URL? = nil) -> DesktopTrack
+    {
+      DesktopTrack(
+        id: id, title: title, duration: 60, path: path, jobId: jobID, bytes: 0, sourceVideoId: nil)
+    }
+    let local = track(
+      "local", title: "Alpha", jobID: "cloud", path: URL(fileURLWithPath: "/fixture"))
+    let remote = track("cloud", title: "Alpha", jobID: "cloud")
+    let second = track("second", title: "Beta")
+    let tie = track("tie", title: "Beta")
+    let unseen = track("unseen", title: "Never played")
+    var history = DesktopPlayHistory(stored: [
+      "cloud": 2, "second": 3, "tie": 3, "negative": -1, "fraction": 1.5, "boolean": true,
+    ])
+    try require(
+      history.count(local) == 2 && history.count(unseen) == 0 && history.counts.count == 3,
+      "History must use linked aliases and reject invalid persisted counts")
+    history.reconcile([local])
+    history.record(local)
+    try require(
+      history.count(local) == 3 && history.count(remote) == 3,
+      "Cache and cloud representations must share one count without double-counting alias history")
+    history.reconcile([local, remote])
+    try require(history.count(local) == 3, "Repeated linkage reconciliation must not create plays")
+    let tracks = [unseen, tie, second, local]
+    func selected(
+      tab: DesktopLibraryTab = .all, filter: String = "All", search: String = "",
+      sort: DesktopLibrarySort = .mostPlayed, starred: Bool = false, hidden: Set<String> = []
+    ) -> [DesktopTrack] {
+      DesktopLibrarySelection.visible(
+        tracks: tracks, search: search, filter: filter, tab: tab, sort: sort,
+        showStarredOnly: starred, favorites: ["cloud", "second"], hidden: hidden, history: history)
+    }
+    try require(
+      selected() == [local, second, tie, unseen],
+      "Most Played sort must rank all songs by descending count with title and ID ties")
+    try require(
+      selected(tab: .mostPlayed, sort: .newest) == [local, second, tie],
+      "Most Played tab must omit unplayed songs and always use play-count order")
+    try require(
+      selected(tab: .mostPlayed, search: "Alpha", starred: true) == [local]
+        && selected(tab: .mostPlayed, filter: "Offline", starred: true) == [local]
+        && selected(tab: .mostPlayed, starred: true, hidden: ["cloud"]) == [second],
+      "Star checkbox, search, source filters and hidden aliases must compose with Most Played")
+    try require(
+      DesktopPlaybackQueue.following(after: local, in: selected(tab: .mostPlayed)) == [
+        second, tie,
+      ],
+      "Ranked Library playback must keep the exact displayed order in Up Next")
+  }
+  @MainActor static func libraryPreferenceIsolationChecks() async throws {
+    let preferences = testPreferences()
+    func key(_ kind: String, owner: String) -> String {
+      let hash = SHA256.hash(data: Data(owner.utf8)).map { String(format: "%02x", $0) }.joined()
+      return "desktop.\(kind).\(hash)"
+    }
+    let track = DesktopTrack(
+      id: "local-preference", title: "Local fixture", duration: 1, path: nil,
+      jobId: nil, bytes: 0, sourceVideoId: nil)
+    preferences.set([track.id: 4], forKey: key("play-counts", owner: "local"))
+    preferences.set([track.id], forKey: key("favorites", owner: "local"))
+    preferences.set(true, forKey: key("show-starred", owner: "local"))
+    preferences.set([track.id: 7], forKey: key("play-counts", owner: uid))
+    let transport = FixtureTransport([try credentials(), profile])
+    let account = DesktopAccountModel(
+      configuration: configuration(), vault: MemoryVault(), transport: transport,
+      installationId: installation, preferences: testPreferences())
+    let workspace = DesktopWorkspace(account: account, resources: nil, preferences: preferences)
+    defer { workspace.shutdown() }
+    try require(
+      workspace.playCount(track) == 4 && workspace.starred(track) && workspace.showStarredOnly,
+      "Signed-out reopening must restore device-local stars, checkbox and history")
+    workspace.shutdown()
+    await account.signIn(email: "fixture@example.invalid", password: "fixture-password")
+    let ownerWorkspace = DesktopWorkspace(
+      account: account, resources: nil, preferences: preferences)
+    defer { ownerWorkspace.shutdown() }
+    try require(
+      account.signedIn && ownerWorkspace.playCount(track) == 7 && !ownerWorkspace.starred(track)
+        && !ownerWorkspace.showStarredOnly,
+      "Account reopening must restore only that owner's local listening history and stars")
+    ownerWorkspace.favorite(track)
+    ownerWorkspace.setShowStarredOnly(true)
+    let reopened = DesktopWorkspace(account: account, resources: nil, preferences: preferences)
+    try require(
+      reopened.starred(track) && reopened.showStarredOnly && reopened.playCount(track) == 7,
+      "Account-local checkbox and stars must persist through the injected device preferences")
+    reopened.shutdown()
+    account.onSessionChanged = nil
+    await account.logout()
+    let guest = DesktopWorkspace(account: account, resources: nil, preferences: preferences)
+    try require(
+      !account.signedIn && guest.playCount(track) == 4 && guest.starred(track),
+      "Signing out must leave the signed-out device history intact and isolated")
+    guest.shutdown()
   }
   @MainActor static func comparisonChecks() throws {
     let untrimmed = DesktopJSON.object(["trim_enabled": .bool(false)])
@@ -3127,6 +3927,59 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
         remaining: 31) == nil,
       "Deferred captures or ordinary pending uploads must not trigger a timer-free retry spin")
   }
+  @MainActor static func libraryThumbnailChecks() throws {
+    let thumbnail =
+      "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=fixture_123&rs=signature-123"
+    let jobID = "0123456789abcdef01234567"
+    let local = DesktopTrack(
+      id: "offline", title: "Saved voice", duration: 19,
+      path: URL(fileURLWithPath: "/fixture/voice.mp3"),
+      jobId: jobID, bytes: 123, sourceVideoId: "jNQXAC9IVRw")
+    func job(_ value: DesktopJSON?) -> DesktopJSON {
+      var fields: [String: DesktopJSON] = [
+        "id": .string(jobID), "status": .string("ready"),
+        "input": .object(["duration_seconds": .number(19)]),
+      ]
+      if let value { fields["thumbnail_url"] = value }
+      return .object(fields)
+    }
+    let cloud = DesktopWorkspace.libraryTracks(
+      localTracks: [], cloudJobs: [job(.string(thumbnail))])
+    let linked = DesktopWorkspace.libraryTracks(
+      localTracks: [local], cloudJobs: [job(.string(thumbnail))])
+    try require(
+      cloud.first?.thumbnailURL?.absoluteString == thumbnail
+        && linked.first?.thumbnailURL?.absoluteString == thumbnail
+        && linked.first?.path == local.path,
+      "Cloud and linked offline Library rows must retain the original returned thumbnail without changing audio"
+    )
+    for value in [nil, .null, .string("https://private.invalid/video.jpg"), .number(1)]
+      as [DesktopJSON?]
+    {
+      try require(
+        DesktopWorkspace.libraryTracks(localTracks: [], cloudJobs: [job(value)]).first?.thumbnailURL
+          == nil,
+        "Missing, null and invalid optional thumbnails must retain the existing Library placeholder"
+      )
+    }
+    try require(
+      DesktopWorkspace.libraryTracks(localTracks: [local], cloudJobs: []) == [local],
+      "Older and local-only tracks must remain readable without thumbnail metadata")
+    let plain = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
+    for value in [
+      plain.replacingOccurrences(of: "https:", with: "http:"),
+      plain.replacingOccurrences(of: "i.ytimg.com", with: "i.ytimg.com.evil.invalid"),
+      plain.replacingOccurrences(of: "i.ytimg.com", with: "user:secret@i.ytimg.com"),
+      plain.replacingOccurrences(of: "i.ytimg.com", with: "i.ytimg.com:443"),
+      plain.replacingOccurrences(of: "/vi/", with: "/vi/../vi/"),
+      plain + "#", plain + "\n", plain + "?token=secret", plain + "?sqp=one&sqp=two",
+      plain + "?sqp=one&", plain + "?rs=" + String(repeating: "x", count: 1025),
+    ] {
+      try require(
+        DesktopThumbnailURL.validated(value) == nil, "Unsafe thumbnail URL must not be fetched")
+    }
+  }
+
   @MainActor static func libraryTitleChecks() throws {
     let jobID = "0123456789abcdef01234567"
     let track = DesktopTrack(
@@ -3784,10 +4637,29 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
     setenv("MUSICMUTE_DESKTOP_TEST_SECRET", "fixture-never-inherit", 1)
     defer { unsetenv("MUSICMUTE_DESKTOP_TEST_SECRET") }
     let bridge = DesktopBridge(resources: root)
+    var preparationFailures: [DesktopAuthFailure] = []
+    var callbackFoundBusyBridge = false
+    bridge.onPreparationRequired = { failure in
+      callbackFoundBusyBridge = callbackFoundBusyBridge || bridge.busy
+      preparationFailures.append(failure)
+    }
     let reply = try await bridge.request(type: "LIBRARY_CACHE", payload: .object([:]), session: nil)
     try require(
       reply["ready"].bool == true && !bridge.busy,
       "Bounded IPC result must roundtrip with filtered process environment")
+    try script(
+      #"printf '{"protocol_version":1,"request_id":"%s","type":"error","error_code":"MODEL_INVALID"}\n' "$id""#
+    )
+    do {
+      _ = try await bridge.request(type: "LOCAL_START", payload: .object([:]), session: nil)
+      throw DesktopTestFailure.failed("A missing model reply must fail the original request")
+    } catch let failure as DesktopAuthFailure {
+      try require(
+        failure == .service("MODEL_INVALID"), "Setup recovery must preserve the real error")
+    }
+    try require(
+      preparationFailures == [.service("MODEL_INVALID")] && !callbackFoundBusyBridge,
+      "An actual missing model must notify setup once after releasing its execution reservation")
     for tail in [
       "printf '%s\\n' '{not-json}'", success + "\n" + success, success + "\nexit 12",
       "/bin/dd if=/dev/zero bs=1024 count=600 2>/dev/null",
@@ -3809,6 +4681,9 @@ private final class StreamingFixtureProtocol: URLProtocol, @unchecked Sendable {
       _ = try await pending.value
       throw DesktopTestFailure.failed("Cancelled desktop operation succeeded")
     } catch is DesktopAuthFailure {}
+    try require(
+      preparationFailures == [.service("MODEL_INVALID")],
+      "Malformed output and cancelled requests must not request setup or restart cancelled work")
     try script(success)
     let retry = try await bridge.request(type: "LIBRARY_CACHE", payload: .object([:]), session: nil)
     try require(

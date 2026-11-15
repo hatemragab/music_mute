@@ -27,6 +27,24 @@ export type LaunchAgentExecutor = (
   arguments_: readonly string[],
 ) => Promise<LaunchAgentExecutionResult>;
 
+export type MacLaunchAgentErrorCode =
+  "WORKER_SERVICE_ENABLE_FAILED" | "WORKER_SERVICE_START_FAILED";
+
+export class MacLaunchAgentError extends Error {
+  public constructor(
+    public readonly code: MacLaunchAgentErrorCode,
+    cause: unknown,
+  ) {
+    super(
+      code === "WORKER_SERVICE_ENABLE_FAILED"
+        ? "MusicMute worker service could not be enabled"
+        : "MusicMute worker service could not be started",
+      { cause },
+    );
+    this.name = "MacLaunchAgentError";
+  }
+}
+
 export interface LaunchAgentStatus {
   loaded: boolean;
   running: boolean;
@@ -251,7 +269,23 @@ export class MacLaunchAgentController {
   }
 
   public async bootstrap(plistPath: string): Promise<void> {
-    await this.execute("/bin/launchctl", ["bootstrap", this.domain, plistPath]);
+    // launchd retains a disabled override even after the plist and app data
+    // are removed. Callers fence deliberate Stop/Pause/Drain before startup;
+    // an intentional bootstrap must restore only this user's worker label.
+    try {
+      await this.execute("/bin/launchctl", ["enable", this.service]);
+    } catch (error) {
+      throw new MacLaunchAgentError("WORKER_SERVICE_ENABLE_FAILED", error);
+    }
+    try {
+      await this.execute("/bin/launchctl", [
+        "bootstrap",
+        this.domain,
+        plistPath,
+      ]);
+    } catch (error) {
+      throw new MacLaunchAgentError("WORKER_SERVICE_START_FAILED", error);
+    }
   }
 
   public async bootout(): Promise<void> {

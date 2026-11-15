@@ -1,0 +1,118 @@
+--- a/lib/file-source/src/file_server.rs
++++ b/lib/file-source/src/file_server.rs
+@@ -284,7 +284,7 @@
+             let mut global_bytes_read: usize = 0;
+             let mut maxed_out_reading_single_file = false;
+             for (&file_id, watcher) in &mut fp_map {
+-                if !watcher.should_read() {
++                if !watcher.should_read().await {
+                     continue;
+                 }
+ 
+@@ -402,7 +402,7 @@
+             // minimum on the assumption that next time through there will be
+             // more lines to read promptly.
+             backoff_cap = if global_bytes_read == 0 {
+-                cmp::min(2_048, backoff_cap.saturating_mul(2))
++                cmp::min(250, backoff_cap.saturating_mul(2))
+             } else {
+                 1
+             };
+--- a/lib/file-source/src/file_watcher/mod.rs
++++ b/lib/file-source/src/file_watcher/mod.rs
+@@ -464,13 +464,24 @@
+     }
+ 
+     #[inline]
+-    pub fn should_read(&self) -> bool {
++    pub async fn should_read(&self) -> bool {
+         if self.reached_eof && self.last_read_attempt.elapsed() < self.read_retry_delay {
+             return false;
+         }
+ 
+-        self.last_read_success.elapsed() < Duration::from_secs(10)
++        if self.last_read_success.elapsed() < Duration::from_secs(10)
+             || self.last_read_attempt.elapsed() > Duration::from_secs(10)
++        {
++            return true;
++        }
++
++        // A quiet file can receive an important record at any time. Check the
++        // already-open descriptor without reading an unchanged EOF. Retain the
++        // existing periodic read fallback for metadata errors/compressed files.
++        self.reader
++            .file_size()
++            .await
++            .is_some_and(|size| size != self.file_position)
+     }
+ 
+     #[inline]
+--- a/lib/file-source/src/file_watcher/tests/mod.rs
++++ b/lib/file-source/src/file_watcher/tests/mod.rs
+@@ -243,19 +243,19 @@
+     }
+ }
+ 
+-#[test]
+-fn backs_off_after_eof() {
++#[tokio::test]
++async fn backs_off_after_eof() {
+     let mut watcher = watcher_for_timing();
+ 
+     watcher.track_read_attempt();
+     watcher.track_read_eof();
+ 
+     assert_eq!(watcher.read_retry_delay, EOF_READ_BACKOFF_MIN);
+-    assert!(!watcher.should_read());
++    assert!(!watcher.should_read().await);
+ 
+     thread::sleep(EOF_READ_BACKOFF_MIN);
+ 
+-    assert!(watcher.should_read());
++    assert!(watcher.should_read().await);
+ 
+     watcher.track_read_attempt();
+     watcher.track_read_eof();
+@@ -340,3 +340,42 @@
+     let sleep_time = std::time::Duration::from_millis(delay as u64);
+     std::thread::sleep(sleep_time);
+ }
++
++#[tokio::test]
++async fn reads_an_appended_important_line_after_long_idle_without_waiting_ten_seconds() {
++    use file_source_common::ReadFrom;
++    use std::io::Write;
++    use std::time::Duration;
++
++    let mut file = tempfile::NamedTempFile::new().unwrap();
++    writeln!(file, "initial-line").unwrap();
++    file.flush().unwrap();
++    let mut watcher = FileWatcher::new(
++        file.path().to_owned(),
++        ReadFrom::Beginning,
++        None,
++        1024,
++        Bytes::from_static(b"\n"),
++    )
++    .await
++    .unwrap();
++    assert!(watcher.read_line().await.unwrap().raw_line.is_some());
++    assert!(watcher.read_line().await.unwrap().raw_line.is_none());
++    watcher.last_read_success = Instant::now() - Duration::from_secs(11);
++    watcher.last_read_attempt = Instant::now() - Duration::from_secs(1);
++    watcher.read_retry_delay = EOF_READ_BACKOFF_MAX;
++    assert!(
++        !watcher.should_read().await,
++        "An unchanged quiet EOF needs no read"
++    );
++    writeln!(file, "important-error").unwrap();
++    file.flush().unwrap();
++    assert!(
++        watcher.should_read().await,
++        "An appended record is ready immediately"
++    );
++    assert_eq!(
++        watcher.read_line().await.unwrap().raw_line.unwrap().bytes,
++        "important-error"
++    );
++}

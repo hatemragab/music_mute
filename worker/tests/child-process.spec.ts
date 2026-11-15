@@ -8,6 +8,8 @@ import {
   ChildCommandError,
   ChildStopError,
   WorkerChildProcess,
+  workerChildDetached,
+  windowsGuardianArguments,
 } from "../src/agent/child-process.js";
 import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
 
@@ -30,6 +32,59 @@ afterEach(async () => {
 });
 
 describe("worker child lifecycle", () => {
+  it("console detachment requires the verified Windows guardian Job and adds only the private mode marker", () => {
+    const engine = "C:\\MusicMuteLocal\\runtime\\release\\app\\engine";
+    const options = {
+      windowsDetachedConsole: true as const,
+      windowsJobObject: true,
+      windowsEngineModuleRoot: engine,
+    };
+    expect(workerChildDetached(options, "win32")).toBe(true);
+    expect(() => workerChildDetached(options, "darwin")).toThrow(
+      "verified guardian-owned Job",
+    );
+    expect(() =>
+      workerChildDetached({ ...options, windowsJobObject: false }, "win32"),
+    ).toThrow();
+    expect(() =>
+      workerChildDetached(
+        { ...options, windowsEngineModuleRoot: "relative" },
+        "win32",
+      ),
+    ).toThrow();
+    expect(() =>
+      workerChildDetached(
+        { windowsDetachedConsole: true, windowsJobObject: true },
+        "win32",
+      ),
+    ).toThrow();
+    expect(workerChildDetached({}, "win32")).toBe(false);
+    expect(workerChildDetached({}, "darwin")).toBe(true);
+    const args = windowsGuardianArguments(
+      engine,
+      321,
+      ["-I", "-c", "isolated-engine"],
+      true,
+    );
+    expect(args.slice(-7)).toEqual([
+      "--parent-pid",
+      "321",
+      "--detached-console",
+      "--",
+      "-I",
+      "-c",
+      "isolated-engine",
+    ]);
+    expect(
+      windowsGuardianArguments(engine, 321, ["-I"]).includes(
+        "--detached-console",
+      ),
+    ).toBe(false);
+    expect(() =>
+      windowsGuardianArguments(undefined, 321, ["-I"], true),
+    ).toThrow();
+  });
+
   it("identifies an unconfirmed child exit without retaining the shutdown error", async () => {
     const fixture = new WorkerChildProcess({
       command: "unused",
@@ -101,6 +156,7 @@ describe("worker child lifecycle", () => {
         command: "unused",
         args: [],
         cwd: ".",
+        stopTimeoutMs: 100,
       });
       const pid = 2_147_483_647;
       Object.assign(fixture, { processGroupPid: pid });
@@ -121,10 +177,42 @@ describe("worker child lifecycle", () => {
           throw Object.assign(new Error("group exited"), { code: "ESRCH" });
         });
         await fixture.stop();
-        expect(kill).toHaveBeenCalledTimes(2);
+        const probes = kill.mock.calls.length;
         // A successful ESRCH probe clears only the positively absent group.
         await fixture.stop();
-        expect(kill).toHaveBeenCalledTimes(2);
+        expect(kill).toHaveBeenCalledTimes(probes);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "retries transient denied group probes but releases the fence only on ESRCH",
+    async () => {
+      const fixture = new WorkerChildProcess({
+        command: "unused",
+        args: [],
+        cwd: ".",
+        stopTimeoutMs: 100,
+      });
+      Object.assign(fixture, { processGroupPid: 2_147_483_647 });
+      const kill = vi
+        .spyOn(process, "kill")
+        .mockImplementationOnce(() => {
+          throw Object.assign(new Error(), { code: "EPERM" });
+        })
+        .mockImplementationOnce(() => {
+          throw Object.assign(new Error(), { code: "EINTR" });
+        })
+        .mockImplementation(() => {
+          throw Object.assign(new Error(), { code: "ESRCH" });
+        });
+      try {
+        await fixture.stop();
+        expect(kill).toHaveBeenCalledTimes(3);
+        await fixture.stop();
+        expect(kill).toHaveBeenCalledTimes(3);
       } finally {
         kill.mockRestore();
       }
@@ -256,6 +344,24 @@ describe("worker child lifecycle", () => {
       },
       { stage: "output-ready" },
     ]);
+  });
+
+  it("exposes only the exact live spawned guardian PID and clears it after stop", async () => {
+    child = new WorkerChildProcess({
+      command: process.execPath,
+      args: [progressFixture],
+      cwd: workerRoot,
+      startTimeoutMs: 2000,
+      stopTimeoutMs: 2000,
+    });
+    expect(child.getPid()).toBeUndefined();
+    await child.start();
+    const pid = child.getPid();
+    expect(Number.isSafeInteger(pid)).toBe(true);
+    expect(pid).toBeGreaterThan(0);
+    expect(child.isAlive()).toBe(true);
+    await child.stop();
+    expect(child.getPid()).toBeUndefined();
   });
 
   it("starts the real Python child, pings it and shuts down cleanly", async () => {

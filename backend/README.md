@@ -200,6 +200,64 @@ and [global rate limit](https://docs.bullmq.io/guide/queues/global-rate-limit) g
 
 ## Requirements and local run
 
+### Private local diagnostics
+
+Run `pnpm run start:full-debug` after starting the repository collector with
+`node ../tools/local-logging/cli.mjs start` from this directory. The shared guide
+at [tools/local-logging/README.md](../tools/local-logging/README.md) describes
+Vector, the retained capture, Logdy at `http://127.0.0.1:19742`, health and the
+read-only MCP tools. The debug command supplies a transient backend-only ingress
+key; never copy it into tracked configuration. Ordinary `start:dev` retains the
+existing error-only console unless diagnostic capture is explicitly enabled.
+
+Capture requires **both** `APP_ENV=local` and `NODE_ENV=development` plus
+`MUSICMUTE_LOG_ENABLED=1`. Production and test modes cannot activate detailed
+capture. `MUSICMUTE_LOG_PAYLOADS=1` enables bounded redacted snapshots;
+`MUSICMUTE_LOG_CONSOLE=1` separately enables structured terminal output. Explicit
+`0` or `false` values disable each control. `MUSICMUTE_LOG_ENDPOINT` accepts only
+an HTTP `127.0.0.1` collector at `/ingest/backend`; `MUSICMUTE_LOG_KEY` is its
+process-local authentication key. Optional `MUSICMUTE_LOG_CAPTURE_ID` identifies
+a capture. The backend does not write its own duplicate capture files.
+
+The existing validated UUID `X-Request-Id` is preserved and returned unchanged.
+AsyncLocalStorage retains it across awaited HTTP/service/database work. Verified
+identity is added after guards run. Import execution context uses the durable
+import ID and known job ID; it does not invent an HTTP request association for
+background work. Every API process has a separate random instance ID.
+
+Included observations are JSON HTTP requests/responses, matched route templates,
+errors and aborts; actual MongoDB command start/outcome/duration; security Redis,
+worker-hint Redis and BullMQ client command/lifecycle observations; existing Nest
+service diagnostics; import executions/retries; account, guest contribution and
+worker-hint WebSocket frames; and outbound native HTTP/fetch status/timing.
+MongoDB command monitoring is local to this client and uses no server profiler,
+extra diagnostic reads or writes. Authentication command contents, positional
+Redis arguments/results, binary/uploads/streams, arbitrary error messages/stacks
+and outbound stream bodies are explicitly omitted. Sanitized repository code
+locations remain available on errors. A WebSocket send records a
+local send attempt; it does not prove client receipt. Application observations
+are distinct from MongoDB/Redis server-owned logs collected by Vector.
+
+Redaction runs before console/network output and covers nested JSON, bounded
+base64 JSON, secrets in headers/URLs and credential-bearing connection strings.
+Binary and opaque encoded content is omitted. Snapshots permit eight nesting
+levels, 1,200 nodes, 100 array items/object keys and 8,192-character strings;
+records have a 48-KiB bound. The nonblocking queue holds at most 256 records with
+two in flight, one-second delivery deadlines and three bounded attempts.
+Warnings/errors can evict lower-severity queued records under pressure. Periodic
+`logging.health` events report pending/active/delivered/failed/dropped counters
+and last successful delivery time. Failures in this queue cannot fail requests.
+
+`pnpm run test:logging:integration` runs a compiled API against owned loopback
+MongoDB/Redis and an in-memory collector, exercising HTTP redaction, request
+correlation, idle latency and collector restart. With the real logging stack
+already started, `MUSICMUTE_LOG_TEST_FORWARD=1 node --test
+test/local-logging.integration.mjs` also forwards that synthetic activity into
+the shared capture, reading its key privately. The same opt-in flag on
+`test/realtime.integration.mjs` forwards the actual snapshot transport fixture.
+These tests do not use real user accounts, Firebase credentials, R2 or production
+services and do not establish deployed coverage.
+
 - Node.js 24 LTS and pnpm 10. The lockfile defines reproducible dependency versions.
 - Independently running MongoDB 8 and Redis 7.4 or later.
 - Run all commands from this directory. Scripts target macOS/Linux and the VPS.
@@ -230,7 +288,7 @@ server. Production Compose also runs only the API.
   distinguishes local playback and diagnostics from account/cloud use, signed-out
   YouTube shared lookup and background saving, native runtime/model downloads,
   retention controls, and Chrome Web Store Limited Use. Its publication metadata
-  is version `2026-10-07`; deployment and the live notice must be verified
+  is version `2026-10-08`; deployment and the live notice must be verified
   separately from source tests.
 
 October 7, 2026 deployment checkpoint: API `123` serves the unified notice and
@@ -240,11 +298,72 @@ entries, inherited image configuration, and service environment stayed identical
 to API `121`. Public policy, support, deletion, and both health endpoints returned
 HTTP 200. This establishes policy publication, not Chrome Web Store approval.
 
+October 8, 2026 deployment checkpoint: the current allowlisted backend source
+archive (374 files) was deployed through CapRover CLI to `musicmute` / `api` as
+`img-captain-api:125`, replacing version 124. CapRover read-back confirmed version
+125, one instance and no build in progress; runtime environment, ports, domains,
+WebSocket configuration and deployment hook remained unchanged. `/health/live`,
+`/health/ready`, `/app-policy`, `/privacy`, `/delete-account`, `/support` and
+`/public-policy` returned HTTP 200. The live privacy page includes the Firebase,
+MongoDB, Cloudflare R2 and Sentry disclosures, and publication metadata is
+`2026-10-08`. The Android Play update policy still returns HTTP 503
+`DEPENDENCY_UNAVAILABLE`; its release/configuration gate remains separate.
+Archive SHA-256: `0a04307a581dbb73b9b5f963d23e448c8eecc13cec6049e1e89c7f184b3d3c58`.
+
 ## Environments
 
 For CapRover, use the repository-root `captain-definition` and set Container HTTP
 Port to **80**. Configure runtime variables as described below; private acquisition
 app setup is in the [provider guide](../video_providers/videoscale/README.md).
+
+Native link-import UI visibility uses the existing standard account policy and
+`URL_IMPORT_ENABLED` without changing import admission or active work. The
+dashboard switch defaults to hidden; the optional sorted country and selected-user
+lists apply only to Android, iOS and macOS. Select/remove users in the same
+account-policy editor and save with the existing review, reason and revision.
+User exclusions never override a global or country hide. The selected-user list
+is administrator-only; clients receive the existing resolved visibility boolean.
+Web and the Chrome browser panel retain their behavior. Guest `GET /processing-policy` uses that request's country; supplying
+a Firebase Bearer additionally evaluates the verified active account using the
+existing account guard. Invalid credentials never fall back to guest behavior.
+The owner `policy` snapshot uses its authenticated account and connection's
+realtime-ticket country. Native caches are scoped to guest/account identity.
+Existing policy documents are read with false/empty defaults, without a document migration.
+
+Cloudflare **Add visitor location headers** is an edge configuration, separate
+from an API image deployment. Default nginx forwards request headers; first read
+the live CapRover `api` template and check `proxy_pass_request_headers`. If the
+API proxy location drops these headers, back up the current template outside the
+repository and add only the following directives to the API proxy location (and
+a separate WebSocket location if one exists):
+
+```nginx
+proxy_set_header CF-IPCountry $http_cf_ipcountry;
+proxy_set_header CF-IPCity $http_cf_ipcity;
+proxy_set_header CF-IPContinent $http_cf_ipcontinent;
+proxy_set_header CF-IPLatitude $http_cf_iplatitude;
+proxy_set_header CF-IPLongitude $http_cf_iplongitude;
+proxy_set_header CF-Region $http_cf_region;
+proxy_set_header CF-Region-Code $http_cf_region_code;
+proxy_set_header CF-Metro-Code $http_cf_metro_code;
+proxy_set_header CF-Postal-Code $http_cf_postal_code;
+proxy_set_header CF-Timezone $http_cf_timezone;
+```
+
+Leave TLS, upgrade, timeout, body-size and other directives intact. Trust in the
+headers requires a proxied API hostname and origin access limited to Cloudflare;
+forwarding alone does not prevent spoofing through a directly reachable origin.
+Missing/unknown country hides native link controls only when the disabled-country
+list is nonempty. No raw headers, IP address or coordinates are logged.
+Authenticated device sync and identified owner ticket issuance save a sanitized
+embedded location on `user_devices` when it changes or five minutes pass. Missing
+headers replace the previous observation with null fields; public policy reads
+never update devices. Devices are not a `policy` feed dependency.
+
+API guideline preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/),
+read 2026-10-08. OpenAPI, existing endpoint permissions, snake_case, assigned ISO
+country formats and compatible additive fields follow rules 101, 104, 118, 171 and 106. `openapi.yaml` is the checked-in authored contract; this repository has no
+OpenAPI generation command. Existing lowercase snapshot reasons are retained.
 
 `APP_ENV=local` loads `.env.local`. Production and test ignore dotenv files, so
 CapRover's process environment is the only production configuration source.
@@ -289,8 +408,9 @@ credentials, browser CORS, retention, billing and remaining live checks.
 The owner approved fresh MongoDB schemas and breaking worker storage identities:
 quoted `etag` replaces `version_id`. The owner resets MongoDB themselves; no code
 here copies old media, deletes AWS objects or resets a database. Worker runtime
-archives, qualification fixtures and APK releases must be republished and verified
-in R2 before the corresponding real installation/release flow becomes usable.
+archives and qualification fixtures must be republished and verified in R2 before
+the corresponding real installation flow becomes usable. Android app binaries
+are distributed through Google Play.
 
 ## Architecture and external Redis
 
@@ -403,10 +523,48 @@ or instances for environments, monitor capacity and test backups/restores.
 
 ## HTTP security
 
+### Windows desktop contracts
+
+`GET/PATCH /admin/update-policy/desktop` manages only macOS/Windows numeric cloud
+access gates. Read uses `releases.read`; write uses existing fresh Google
+`releases.manage`, transactional operation receipts and global AppPolicy revision
+CAS. Each selected `minimum_build` is null or 1–2147483647; omitted channels remain
+unchanged. Mobile publication, installer feeds and worker artifact catalogs are
+independent. The dashboard reviews the selected gate, reason and fresh auth before
+writing; lost replies use operation read-back rather than repeating PATCH. This
+source addition needs an explicitly authorized backend/dashboard deployment before
+clients can rely on it in production.
+
+Account/device reports accept `platform: "windows"` alongside Android, iOS,
+macOS and web. `platforms.windows.minimumBuild` is an optional desktop policy
+with the same bounds and independent enforcement as macOS. Old stored policies
+and requests remain valid; absent desktop gates are not manufactured mobile
+release selections. Existing account-free local processing needs no backend
+session. Authenticated cloud processing and account media sync retain the normal
+account, ownership and quota boundaries.
+
+Consumer workers declare `runtime.installationProfile: "windows-user"`. Reports
+are persisted without changing legacy service records. Activation requires x64
+Windows build 19045 or later and matching DirectML/GPU/model/recipe declarations,
+plus the existing recorded qualification and Google/account approval fences.
+The backend is not a remote GPU attestation service.
+
+The backend-owned `WORKER_INSTALLATION_CATALOG_PATH` may include a separate
+`releases["windows-amd64-user"]` descriptor. It uses the existing immutable
+private R2 artifact identity fields and signed update metadata fields. Its
+Ed25519 signature must cover the reconstructed metadata including
+`installationProfile: "windows-user"`; existing macOS/service signatures omit
+that property. The consumer entry must be signed. Artifact and update requests
+send `installation_profile: "windows-user"` with `platform: "windows-amd64"`.
+Missing consumer entries fail closed instead of returning a service package.
+Machine updates check the saved runtime profile and approved platform before
+issuing a grant. Publishing a consumer descriptor, configuring a real client or
+changing production approval still requires the appropriate release work.
+
 ### Native Desktop Google exchange
 
 `POST /auth/desktop-google-token-exchanges` is a public pre-Firebase operation
-for the registered Mac Desktop OAuth client. Its closed body contains only
+for the registered shared macOS/Windows Desktop OAuth client. Its closed body contains only
 `authorization_code`, `code_verifier` and the exact dynamic
 `http://127.0.0.1:<port>/oauth2callback`. The port must be canonical decimal
 1–65535. It is a Google form value, never a fetch destination. The backend uses
@@ -417,12 +575,18 @@ session bootstrap continue independently. The exchange persists no Google access
 refresh or identity tokens.
 
 Set **both** `GOOGLE_DESKTOP_CLIENT_ID` and `GOOGLE_DESKTOP_CLIENT_SECRET` through
-backend-only secret configuration. The secret must never enter a Mac/browser
+backend-only secret configuration. The secret must never enter a macOS/Windows/browser
 bundle or public config. Both absent preserves existing authentication and makes
 this route return safe 503; partial or malformed configuration fails startup
 without printing values. The configured Desktop client must also be permitted by
 the Firebase Google provider's audience policy. This implementation does not
 change provider permissions or production secrets.
+
+Windows uses this same fixed Desktop client and exchange route. The Windows
+public app configuration contains the matching client ID only, together with
+the existing public Firebase settings. OAuth state and the loopback listener
+belong to the native app. Do not add platform-specific caller-selected client
+IDs, ship the desktop client secret, or loosen the loopback URL validation.
 
 `DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE` defaults to 10 and
 `DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE` to 300. Existing global request
@@ -540,10 +704,32 @@ one-hop proxy IP behavior follows `TRUST_PROXY`. The socket accepts no client
 messages and uses a renewable Redis lease to allow one connection per machine
 across API instances. Each connection rotates after one hour.
 
-Public APK grants retain a 10/IP/minute route limit and have an atomic
-`PUBLIC_RELEASE_GRANTS_PER_MINUTE` service ceiling (default 300). A signed R2
-URL can be fetched repeatedly until expiry; API issuance limits cannot cap
-those bytes, so production edge/storage egress controls need separate review.
+Android releases and updates use Google Play only. New Android drafts require
+`google_play` and the verified listing for `APK_EXPECTED_PACKAGE_ID`; operators
+upload the binary in Play Console, record its newer version/build and confirm
+availability before audited publication. Android policy writes retain the stored
+shape with `source: google_play`, `directReleaseId: null`, and the Play target in
+`storeReleaseId`. Required decisions use the minimum supported build; optional
+decisions use the target. Play supplies all update bytes.
+
+Historical direct-APK releases and upload status remain readable without a
+migration. Direct rows cannot be edited, published or withdrawn. APK upload and
+completion routes return HTTP 400 `INVALID_REQUEST` after the existing admin
+permission/fresh-auth checks. Public APK landing, grant and redirect routes
+return HTTP 404 `RESOURCE_NOT_FOUND` with no HTML, signed URL or Location header.
+The retired grant/redirect routes retain their 10/IP/minute route limit and
+atomic `PUBLIC_RELEASE_GRANTS_PER_MINUTE` service ceiling (default 300).
+`distribution=direct` returns HTTP 400 `INVALID_REQUEST`; Play snapshots expose
+`target.artifact: null`. Job audio download grants remain separate.
+
+For iOS-only publication/withdrawal, an unchanged historical Android selection
+with no Play target is preserved as stored, including its minimum. Its read model
+maps the editable source to Play, but the iOS action does not migrate Android or
+silence the existing public Play 503. Preview supports this exception only when
+its iOS fields change and every editable Android field is unchanged. Any Android
+selection change must validate a real Play target at or above its minimum.
+Operators must later publish a verified Play release to repair a missing target;
+application startup does not rewrite policies or invent releases.
 
 Browser cross-origin access is denied unless `CORS_ORIGINS` lists exact origins;
 production origins require HTTPS. Native apps do not need CORS. CORS does not
@@ -836,3 +1022,17 @@ the new source-delivery route returned 401 `UNAUTHENTICATED` without a guest
 capability. These probes do not establish authenticated live R2 delivery or
 end-to-end cloud playback. Local source-delivery integration used isolated
 MongoDB/Redis and synthetic audio.
+
+## Nullable Library thumbnail URLs
+
+The original thumbnail URL included in acquisition is validated and persisted in
+existing nullable job/shared-source metadata. Owner HTTP and WebSocket job views
+expose `thumbnail_url` as a URL or null. Older records and file-only jobs need no
+migration or backfill and continue showing client placeholders. The backend does
+not fetch images, store thumbnails in R2, or perform additional metadata requests.
+Only HTTPS `i.ytimg.com` public JPG/WebP video-thumbnail paths and bounded `sqp`/`rs`
+parameters are accepted; audio delivery URLs and other private metadata stay hidden.
+
+API preflight read https://opensource.zalando.com/restful-api-guidelines/ on
+2026-10-08: rules 104 (owner/service authorization), 106 (compatible extension),
+118 (`thumbnail_url` snake_case) and 123 (null/absent compatibility) apply.

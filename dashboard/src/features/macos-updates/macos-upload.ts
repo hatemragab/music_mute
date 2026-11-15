@@ -99,7 +99,7 @@ export const hashDmg = (
       return;
     }
     const worker = new Worker(
-      new URL("../releases/apk-hash.worker.ts", import.meta.url),
+      new URL("./macos-hash.worker.ts", import.meta.url),
       { type: "module" },
     );
     const cleanup = () => {

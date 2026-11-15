@@ -87,12 +87,17 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
     }
     subscriptions.removeAll()
     owner = uid
+    LocalDiagnostics.emit(
+      "realtime.owner_changed", category: "realtime", data: ["authenticated": uid != nil],
+      userID: uid)
     attempts = 0
     resume()
   }
 
   func setForeground(_ value: Bool) {
     foreground = value
+    LocalDiagnostics.emit(
+      "lifecycle.foreground", category: "lifecycle", data: ["foreground": value], userID: owner)
     if value {
       resume()
     } else {
@@ -141,6 +146,9 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
     generation &+= 1
     let epoch = generation
     state = attempts == 0 ? .connecting : .reconnecting
+    LocalDiagnostics.emit(
+      "realtime.connecting", category: "realtime",
+      data: ["generation": epoch, "attempt": attempts], userID: owner)
     connection = Task { [weak self] in
       guard let self else { return }
       do {
@@ -165,10 +173,20 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
             while !Task.isCancelled {
               let text = try await task.receive()
               guard let self, epoch == self.generation else { return }
+              LocalDiagnostics.emit(
+                "realtime.received", category: "realtime",
+                data: [
+                  "generation": epoch, "phase": "client_received",
+                  "frame": LocalDiagnostics.payload(Data(text.utf8)),
+                ], userID: self.owner)
               try self.message(text)
             }
           } catch {
             guard let self, epoch == self.generation, !Task.isCancelled else { return }
+            LocalDiagnostics.emit(
+              "realtime.failed", category: "realtime", level: "warn",
+              data: ["generation": epoch, "error": LocalDiagnostics.error(error)],
+              userID: self.owner)
             self.reconnect()
           }
         }
@@ -203,6 +221,9 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
         throw JobsFailure.malformedResponse
       }
       stream = id
+      LocalDiagnostics.emit(
+        "realtime.ready", category: "realtime",
+        data: ["streamId": id, "generation": generation, "phase": "protocol_ready"], userID: owner)
       attempts = 0
       armWatchdog(65)
       for id in subscriptions.keys { subscribe(id) }
@@ -240,6 +261,12 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
     subscriptions[id] = subscription
     subscription.continuation.yield(
       try ApiWireJSON.response(JSONSerialization.data(withJSONObject: payload)))
+    LocalDiagnostics.emit(
+      "realtime.snapshot_processed", category: "realtime",
+      data: [
+        "streamId": stream, "subscriptionId": id, "resource": subscription.resource,
+        "sequence": sequence, "phase": "application_processed",
+      ], userID: owner)
     if subscriptions.values.allSatisfy({ $0.sequence > 0 }) { state = .live }
   }
 
@@ -262,9 +289,21 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
       let text = String(data: data, encoding: .utf8)
     else { return }
     let epoch = generation
+    let loggingOwner = owner
     Task { [weak self] in
       guard self?.generation == epoch else { return }
-      do { try await socket.send(text) } catch {
+      do {
+        try await socket.send(text)
+        LocalDiagnostics.emit(
+          "realtime.sent", category: "realtime",
+          data: [
+            "generation": epoch, "phase": "client_transport_sent",
+            "frame": LocalDiagnostics.payload(data),
+          ], userID: loggingOwner)
+      } catch {
+        LocalDiagnostics.emit(
+          "realtime.send_failed", category: "realtime", level: "warn",
+          data: ["generation": epoch, "error": LocalDiagnostics.error(error)], userID: loggingOwner)
         if self?.generation == epoch { self?.reconnect() }
       }
     }
@@ -277,6 +316,9 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
     }
   }
   private func reconnect() {
+    LocalDiagnostics.emit(
+      "realtime.retry", category: "realtime", level: "warn",
+      data: ["generation": generation, "attempt": attempts], userID: owner)
     disconnect()
     state = .reconnecting
     let delay = min(30, pow(2, Double(min(attempts, 5)))) + Double.random(in: 0...0.25)
@@ -288,6 +330,11 @@ private final class SocketRedirectPolicy: NSObject, URLSessionTaskDelegate {
     }
   }
   private func disconnect() {
+    if socket != nil {
+      LocalDiagnostics.emit(
+        "realtime.disconnected", category: "realtime", data: ["generation": generation],
+        userID: owner)
+    }
     generation &+= 1
     connection?.cancel()
     connection = nil

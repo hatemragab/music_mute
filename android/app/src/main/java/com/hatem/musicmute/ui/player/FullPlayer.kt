@@ -41,6 +41,7 @@ import com.hatem.musicmute.playback.PlaybackState
 import com.hatem.musicmute.playback.RepeatMode
 import com.hatem.musicmute.playback.upcomingTracks
 import com.hatem.musicmute.ui.design.*
+import com.hatem.musicmute.ui.library.LibraryThumbnail
 import com.hatem.musicmute.ui.library.libraryProblemLabel
 
 @Composable
@@ -79,13 +80,14 @@ internal fun FullPlayer(
             return@CreativePage
         }
 
-        val title = entry?.title?.takeIf { it.isNotBlank() }
+        val currentEntry = state.matchingLibraryEntry(entry)
+        val title = currentEntry?.title?.takeIf { it.isNotBlank() }
             ?: state.queue.getOrNull(state.currentIndex)?.title?.takeIf { it.isNotBlank() }
             ?: stringResource(R.string.voice_track)
         PlayerHero(
             title = title,
             original = state.original,
-            entry = entry,
+            entry = currentEntry,
             saveEnabled = !state.switching,
             saveLabel = playerSaveLabel(state.original),
             onSave = if (state.original) actions.saveOriginal else actions.saveVoice,
@@ -174,7 +176,7 @@ private fun PlayerHero(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PlayerArtwork(Modifier.size(artworkSize))
+            PlayerArtwork(entry?.thumbnailUrl, Modifier.size(artworkSize))
             Column(
                 Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -219,28 +221,34 @@ private fun PlayerHero(
 }
 
 @Composable
-private fun PlayerArtwork(modifier: Modifier = Modifier) {
+private fun PlayerArtwork(thumbnailUrl: String?, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(24.dp)
     val primary = MaterialTheme.colorScheme.primary
-    Box(
+    LibraryThumbnail(
+        thumbnailUrl,
         modifier
-            .clip(shape)
-            .background(
+            .border(1.dp, primary.copy(alpha = 0.18f), shape)
+            .clearAndSetSemantics { },
+        shape = shape,
+        shadowElevation = 12.dp,
+        decodeSizePx = 512,
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(
                 Brush.linearGradient(
                     listOf(primary.copy(alpha = 0.28f), MaterialTheme.colorScheme.surfaceContainerHighest),
                 ),
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "♫",
+                color = primary,
+                fontSize = 64.sp,
+                lineHeight = 64.sp,
+                fontWeight = FontWeight.Medium,
             )
-            .border(1.dp, primary.copy(alpha = 0.18f), shape)
-            .clearAndSetSemantics { },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            "♫",
-            color = primary,
-            fontSize = 64.sp,
-            lineHeight = 64.sp,
-            fontWeight = FontWeight.Medium,
-        )
+        }
     }
 }
 

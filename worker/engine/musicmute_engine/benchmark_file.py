@@ -102,9 +102,9 @@ def build_report(raw: dict[str, object], arguments: argparse.Namespace, engine_d
         "recipeDigest": first["recipeDigest"],
         "provider": arguments.provider,
         "serviceIdentity": raw["serviceIdentity"],
-        # DirectML registers a CPU provider; the profile must prove no CPU
-        # inference occurred. Do not confuse observed dispatch with disabling it.
-        "fallbackDisabled": False if directml else os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "0") == "0",
+        # New engine sessions disable both graph and exception CPU fallback.
+        # Older raw fixture/reports do not contain that policy evidence.
+        "fallbackDisabled": raw.get("gpuOnlyPolicy") == "onnxruntime-disable-cpu-fallback-v1" if directml else os.environ.get("PYTORCH_ENABLE_MPS_FALLBACK", "0") == "0",
         "providerDispatch": raw["providerDispatch"],
         "gpuModel": detected_gpu_model,
         "gpuModelSource": gpu_identity["source"] if gpu_identity else "system_profiler SPDisplaysDataType" if detected_gpu_model else "unavailable",
@@ -161,7 +161,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-engine-root", type=Path)
     parser.add_argument("--save-audio-dir", type=Path)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--directml-device-id", type=int, default=0)
+    parser.add_argument("--runtime-profile", choices=("legacy-service", "windows-user"), default="legacy-service")
+    parser.add_argument("--expected-user-sid")
     arguments = parser.parse_args()
+    if not 0 <= arguments.directml_device_id <= 15:
+        parser.error("DirectML device ordinal must be 0-15")
+    if arguments.runtime_profile == "windows-user" and (arguments.provider != "directml" or not arguments.expected_user_sid):
+        parser.error("windows-user requires DirectML and --expected-user-sid")
     paths = [arguments.fixture, arguments.work_root, arguments.release_root,
              arguments.model_cache, arguments.ffmpeg, arguments.ffprobe, arguments.report]
     paths += [path for path in (arguments.candidate_engine_root, arguments.save_audio_dir) if path is not None]
@@ -198,7 +205,8 @@ def main() -> int:
     arguments.benchmark_mode = True
     arguments.progress = emit
     arguments.iterations = 1 + arguments.warmup_runs + arguments.measured_runs
-    arguments.directml_device_id = 0
+    # Preserve the selected consumer ordinal instead of always benchmarking GPU 0.
+    arguments.directml_device_id = getattr(arguments, "directml_device_id", 0)
     try:
         raw = run_qualification(arguments)
         report = build_report(raw, arguments, engine_digest)

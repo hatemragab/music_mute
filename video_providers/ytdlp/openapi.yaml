@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MusicMute private yt-dlp audio acquisition
-  version: 1.0.0
+  version: 1.1.0
   x-audience: component-internal
   description: Native YouTube audio through one sticky proxy per attempt. Ten acquisitions overlap with at most two starts per rolling second. At most thirty seconds per attempt and 120 seconds across trusted attempts, including retry/admission waits. No video acquisition or FFmpeg. NestJS validates media and retains the existing private R2 and worker flow.
 security:
@@ -69,7 +69,7 @@ paths:
               description: Exact positive file byte count within max_bytes.
               schema: { type: integer, minimum: 1, maximum: 100000000 }
             X-Import-Extra-Data-Base64:
-              description: Optional sanitized schema-version-1 base64 JSON, at most 4096 ASCII characters. Provider is yt-dlp; included title/channel/format/audio metadata only. No URLs, credentials, tokens or raw extractor payload. Missing or invalid means null. Metadata never replaces independent backend probing.
+              description: Optional sanitized schema-version-1 base64 JSON, at most 4096 ASCII characters. Provider is yt-dlp; included title/channel/format/audio metadata and optional thumbnail_url from the same extraction. thumbnail_url is at most 2048 characters, HTTPS i.ytimg.com, with a /vi/ or /vi_webp/ image path bound to the requested video ID; only optional bounded sqp/rs thumbnail parameters are permitted. Missing or unsafe thumbnails are omitted without fetching an image or adding a metadata request. No other URLs, credentials, tokens or raw extractor payload. Missing or invalid metadata means null. Metadata never replaces independent backend probing.
               schema: { type: string, maxLength: 4096 }
           content:
             audio/webm:

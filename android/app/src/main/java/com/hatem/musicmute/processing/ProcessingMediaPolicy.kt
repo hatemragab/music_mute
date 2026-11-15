@@ -16,6 +16,13 @@ data class ProcessingMediaPolicy(
     val acceptNewJobs: Boolean = true,
     val acceptLongJobs: Boolean = true,
     val longJobThresholdSeconds: Double? = null,
+    // Presentation only. Never use this value for admission, retries, or existing work.
+    val linkImportEnabled: Boolean = false,
+    val linkImportDisabledCountries: List<String> = emptyList(),
+    val visitorCountry: String? = null,
+    val linkImportVisible: Boolean = false,
+    val linkImportReason: String? = null,
+    val linkImportPolicyRevision: Int? = null,
 ) {
     val localPreparationReady get() = (maxLocalSourceBytes ?: 0) > 0 && (maxPreparationSeconds ?: 0) > 0
     fun acceptsPrepared(bytes: Long, durationSeconds: Double): Boolean = bytes > 0 &&
@@ -64,7 +71,16 @@ data class ProcessingMediaPolicy(
                     duration, bytes, id, localBytes, preparationSeconds,
                     root.getValue("acceptNewJobs").jsonPrimitive.boolean,
                     root["acceptLongJobs"]?.jsonPrimitive?.booleanOrNull ?: false,
-                    limits.number("longJobThresholdSeconds")?.takeIf { it.isFinite() && it > 0 && it <= duration })
+                    limits.number("longJobThresholdSeconds")?.takeIf { it.isFinite() && it > 0 && it <= duration },
+                    linkImportEnabled = (root["linkImportEnabled"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true,
+                    linkImportDisabledCountries = (root["linkImportDisabledCountries"] as? JsonArray)
+                        ?.mapNotNull { (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.content }
+                        ?.filter { it.matches(Regex("[A-Z]{2}")) }?.distinct()?.sorted() ?: emptyList(),
+                    visitorCountry = (root["visitorCountry"] as? JsonPrimitive)?.takeIf { it.isString }?.content,
+                    linkImportVisible = (root["linkImportVisible"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true,
+                    linkImportReason = (root["linkImportReason"] as? JsonPrimitive)?.takeIf { it.isString }?.content,
+                    linkImportPolicyRevision = root.number("linkImportPolicyRevision")
+                        ?.takeIf { it.isFinite() && it >= 0 && it <= Int.MAX_VALUE && it % 1 == 0.0 }?.toInt())
             } catch (_: Exception) { throw JobsFailure(JobsProblem.PROCESSING_POLICY_INCOMPATIBLE) }
         }
     }

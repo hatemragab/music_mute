@@ -76,6 +76,51 @@ class FakeWarmupModel:
 
 
 class SeparatorIsolationTests(unittest.TestCase):
+    def test_detach_drops_private_audio_paths_and_callbacks_but_preserves_graph_and_stft(self) -> None:
+        fields = ("audio_file_path", "audio_file_base", "primary_source", "secondary_source",
+                  "primary_stem_output_path", "secondary_stem_output_path")
+        model = SimpleNamespace(**{name: object() for name in fields}, output_dir="private job",
+                                on_window_progress=lambda *_: None, model_run=object(), stft=object(),
+                                separation_timings={"private": 1}, input_subtype="PCM_16", input_bit_depth=16,
+                                grouped_windows=10, grouped_model_calls=10, grouped_max_batch=1)
+        model.clear_file_specific_paths = lambda: [setattr(model, name, None) for name in fields]
+        separator = KimSeparator.__new__(KimSeparator)
+        separator._separator = SimpleNamespace(model_instance=model, output_dir="private job")
+        separator.last_separation_timings = {"private": 1}
+        graph, stft = model.model_run, model.stft
+        separator.detach_job()
+        self.assertTrue(all(getattr(model, name) is None for name in fields))
+        self.assertIsNone(model.on_window_progress)
+        self.assertIsNone(model.input_subtype); self.assertIsNone(model.input_bit_depth)
+        self.assertEqual(model.output_dir, ""); self.assertEqual(separator._separator.output_dir, "")
+        self.assertEqual(separator.last_separation_timings, {}); self.assertEqual(model.separation_timings, {})
+        self.assertEqual(model.grouped_windows, 0)
+        self.assertIs(model.model_run, graph); self.assertIs(model.stft, stft)
+
+    def test_uncertain_upstream_detach_never_reports_release(self) -> None:
+        separator = KimSeparator.__new__(KimSeparator)
+        model = SimpleNamespace(primary_source=bytearray(b"private song"), clear_file_specific_paths=lambda: None)
+        separator._separator = SimpleNamespace(model_instance=model)
+        with self.assertRaises(SeparatorError):
+            separator.detach_job()
+        model.clear_file_specific_paths = Mock(side_effect=OSError("failed reset"))
+        with self.assertRaises(SeparatorError):
+            separator.detach_job()
+
+    def test_first_inference_timing_is_only_one_observed_directml_session(self) -> None:
+        separator = KimSeparator.__new__(KimSeparator)
+        separator.provider = "directml"
+        separator._timing_sessions = []
+        self.assertIsNone(separator.first_inference_seconds)
+        separator._timing_sessions = [SimpleNamespace()]
+        self.assertIsNone(separator.first_inference_seconds)
+        separator._timing_sessions[0].musicmute_first_inference_seconds = 0.125
+        self.assertEqual(separator.first_inference_seconds, 0.125)
+        separator._timing_sessions.append(SimpleNamespace(musicmute_first_inference_seconds=0.2))
+        self.assertIsNone(separator.first_inference_seconds)
+        separator._timing_sessions.pop()
+        separator.provider = "mps"
+        self.assertIsNone(separator.first_inference_seconds)
     def test_default_group_is_provider_specific(self) -> None:
         with patch("musicmute_engine.separator.verify_model", return_value=Path("model.onnx")), patch.object(KimSeparator, "_load"), patch.object(KimSeparator, "_warm_up"):
             self.assertEqual(KimSeparator("mps", Path("model.onnx")).group_size, 2)

@@ -172,6 +172,57 @@ describe("worker control-plane client", () => {
     },
   );
 
+  it("recovers from a non-JSON HTTP 521 response without changing the claim identity", async () => {
+    const bodies: string[] = [];
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return bodies.length === 1
+        ? new Response("Origin unavailable", { status: 521 })
+        : json({ claim: null, serverTime: "2026-01-01T00:00:00.000Z" });
+    });
+    const client = new WorkerControlPlaneClient({
+      baseUrl: "http://127.0.0.1",
+      credential: "x".repeat(43),
+      allowInsecureLoopback: true,
+      fetch: fetchMock as unknown as typeof fetch,
+      maxAttempts: 2,
+    });
+
+    await expect(
+      client.claim(
+        { workerId, sessionId, incarnation },
+        "gpu-0",
+        0,
+        1,
+        "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea",
+      ),
+    ).resolves.toMatchObject({ claim: null });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it("reports an exhausted HTTP 521 response as retryable", async () => {
+    const client = new WorkerControlPlaneClient({
+      baseUrl: "http://127.0.0.1",
+      credential: "x".repeat(43),
+      allowInsecureLoopback: true,
+      fetch: vi.fn(
+        async () => new Response("Origin unavailable", { status: 521 }),
+      ) as unknown as typeof fetch,
+      maxAttempts: 1,
+    });
+
+    await expect(
+      client.claim(
+        { workerId, sessionId, incarnation },
+        "gpu-0",
+        0,
+        1,
+        "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea",
+      ),
+    ).rejects.toMatchObject({ code: "HTTP_521", status: 521, retryable: true });
+  });
+
   it("validates the machine identity returned when a session opens", async () => {
     const client = new WorkerControlPlaneClient({
       baseUrl: "http://localhost",

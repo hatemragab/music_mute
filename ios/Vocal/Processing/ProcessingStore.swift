@@ -500,8 +500,19 @@ actor ProcessingStore {
         try persist(snapshot)
       }
       snapshots[owner] = snapshot
+      LocalDiagnostics.emit(
+        "storage.read", category: "storage",
+        data: [
+          "store": "processing", "result": "completed", "operations": snapshot.operations.count,
+        ], userID: owner)
       return snapshot
-    } catch { throw ProcessingStoreFailure.corruptStore }
+    } catch {
+      LocalDiagnostics.emit(
+        "storage.failed", category: "storage", level: "warn",
+        data: ["store": "processing", "operation": "read", "error": LocalDiagnostics.error(error)],
+        userID: owner)
+      throw ProcessingStoreFailure.corruptStore
+    }
   }
 
   private func persist(_ snapshot: Snapshot) throws {
@@ -515,7 +526,19 @@ actor ProcessingStore {
       }
       try JSONEncoder().encode(snapshot).write(to: fileURL(snapshot.ownerUid), options: .atomic)
       snapshots[snapshot.ownerUid] = snapshot
-    } catch { throw ProcessingStoreFailure.storage }
+      LocalDiagnostics.emit(
+        "storage.write", category: "storage",
+        data: [
+          "store": "processing", "result": "completed", "operations": snapshot.operations.count,
+        ], userID: snapshot.ownerUid)
+    } catch {
+      LocalDiagnostics.emit(
+        "storage.failed", category: "storage", level: "warn",
+        data: [
+          "store": "processing", "operation": "write", "error": LocalDiagnostics.error(error),
+        ], userID: snapshot.ownerUid)
+      throw ProcessingStoreFailure.storage
+    }
   }
 
   private func fileURL(_ owner: String) -> URL {

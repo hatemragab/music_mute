@@ -11,7 +11,7 @@ import java.util.UUID
 /** Opt-in framework checks; no notifications posted, media played or update downloaded. */
 internal fun checkNotificationBadges(context: Context) {
     val manager = context.getSystemService(NotificationManager::class.java)
-    for (create in listOf(::createPlaybackNotificationChannel, ::createAppUpdateNotificationChannel)) {
+    for (create in listOf(::createPlaybackNotificationChannel)) {
         val created = create(context)
         val saved = requireNotNull(manager.getNotificationChannel(created.id))
         check(!saved.canShowBadge()) { "${created.id} must not create a launcher dot" }
@@ -22,10 +22,8 @@ internal fun checkNotificationBadges(context: Context) {
         check(registered.importance == saved.importance)
         check(registered.sound == saved.sound)
     }
-    check(PLAYBACK_NOTIFICATION_CHANNEL != APP_UPDATE_NOTIFICATION_CHANNEL)
     createProcessingNotificationChannel(context)
     check(PLAYBACK_NOTIFICATION_CHANNEL != PROCESSING_NOTIFICATION_CHANNEL)
-    check(APP_UPDATE_NOTIFICATION_CHANNEL != PROCESSING_NOTIFICATION_CHANNEL)
     // Outcome alerts keep their existing channel and user-controlled badge preference.
     check(manager.getNotificationChannel(PROCESSING_NOTIFICATION_CHANNEL) != null)
 

@@ -61,12 +61,16 @@ describe('snake_case HTTP contract', () => {
       handle: () =>
         of({
           requestId: 'id',
+          installationProfile: 'windows-user',
           nextCursor: null,
           items: [{ createdAt: date, input: { contentType: 'audio/mpeg' } }],
           grant: { headers: { 'Content-Type': 'audio/mpeg' } },
           signed: {
             keyId: 'key',
-            metadata: { releaseVersion: '1.0.0' },
+            metadata: {
+              releaseVersion: '1.0.0',
+              installationProfile: 'windows-user',
+            },
           },
         }),
     };
@@ -75,10 +79,17 @@ describe('snake_case HTTP contract', () => {
       await firstValueFrom(response.intercept({} as ExecutionContext, next)),
     ).toEqual({
       request_id: 'id',
+      installation_profile: 'windows-user',
       next_cursor: null,
       items: [{ created_at: date, input: { content_type: 'audio/mpeg' } }],
       grant: { headers: { 'Content-Type': 'audio/mpeg' } },
-      signed: { key_id: 'key', metadata: { releaseVersion: '1.0.0' } },
+      signed: {
+        key_id: 'key',
+        metadata: {
+          releaseVersion: '1.0.0',
+          installationProfile: 'windows-user',
+        },
+      },
     });
   });
 });

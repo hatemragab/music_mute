@@ -3,26 +3,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LocalConfig } from "./config.js";
 
-export interface GuestCredential {
-  token: string;
-  expires_at: string;
-}
-export interface GuestCredentialStore {
-  load(): Promise<GuestCredential | null>;
-  save(credential: GuestCredential): Promise<void>;
-}
-export function validGuestCredential(value: unknown): value is GuestCredential {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const credential = value as Record<string, unknown>;
-  return (
-    Object.keys(credential).length === 2 &&
-    typeof credential.token === "string" &&
-    /^[A-Za-z0-9_-]{43,128}(?![\s\S])/.test(credential.token) &&
-    typeof credential.expires_at === "string" &&
-    credential.expires_at.length <= 40 &&
-    Number.isFinite(Date.parse(credential.expires_at))
-  );
-}
+import {
+  validGuestCredential,
+  type GuestCredential,
+  type GuestCredentialStore,
+} from "./guest-credential-model.js";
+export { validGuestCredential } from "./guest-credential-model.js";
+export type {
+  GuestCredential,
+  GuestCredentialStore,
+} from "./guest-credential-model.js";
 
 /** Signed native helper uses macOS Security directly; secrets travel only in pipes. */
 export class MacGuestCredentialStore implements GuestCredentialStore {

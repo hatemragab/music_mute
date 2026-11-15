@@ -14,6 +14,8 @@ with the currently verified destinations.
 - Product explanation, supported-input caveats, three-step journey, features,
   a synchronized original/voice-only listening demo, real-app showcase, privacy
   controls, honest platform statuses, FAQ, and `#downloads` anchor.
+- Above-the-fold direct actions for the verified web app and Chrome extension,
+  with the Mac companion requirement and pending release links stated alongside them.
 - Centralized public destinations in `src/product-links.ts`.
 - Reciprocal English/Arabic crawl metadata, canonical URLs, and the existing Solo
   Signal favicon.
@@ -26,10 +28,15 @@ with the currently verified destinations.
   excluding credentials, dependencies, generated output, test artifacts, and
   unrelated repository files.
 
-The only currently advertised launch action is
-[`https://app.music-mute.com`](https://app.music-mute.com). Android, iOS, macOS,
-and Chrome show accurate pending statuses without store badges or unverified download
-links.
+The currently advertised public destinations are the
+[`MusicMute web app`](https://app.music-mute.com) and the verified
+[`MusicMute Local Chrome extension`](https://chromewebstore.google.com/detail/musicmute-local/acmgefmmndomcpdlgnafkjbgobinllep).
+The extension requires the separate MusicMute Local companion on a prepared Apple
+silicon Mac. Android, iOS, and a public-ready macOS download keep accurate pending
+statuses without unverified store badges or download links.
+The Downloads section also marks Windows as a pending public release: Windows 10
+22H2/build 19045 and Windows 11, native x64, with GPU preparation required. This
+copy provides no Windows installer link or claim of a verified public release.
 
 ## Local development
 
@@ -127,3 +134,14 @@ This endpoint enables verification; URL submission is a separate operation.
 
 See [`docs/design-research.md`](docs/design-research.md) for the open-source template
 review and the reason this page uses a small custom implementation.
+
+## Private local diagnostics
+
+From the repository root, start `node tools/local-logging/cli.mjs up`, then
+`node tools/local-logging/cli.mjs run landing-page`. The Vite development server logs
+HTTP, raw WebSocket reception/sends, lifecycle, actions, storage operation metadata
+and safe errors. `globalThis.__MUSICMUTE_LOCAL_LOG_STATUS__` reports bounded queue,
+delivery, drops and failures. Payload, console and collector controls are separate;
+release builds compile the collector gate off even when development environment
+variables are supplied. See the [local logging guide](../docs/local-logging/README.md)
+for privacy, retained files, source coverage, Logdy and read-only MCP setup.

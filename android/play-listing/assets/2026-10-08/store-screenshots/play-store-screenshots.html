@@ -1,0 +1,1624 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MusicMute Play screenshot preview</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --brand: #123c37;
+        --brand-deep: #071b1a;
+        --mint: #96e6c7;
+        --mint-soft: #d5fff0;
+        --orange: #ff814a;
+        --bg: #101115;
+        --surface: #191b21;
+        --surface-2: #202229;
+        --surface-3: #2b2d35;
+        --line: #3a3c47;
+        --text: #f2f0f5;
+        --muted: #b9b8c3;
+        --success: #48c847;
+        --shadow: rgba(0, 0, 0, 0.42);
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #071210;
+      }
+
+      body.asset-mode {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .poster {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        background:
+          radial-gradient(circle at 83% 8%, rgba(255, 129, 74, 0.24), transparent 25%),
+          radial-gradient(circle at 10% 52%, rgba(150, 230, 199, 0.18), transparent 31%),
+          linear-gradient(155deg, #123c37 0%, #0c2d2b 50%, #071b1a 100%);
+        color: white;
+      }
+
+      .poster.phone {
+        width: 1080px;
+        height: 1920px;
+      }
+
+      .poster.tablet {
+        width: 1440px;
+        height: 2560px;
+      }
+
+      .poster::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        width: 760px;
+        height: 760px;
+        right: -260px;
+        top: 300px;
+        border-radius: 50%;
+        border: 1px solid rgba(150, 230, 199, 0.15);
+        box-shadow:
+          0 0 0 54px rgba(150, 230, 199, 0.025),
+          0 0 0 112px rgba(150, 230, 199, 0.02);
+      }
+
+      .poster::after {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        inset: 0;
+        opacity: 0.11;
+        background-image: radial-gradient(rgba(213, 255, 240, 0.85) 1.2px, transparent 1.2px);
+        background-size: 34px 34px;
+        mask-image: linear-gradient(to bottom, transparent, black 20%, black 72%, transparent 95%);
+      }
+
+      .brand-line {
+        position: absolute;
+        top: 56px;
+        left: 70px;
+        right: 70px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        height: 58px;
+        font-size: 28px;
+        font-weight: 760;
+        letter-spacing: -0.02em;
+      }
+
+      .tablet .brand-line {
+        top: 72px;
+        left: 92px;
+        right: 92px;
+        height: 76px;
+        gap: 22px;
+        font-size: 36px;
+      }
+
+      .brand-line img {
+        width: 52px;
+        height: 52px;
+        border-radius: 13px;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+      }
+
+      .tablet .brand-line img {
+        width: 68px;
+        height: 68px;
+        border-radius: 17px;
+      }
+
+      .series-mark {
+        margin-inline-start: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: rgba(213, 255, 240, 0.72);
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        direction: ltr;
+      }
+
+      .tablet .series-mark {
+        font-size: 24px;
+        gap: 16px;
+      }
+
+      .series-mark::before {
+        content: "";
+        width: 58px;
+        height: 2px;
+        background: rgba(150, 230, 199, 0.55);
+      }
+
+      .headline-wrap {
+        position: absolute;
+        top: 150px;
+        left: 68px;
+        right: 68px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 42px;
+      }
+
+      .tablet .headline-wrap {
+        top: 190px;
+        left: 92px;
+        right: 92px;
+        gap: 60px;
+      }
+
+      .headline {
+        max-width: 850px;
+        margin: 0;
+        font-size: 78px;
+        line-height: 0.98;
+        letter-spacing: -0.055em;
+        font-weight: 820;
+        text-wrap: balance;
+      }
+
+      .tablet .headline {
+        max-width: 1100px;
+        font-size: 104px;
+      }
+
+      .locale-ar .headline {
+        font-family: Tahoma, Arial, sans-serif;
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+      }
+
+      .headline em {
+        color: var(--mint);
+        font-style: normal;
+      }
+
+      .signal-orbit {
+        flex: 0 0 auto;
+        width: 114px;
+        height: 114px;
+        border: 1px solid rgba(150, 230, 199, 0.34);
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        position: relative;
+      }
+
+      .tablet .signal-orbit {
+        width: 148px;
+        height: 148px;
+      }
+
+      .signal-orbit::before,
+      .signal-orbit::after {
+        content: "";
+        position: absolute;
+        border-radius: 50%;
+        border: 1px solid rgba(150, 230, 199, 0.17);
+      }
+
+      .signal-orbit::before {
+        inset: 15px;
+      }
+
+      .signal-orbit::after {
+        inset: 31px;
+      }
+
+      .signal-orbit span {
+        width: 9px;
+        height: 38px;
+        border-radius: 10px;
+        background: var(--orange);
+        box-shadow:
+          -20px 7px 0 -2px rgba(255, 129, 74, 0.72),
+          20px 7px 0 -2px rgba(255, 129, 74, 0.72);
+      }
+
+      .device {
+        position: absolute;
+        background: #050609;
+        border: 3px solid rgba(242, 240, 245, 0.22);
+        box-shadow:
+          0 58px 120px rgba(0, 0, 0, 0.5),
+          0 0 0 2px rgba(150, 230, 199, 0.08) inset;
+        overflow: hidden;
+      }
+
+      .phone .device {
+        left: 160px;
+        top: 430px;
+        width: 760px;
+        height: 1450px;
+        padding: 16px;
+        border-radius: 90px;
+      }
+
+      .tablet .device {
+        left: 110px;
+        top: 585px;
+        width: 1220px;
+        height: 1850px;
+        padding: 20px;
+        border-radius: 80px;
+      }
+
+      .device::before {
+        content: "";
+        position: absolute;
+        z-index: 3;
+        top: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 152px;
+        height: 26px;
+        border-radius: 0 0 19px 19px;
+        background: #050609;
+      }
+
+      .tablet .device::before {
+        width: 18px;
+        height: 18px;
+        top: 17px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 5px #11151b;
+      }
+
+      .ui-screen {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        border-radius: 72px;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .tablet .ui-screen {
+        border-radius: 59px;
+      }
+
+      .statusbar {
+        height: 62px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 34px;
+        color: rgba(242, 240, 245, 0.82);
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .tablet .statusbar {
+        height: 68px;
+        padding: 0 42px;
+        font-size: 19px;
+      }
+
+      .status-icons {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .status-icons i {
+        display: block;
+        width: 22px;
+        height: 12px;
+        border: 2px solid currentColor;
+        border-radius: 4px;
+        opacity: 0.9;
+      }
+
+      .status-icons i:last-child {
+        width: 27px;
+        position: relative;
+      }
+
+      .status-icons i:last-child::before {
+        content: "";
+        position: absolute;
+        inset: 2px;
+        width: 16px;
+        border-radius: 2px;
+        background: currentColor;
+      }
+
+      .app-region {
+        height: calc(100% - 62px);
+        display: flex;
+        overflow: hidden;
+      }
+
+      .tablet .app-region {
+        height: calc(100% - 68px);
+      }
+
+      .scene {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .page {
+        height: 100%;
+        padding: 24px 26px 90px;
+        overflow: hidden;
+      }
+
+      .tablet .page {
+        width: min(100%, 880px);
+        margin: 0 auto;
+        padding: 34px 38px 42px;
+      }
+
+      .appbar {
+        height: 62px;
+        display: flex;
+        align-items: center;
+        gap: 13px;
+      }
+
+      .wordmark {
+        font-size: 27px;
+        font-weight: 760;
+        letter-spacing: -0.03em;
+      }
+
+      .live {
+        margin-inline-start: auto;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--muted);
+        font-size: 17px;
+        font-weight: 650;
+      }
+
+      .live::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--success);
+        box-shadow: 0 0 0 5px rgba(72, 200, 71, 0.12);
+      }
+
+      .logo-bars {
+        height: 36px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .logo-bars span {
+        display: block;
+        width: 5px;
+        border-radius: 8px;
+        background: var(--orange);
+      }
+
+      .logo-bars span:nth-child(1) { height: 20px; opacity: 0.7; }
+      .logo-bars span:nth-child(2) { height: 34px; }
+      .logo-bars span:nth-child(3) { height: 24px; opacity: 0.82; }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid rgba(143, 142, 156, 0.3);
+        border-radius: 24px;
+        padding: 22px;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.08);
+      }
+
+      .card + .card {
+        margin-top: 14px;
+      }
+
+      .section-title {
+        margin: 26px 0 14px;
+        font-size: 26px;
+        line-height: 1.15;
+        letter-spacing: -0.025em;
+        font-weight: 760;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .primary-button {
+        height: 60px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        border-radius: 18px;
+        background: var(--orange);
+        color: #211007;
+        font-size: 20px;
+        font-weight: 780;
+        box-shadow: 0 12px 26px rgba(255, 129, 74, 0.16);
+      }
+
+      .limits {
+        margin-top: 18px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 18px;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .limit {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .limit::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--orange);
+      }
+
+      .utility-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .utility-copy strong,
+      .task-title,
+      .track-title {
+        display: block;
+        font-size: 18px;
+        font-weight: 730;
+        letter-spacing: -0.015em;
+      }
+
+      .utility-copy span,
+      .task-meta,
+      .track-meta {
+        display: block;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .toggle {
+        width: 48px;
+        height: 28px;
+        padding: 4px;
+        border-radius: 30px;
+        background: var(--orange);
+      }
+
+      .toggle::after {
+        content: "";
+        display: block;
+        width: 20px;
+        height: 20px;
+        margin-inline-start: auto;
+        border-radius: 50%;
+        background: #211007;
+      }
+
+      .task-card {
+        border-radius: 22px;
+        overflow: hidden;
+        border: 1px solid rgba(143, 142, 156, 0.28);
+        background: var(--surface);
+      }
+
+      .task-body {
+        padding: 18px 18px 14px;
+      }
+
+      .task-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .source-pill,
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 30px;
+        background: rgba(255, 129, 74, 0.1);
+        color: var(--orange);
+        font-size: 13px;
+        font-weight: 720;
+      }
+
+      .task-date {
+        margin-inline-start: auto;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status-box {
+        margin-top: 14px;
+        padding: 13px 14px;
+        border-radius: 15px;
+        background: #0c0d10;
+      }
+
+      .status-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 690;
+      }
+
+      .status-line::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--orange);
+      }
+
+      .status-line.ready::before {
+        background: var(--success);
+      }
+
+      .progress-track {
+        height: 7px;
+        margin-top: 12px;
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--surface-3);
+      }
+
+      .progress-track > span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--orange), #ffb18d);
+      }
+
+      .task-footer {
+        min-height: 52px;
+        display: flex;
+        align-items: center;
+        padding: 0 18px;
+        background: rgba(255, 129, 74, 0.055);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .task-footer strong {
+        margin-inline-start: auto;
+        color: var(--orange);
+      }
+
+      .bottom-nav {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 14px;
+        height: 70px;
+        display: flex;
+        align-items: stretch;
+        padding: 5px;
+        border: 1px solid rgba(143, 142, 156, 0.18);
+        border-radius: 24px;
+        background: rgba(16, 17, 21, 0.96);
+        box-shadow: 0 -18px 44px rgba(16, 17, 21, 0.72);
+      }
+
+      .bottom-item {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        border-radius: 18px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 680;
+      }
+
+      .bottom-item.active {
+        color: var(--orange);
+        background: rgba(255, 129, 74, 0.09);
+      }
+
+      .nav-rail {
+        width: 142px;
+        flex: 0 0 142px;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        padding: 42px 14px 24px;
+        border-inline-end: 1px solid rgba(143, 142, 156, 0.2);
+        background: #0d0f13;
+      }
+
+      .tablet .nav-rail {
+        display: flex;
+      }
+
+      .nav-rail .rail-item {
+        width: 104px;
+        min-height: 74px;
+        border-radius: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 15px;
+        font-weight: 680;
+      }
+
+      .nav-rail .rail-item.active {
+        color: var(--orange);
+        background: rgba(255, 129, 74, 0.1);
+      }
+
+      .tablet .bottom-nav {
+        display: none;
+      }
+
+      .processing-header,
+      .player-header,
+      .library-header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        height: 62px;
+      }
+
+      .back-dot {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 26px;
+      }
+
+      .screen-title {
+        font-size: 24px;
+        font-weight: 760;
+        letter-spacing: -0.025em;
+      }
+
+      .detail-title {
+        margin: 24px 0 5px;
+        font-size: 34px;
+        line-height: 1.08;
+        font-weight: 780;
+        letter-spacing: -0.035em;
+      }
+
+      .detail-state {
+        color: var(--orange);
+        font-size: 17px;
+        font-weight: 720;
+      }
+
+      .big-progress {
+        margin-top: 20px;
+        padding: 22px;
+        border-radius: 24px;
+        background: var(--surface);
+        border: 1px solid rgba(143, 142, 156, 0.3);
+      }
+
+      .progress-number {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .progress-number strong {
+        font-size: 54px;
+        letter-spacing: -0.055em;
+      }
+
+      .progress-number span {
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .timeline {
+        margin-top: 18px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .timeline-row {
+        display: grid;
+        grid-template-columns: 24px 1fr auto;
+        align-items: center;
+        gap: 12px;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .timeline-row::before {
+        content: "";
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid var(--line);
+      }
+
+      .timeline-row.done,
+      .timeline-row.active {
+        color: var(--text);
+      }
+
+      .timeline-row.done::before {
+        border-color: var(--success);
+        background: var(--success);
+        box-shadow: inset 0 0 0 5px var(--surface);
+      }
+
+      .timeline-row.active::before {
+        border-color: var(--orange);
+        box-shadow: 0 0 0 5px rgba(255, 129, 74, 0.12);
+      }
+
+      .timing-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .timing-grid .card {
+        padding: 18px;
+      }
+
+      .timing-grid small {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .timing-grid strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 25px;
+      }
+
+      .player-hero {
+        display: grid;
+        grid-template-columns: 178px 1fr;
+        align-items: center;
+        gap: 24px;
+        margin-top: 12px;
+      }
+
+      .artwork {
+        aspect-ratio: 1;
+        border-radius: 32px;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 28% 20%, rgba(255, 129, 74, 0.35), transparent 38%),
+          linear-gradient(145deg, rgba(255, 129, 74, 0.2), var(--surface-3));
+        border: 1px solid rgba(255, 129, 74, 0.22);
+        color: var(--orange);
+        font-size: 76px;
+      }
+
+      .player-kind {
+        color: var(--orange);
+        font-size: 15px;
+        font-weight: 760;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      .player-title {
+        margin-top: 10px;
+        font-size: 28px;
+        line-height: 1.12;
+        font-weight: 780;
+        letter-spacing: -0.03em;
+      }
+
+      .save-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 18px;
+        color: var(--orange);
+        font-size: 15px;
+        font-weight: 720;
+      }
+
+      .selector {
+        display: flex;
+        height: 54px;
+        margin-top: 24px;
+        padding: 4px;
+        border-radius: 16px;
+        background: #0c0d10;
+      }
+
+      .selector span {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
+        color: var(--muted);
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .selector .active {
+        color: #2b170d;
+        background: #4b3025;
+        box-shadow: inset 0 0 0 1px rgba(255, 129, 74, 0.2);
+      }
+
+      .wave-shell {
+        margin-top: 28px;
+      }
+
+      .wave-bars {
+        height: 96px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        overflow: hidden;
+      }
+
+      .wave-bars i {
+        display: block;
+        flex: 1;
+        min-width: 2px;
+        border-radius: 20px;
+        background: var(--orange);
+        opacity: 0.72;
+      }
+
+      .wave-bars i:nth-child(n + 17) {
+        opacity: 0.28;
+      }
+
+      .time-row {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .transport {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1.5fr 1fr 1fr;
+        align-items: center;
+        gap: 8px;
+        margin-top: 26px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 30px;
+      }
+
+      .play-button {
+        width: 78px;
+        height: 78px;
+        margin: 0 auto;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--orange);
+        color: #211007;
+        font-size: 33px;
+        box-shadow: 0 18px 34px rgba(255, 129, 74, 0.2);
+      }
+
+      .tool-strip {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        margin-top: 28px;
+        min-height: 82px;
+        border-radius: 20px;
+        overflow: hidden;
+        border: 1px solid rgba(143, 142, 156, 0.28);
+        background: var(--surface);
+      }
+
+      .tool {
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .tool + .tool {
+        border-inline-start: 1px solid rgba(143, 142, 156, 0.24);
+      }
+
+      .tool b {
+        color: var(--orange);
+        font-size: 18px;
+      }
+
+      .library-wave {
+        height: 88px;
+        margin-top: -4px;
+        opacity: 0.7;
+      }
+
+      .search-row {
+        display: grid;
+        grid-template-columns: 1fr 126px;
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .search,
+      .sort {
+        height: 50px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 15px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .filters {
+        height: 52px;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 680;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .filters .active {
+        color: var(--orange);
+        position: relative;
+      }
+
+      .filters .active::after {
+        content: "";
+        position: absolute;
+        left: 25%;
+        right: 25%;
+        bottom: -12px;
+        height: 2px;
+        background: var(--orange);
+      }
+
+      .track-card {
+        display: grid;
+        grid-template-columns: 56px 1fr auto;
+        align-items: center;
+        gap: 14px;
+        min-height: 86px;
+        margin-top: 10px;
+        padding: 13px 15px;
+        border-radius: 20px;
+        border: 1px solid rgba(143, 142, 156, 0.28);
+        background: var(--surface);
+      }
+
+      .track-icon {
+        width: 56px;
+        height: 56px;
+        display: grid;
+        place-items: center;
+        border-radius: 16px;
+        background: var(--surface-3);
+        color: var(--orange);
+        font-size: 26px;
+      }
+
+      .track-more {
+        color: var(--muted);
+        font-size: 24px;
+      }
+
+      .mini-player {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        bottom: 88px;
+        height: 78px;
+        display: grid;
+        grid-template-columns: 46px 1fr auto auto;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 129, 74, 0.22);
+        background: rgba(25, 27, 33, 0.98);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);
+      }
+
+      .tablet .mini-player {
+        position: static;
+        margin-top: 16px;
+        height: 84px;
+      }
+
+      .mini-art {
+        width: 46px;
+        height: 46px;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
+        background: var(--surface-3);
+        color: var(--orange);
+      }
+
+      .nav-icon,
+      .inline-icon {
+        width: 24px;
+        height: 24px;
+        display: inline-grid;
+        place-items: center;
+      }
+
+      .nav-icon svg,
+      .inline-icon svg {
+        width: 100%;
+        height: 100%;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .locale-ar .page,
+      .locale-ar .nav-rail,
+      .locale-ar .bottom-nav {
+        font-family: Tahoma, Arial, sans-serif;
+      }
+
+      .tablet .section-title {
+        font-size: 30px;
+      }
+
+      .tablet .card {
+        padding: 26px;
+      }
+
+      .tablet .primary-button {
+        height: 66px;
+        font-size: 22px;
+      }
+
+      .tablet .task-card {
+        border-radius: 25px;
+      }
+
+      .tablet .player-hero {
+        grid-template-columns: 230px 1fr;
+        gap: 34px;
+      }
+
+      .tablet .player-title {
+        font-size: 36px;
+      }
+
+      .tablet .wave-bars {
+        height: 122px;
+      }
+
+      .tablet .detail-title {
+        font-size: 44px;
+      }
+
+      .tablet .progress-number strong {
+        font-size: 72px;
+      }
+
+      .gallery {
+        min-height: 100vh;
+        padding: 42px;
+        background: #091311;
+        color: white;
+      }
+
+      .gallery-header {
+        width: min(1500px, 100%);
+        margin: 0 auto 28px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+      }
+
+      .gallery h1 {
+        margin: 0;
+        font-size: 44px;
+        letter-spacing: -0.04em;
+      }
+
+      .gallery p {
+        margin: 8px 0 0;
+        color: #aebdb7;
+      }
+
+      .gallery-controls {
+        display: flex;
+        gap: 8px;
+      }
+
+      .gallery button {
+        border: 1px solid #32534b;
+        border-radius: 999px;
+        padding: 10px 16px;
+        background: transparent;
+        color: #d5fff0;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .gallery button.active {
+        background: #96e6c7;
+        color: #07201c;
+      }
+
+      .gallery-grid {
+        width: min(1500px, 100%);
+        margin: auto;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 24px;
+      }
+
+      .preview-card {
+        margin: 0;
+        padding: 12px;
+        border: 1px solid #29433d;
+        border-radius: 24px;
+        background: #101b18;
+      }
+
+      .preview-card img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 9 / 16;
+        object-fit: cover;
+        border-radius: 15px;
+        background: #123c37;
+      }
+
+      .preview-card figcaption {
+        padding: 12px 4px 4px;
+        color: #d5fff0;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .contact {
+        width: 1800px;
+        height: 1120px;
+        overflow: hidden;
+        padding: 46px 58px 54px;
+        background:
+          radial-gradient(circle at 86% 0%, rgba(255, 129, 74, 0.16), transparent 32%),
+          #071210;
+        color: white;
+      }
+
+      .contact-head {
+        height: 120px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .contact h1 {
+        margin: 0;
+        font-size: 44px;
+        line-height: 1.1;
+        letter-spacing: -0.04em;
+        white-space: nowrap;
+      }
+
+      .contact p {
+        margin: 8px 0 0;
+        color: #aebdb7;
+        font-size: 20px;
+      }
+
+      .contact-badge {
+        padding: 10px 18px;
+        border: 1px solid #32534b;
+        border-radius: 999px;
+        color: #96e6c7;
+        font-size: 18px;
+        font-weight: 760;
+      }
+
+      .contact-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 30px;
+      }
+
+      .contact figure {
+        margin: 0;
+        padding: 10px;
+        border: 1px solid #29433d;
+        border-radius: 22px;
+        background: #101b18;
+      }
+
+      .contact img {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 9 / 16;
+        object-fit: cover;
+        border-radius: 14px;
+      }
+
+      .contact figcaption {
+        height: 50px;
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+        color: #d5fff0;
+        font-size: 17px;
+        font-weight: 730;
+      }
+    </style>
+  </head>
+  <body>
+    <template id="scene-home-en">
+      <div class="page">
+        <div class="appbar"><div class="logo-bars"><span></span><span></span><span></span></div><div class="wordmark">MusicMute</div><div class="live">Live</div></div>
+        <div class="card">
+          <div class="primary-button"><span class="inline-icon" data-icon="folder"></span>Choose audio file</div>
+          <div class="limits"><span class="limit">Audio or video</span><span class="limit">Up to 20 min</span><span class="limit">Up to 50 MB</span></div>
+        </div>
+        <div class="card utility-row">
+          <div class="utility-copy"><strong>Trim silent gaps</strong><span>Before cloud processing</span></div><div class="toggle"></div>
+        </div>
+        <h2 class="section-title">Recent processing</h2>
+        <div class="task-card">
+          <div class="task-body"><div class="task-top"><span class="source-pill">Audio file</span><span class="task-date">Today, 9:24</span></div><span class="task-title">Studio note 07</span><div class="status-box"><div class="status-line">Removing music</div><div class="progress-track"><span style="width:68%"></span></div></div></div>
+          <div class="task-footer">Private cloud processing <strong>68%</strong></div>
+        </div>
+        <div class="bottom-nav" data-active="home"></div>
+      </div>
+    </template>
+
+    <template id="scene-home-ar">
+      <div class="page" dir="rtl">
+        <div class="appbar"><div class="logo-bars"><span></span><span></span><span></span></div><div class="wordmark">MusicMute</div><div class="live">مباشر</div></div>
+        <div class="card">
+          <div class="primary-button"><span class="inline-icon" data-icon="folder"></span>اختر ملف صوت أو فيديو</div>
+          <div class="limits"><span class="limit">صوت أو فيديو</span><span class="limit">حتى ٢٠ دقيقة</span><span class="limit">حتى ٥٠ م.ب</span></div>
+        </div>
+        <div class="card utility-row">
+          <div class="utility-copy"><strong>قصّ فترات الصمت</strong><span>قبل المعالجة السحابية</span></div><div class="toggle"></div>
+        </div>
+        <h2 class="section-title">المعالجة الأخيرة</h2>
+        <div class="task-card">
+          <div class="task-body"><div class="task-top"><span class="source-pill">ملف صوتي</span><span class="task-date">اليوم، ٩:٢٤</span></div><span class="task-title">ملاحظة الاستوديو ٠٧</span><div class="status-box"><div class="status-line">جارٍ إزالة الموسيقى</div><div class="progress-track"><span style="width:68%"></span></div></div></div>
+          <div class="task-footer">معالجة سحابية خاصة <strong>٦٨٪</strong></div>
+        </div>
+        <div class="bottom-nav" data-active="home"></div>
+      </div>
+    </template>
+
+    <template id="scene-processing-en">
+      <div class="page">
+        <div class="processing-header"><div class="back-dot">‹</div><div class="screen-title">Processing details</div></div>
+        <h2 class="detail-title">Studio note 07</h2><div class="detail-state">Removing music</div>
+        <div class="big-progress">
+          <div class="progress-number"><strong>68%</strong><span>Voice processing</span></div>
+          <div class="progress-track"><span style="width:68%"></span></div>
+          <div class="timeline"><div class="timeline-row done"><span>Audio checked</span><b>Done</b></div><div class="timeline-row done"><span>Upload complete</span><b>Done</b></div><div class="timeline-row active"><span>Removing music</span><b>Live</b></div><div class="timeline-row"><span>Save voice result</span><b>Next</b></div></div>
+        </div>
+        <div class="timing-grid"><div class="card"><small>Server total</small><strong>1:42</strong></div><div class="card"><small>Processing</small><strong>0:58</strong></div></div>
+        <div class="card" style="margin-top:14px"><div class="status-line ready">Your task stays in your account</div><p class="muted" style="font-size:14px;line-height:1.45;margin:10px 0 0">Realtime updates keep this screen current while processing continues.</p></div>
+      </div>
+    </template>
+
+    <template id="scene-processing-ar">
+      <div class="page" dir="rtl">
+        <div class="processing-header"><div class="back-dot">‹</div><div class="screen-title">تفاصيل المعالجة</div></div>
+        <h2 class="detail-title">ملاحظة الاستوديو ٠٧</h2><div class="detail-state">جارٍ إزالة الموسيقى</div>
+        <div class="big-progress">
+          <div class="progress-number"><strong>٦٨٪</strong><span>معالجة الصوت</span></div>
+          <div class="progress-track"><span style="width:68%"></span></div>
+          <div class="timeline"><div class="timeline-row done"><span>تم فحص الصوت</span><b>تم</b></div><div class="timeline-row done"><span>اكتمل الرفع</span><b>تم</b></div><div class="timeline-row active"><span>جارٍ إزالة الموسيقى</span><b>مباشر</b></div><div class="timeline-row"><span>حفظ النتيجة الصوتية</span><b>التالي</b></div></div>
+        </div>
+        <div class="timing-grid"><div class="card"><small>إجمالي الخادم</small><strong>١:٤٢</strong></div><div class="card"><small>المعالجة</small><strong>٠:٥٨</strong></div></div>
+        <div class="card" style="margin-top:14px"><div class="status-line ready">مهمتك محفوظة في حسابك</div><p class="muted" style="font-size:14px;line-height:1.45;margin:10px 0 0">تُبقي التحديثات المباشرة هذه الشاشة محدثة أثناء استمرار المعالجة.</p></div>
+      </div>
+    </template>
+
+    <template id="scene-player-en">
+      <div class="page">
+        <div class="player-header"><div class="back-dot">⌄</div><div class="screen-title" style="flex:1;text-align:center">Now playing</div><span class="inline-icon" data-icon="info"></span></div>
+        <div class="player-hero"><div class="artwork">♫</div><div><div class="player-kind">Voice only</div><div class="player-title">Studio note 07</div><div class="save-link"><span class="inline-icon" data-icon="download"></span>Save voice only</div></div></div>
+        <div class="selector"><span class="active">Voice only</span><span>Original audio</span></div>
+        <div class="wave-shell"><div class="wave-bars" data-bars="36"></div><div class="time-row"><span>1:18</span><span>3:42</span></div></div>
+        <div class="transport"><span>↝</span><span>Ⅰ◀</span><span class="play-button">Ⅱ</span><span>▶Ⅰ</span><span>↻</span></div>
+        <div class="tool-strip"><div class="tool"><b>1×</b><span>Speed</span></div><div class="tool"><b>≡</b><span>Queue</span></div><div class="tool"><b>↻1</b><span>Repeat</span></div></div>
+        <div class="card" style="margin-top:16px"><div class="utility-row"><div class="utility-copy"><strong>Listening tools</strong><span>Timer, passage loop, quiet ending</span></div><span class="inline-icon" data-icon="sliders"></span></div></div>
+      </div>
+    </template>
+
+    <template id="scene-player-ar">
+      <div class="page" dir="rtl">
+        <div class="player-header"><div class="back-dot">⌄</div><div class="screen-title" style="flex:1;text-align:center">قيد التشغيل</div><span class="inline-icon" data-icon="info"></span></div>
+        <div class="player-hero"><div class="artwork">♫</div><div><div class="player-kind">الصوت فقط</div><div class="player-title">ملاحظة الاستوديو ٠٧</div><div class="save-link"><span class="inline-icon" data-icon="download"></span>حفظ الصوت فقط</div></div></div>
+        <div class="selector"><span class="active">الصوت فقط</span><span>الصوت الأصلي</span></div>
+        <div class="wave-shell"><div class="wave-bars" data-bars="36"></div><div class="time-row"><span>١:١٨</span><span>٣:٤٢</span></div></div>
+        <div class="transport"><span>↻</span><span>Ⅰ◀</span><span class="play-button">Ⅱ</span><span>▶Ⅰ</span><span>↝</span></div>
+        <div class="tool-strip"><div class="tool"><b>١×</b><span>السرعة</span></div><div class="tool"><b>≡</b><span>القائمة</span></div><div class="tool"><b>↻١</b><span>تكرار</span></div></div>
+        <div class="card" style="margin-top:16px"><div class="utility-row"><div class="utility-copy"><strong>أدوات الاستماع</strong><span>مؤقّت ومقطع متكرر ونهاية هادئة</span></div><span class="inline-icon" data-icon="sliders"></span></div></div>
+      </div>
+    </template>
+
+    <template id="scene-library-en">
+      <div class="page">
+        <div class="library-header"><div class="screen-title" style="font-size:31px">Library</div></div>
+        <div class="library-wave"><div class="wave-bars" data-bars="42"></div></div>
+        <div class="search-row"><div class="search"><span class="inline-icon" data-icon="search"></span>Search your audio</div><div class="sort">Newest⌄</div></div>
+        <div class="filters"><span class="active">All</span><span>Starred</span><span>Downloaded</span><span>Removed</span></div>
+        <div class="track-card"><div class="track-icon">♫</div><div><span class="track-title">Studio note 07 ★</span><span class="track-meta">3:42 · Today, 9:28</span></div><div class="track-more">⋮</div></div>
+        <div class="track-card"><div class="track-icon">♫</div><div><span class="track-title">Interview sample</span><span class="track-meta">8:15 · Yesterday</span></div><div class="track-more">⋮</div></div>
+        <div class="track-card"><div class="track-icon">♫</div><div><span class="track-title">Lesson recording</span><span class="track-meta">12:08 · Monday</span></div><div class="track-more">⋮</div></div>
+        <div class="mini-player"><div class="mini-art">♫</div><div><span class="track-title">Studio note 07</span><span class="track-meta">Voice only</span></div><span>Ⅱ</span><span>▶Ⅰ</span></div>
+        <div class="bottom-nav" data-active="library"></div>
+      </div>
+    </template>
+
+    <template id="scene-library-ar">
+      <div class="page" dir="rtl">
+        <div class="library-header"><div class="screen-title" style="font-size:31px">المكتبة</div></div>
+        <div class="library-wave"><div class="wave-bars" data-bars="42"></div></div>
+        <div class="search-row"><div class="search"><span class="inline-icon" data-icon="search"></span>ابحث في ملفاتك</div><div class="sort">الأحدث⌄</div></div>
+        <div class="filters"><span class="active">الكل</span><span>المفضلة</span><span>المحمّلة</span><span>المزالة</span></div>
+        <div class="track-card"><div class="track-icon">♫</div><div><span class="track-title">ملاحظة الاستوديو ٠٧ ★</span><span class="track-meta">٣:٤٢ · اليوم، ٩:٢٨</span></div><div class="track-more">⋮</div></div>
+        <div class="track-card"><div class="track-icon">♫</div><div><span class="track-title">عينة مقابلة</span><span class="track-meta">٨:١٥ · أمس</span></div><div class="track-more">⋮</div></div>
+        <div class="track-card"><div class="track-icon">♫</div><div><span class="track-title">تسجيل درس</span><span class="track-meta">١٢:٠٨ · الاثنين</span></div><div class="track-more">⋮</div></div>
+        <div class="mini-player"><div class="mini-art">♫</div><div><span class="track-title">ملاحظة الاستوديو ٠٧</span><span class="track-meta">الصوت فقط</span></div><span>Ⅱ</span><span>▶Ⅰ</span></div>
+        <div class="bottom-nav" data-active="library"></div>
+      </div>
+    </template>
+
+    <script>
+      (function () {
+        'use strict';
+
+        var specs = [];
+        var copy = {
+          en: [
+            ['Your audio. A clearer voice.', 'home', 'Start with your own audio'],
+            ['See every step, live.', 'processing', 'Follow processing clearly'],
+            ['Hear the difference.', 'player', 'Compare voice and original'],
+            ['Your voice library, organized.', 'library', 'Keep every result together']
+          ],
+          ar: [
+            ['صوتك، بوضوح أكبر.', 'home', 'ابدأ بملفك الصوتي'],
+            ['تابع كل خطوة مباشرة.', 'processing', 'تابع المعالجة بوضوح'],
+            ['اسمع الفرق.', 'player', 'قارن الصوت بالأصل'],
+            ['مكتبتك الصوتية، مرتبة.', 'library', 'احتفظ بكل النتائج معًا']
+          ]
+        };
+        ['phone', 'tablet'].forEach(function (device) {
+          ['en', 'ar'].forEach(function (locale) {
+            copy[locale].forEach(function (item, index) {
+              specs.push({
+                id: device + '-' + locale + '-' + String(index + 1).padStart(2, '0'),
+                device: device,
+                locale: locale,
+                number: String(index + 1).padStart(2, '0'),
+                headline: item[0],
+                scene: item[1],
+                label: item[2]
+              });
+            });
+          });
+        });
+
+        var iconPaths = {
+          home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V21h13V10.5"/><path d="M9 21v-6h6v6"/>',
+          library: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 16V9l7-1v7"/><circle cx="7.5" cy="16" r="1.5"/><circle cx="14.5" cy="15" r="1.5"/>',
+          settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
+          folder: '<path d="M3 6h7l2 2h9v11H3z"/><path d="M3 9h18"/>',
+          info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
+          download: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/>',
+          sliders: '<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="18" r="2"/>',
+          search: '<circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/>'
+        };
+
+        function iconMarkup(name) {
+          return '<svg viewBox="0 0 24 24" aria-hidden="true">' + iconPaths[name] + '</svg>';
+        }
+
+        function populateIcons(root) {
+          root.querySelectorAll('[data-icon]').forEach(function (node) {
+            node.innerHTML = iconMarkup(node.getAttribute('data-icon'));
+          });
+        }
+
+        function populateWaves(root) {
+          var heights = [22, 42, 68, 36, 78, 54, 88, 45, 70, 96, 58, 82, 34, 63, 91, 51, 75, 40, 86, 60, 28, 72, 48, 90, 55, 80, 38, 66, 94, 44, 76, 52, 84, 31, 69, 47, 88, 57, 79, 35, 73, 50];
+          root.querySelectorAll('[data-bars]').forEach(function (wave) {
+            var count = Number(wave.getAttribute('data-bars')) || 36;
+            for (var i = 0; i < count; i += 1) {
+              var bar = document.createElement('i');
+              bar.style.height = heights[i % heights.length] + '%';
+              wave.appendChild(bar);
+            }
+          });
+        }
+
+        function navItems(locale, active, rail) {
+          var labels = locale === 'ar' ? ['الرئيسية', 'المكتبة', 'الإعدادات'] : ['Home', 'Library', 'Settings'];
+          var names = ['home', 'library', 'settings'];
+          var wrapper = document.createElement('div');
+          wrapper.className = rail ? 'nav-rail' : 'bottom-nav';
+          names.forEach(function (name, index) {
+            var item = document.createElement('div');
+            item.className = (rail ? 'rail-item' : 'bottom-item') + (active === name ? ' active' : '');
+            item.innerHTML = '<span class="nav-icon">' + iconMarkup(name) + '</span><span>' + labels[index] + '</span>';
+            wrapper.appendChild(item);
+          });
+          return wrapper;
+        }
+
+        function emphasizeHeadline(text, locale) {
+          var words = text.trim().split(' ');
+          var marked = locale === 'ar' ? words.slice(-2).join(' ') : words.slice(-2).join(' ');
+          var prefix = words.slice(0, -2).join(' ');
+          return (prefix ? prefix + ' ' : '') + '<em>' + marked + '</em>';
+        }
+
+        function buildPoster(spec) {
+          var poster = document.createElement('main');
+          poster.className = 'poster ' + spec.device + ' locale-' + spec.locale;
+          poster.setAttribute('dir', spec.locale === 'ar' ? 'rtl' : 'ltr');
+
+          var brand = document.createElement('div');
+          brand.className = 'brand-line';
+          brand.innerHTML = '<img src="../icon-source.svg" alt=""/><span>MusicMute</span><span class="series-mark">' + spec.number + ' / 04</span>';
+          poster.appendChild(brand);
+
+          var headline = document.createElement('div');
+          headline.className = 'headline-wrap';
+          headline.innerHTML = '<h1 class="headline">' + emphasizeHeadline(spec.headline, spec.locale) + '</h1><div class="signal-orbit" aria-hidden="true"><span></span></div>';
+          poster.appendChild(headline);
+
+          var device = document.createElement('div');
+          device.className = 'device';
+          device.innerHTML = '<div class="ui-screen"><div class="statusbar"><span>9:41</span><span class="status-icons"><span>▴▴▴</span><i></i><i></i></span></div><div class="app-region"><div class="scene"></div></div></div>';
+          poster.appendChild(device);
+
+          var scene = device.querySelector('.scene');
+          var template = document.getElementById('scene-' + spec.scene + '-' + spec.locale);
+          scene.appendChild(template.content.cloneNode(true));
+
+          var active = spec.scene === 'library' ? 'library' : 'home';
+          var existingBottom = scene.querySelector('.bottom-nav');
+          if (existingBottom) existingBottom.replaceWith(navItems(spec.locale, active, false));
+          if (spec.device === 'tablet' && (spec.scene === 'home' || spec.scene === 'library')) {
+            device.querySelector('.app-region').insertBefore(navItems(spec.locale, active, true), scene);
+          }
+          populateIcons(poster);
+          populateWaves(poster);
+          return poster;
+        }
+
+        function renderAsset(id) {
+          var spec = specs.find(function (entry) { return entry.id === id; });
+          if (!spec) throw new Error('Unknown screenshot asset: ' + id);
+          document.body.className = 'asset-mode';
+          document.documentElement.lang = spec.locale === 'ar' ? 'ar' : 'en';
+          document.body.appendChild(buildPoster(spec));
+        }
+
+        function renderGallery() {
+          var gallery = document.createElement('main');
+          gallery.className = 'gallery';
+          gallery.innerHTML = '<div class="gallery-header"><div><h1>MusicMute Play screenshots</h1><p>Source-faithful HTML compositions · four phone and four 7-inch tablet assets per locale</p></div><div class="gallery-controls"><button data-locale="en" class="active">English</button><button data-locale="ar">العربية</button></div></div><div class="gallery-grid"></div>';
+          document.body.appendChild(gallery);
+          var currentLocale = 'en';
+
+          function draw() {
+            var grid = gallery.querySelector('.gallery-grid');
+            grid.replaceChildren();
+            specs.filter(function (spec) { return spec.locale === currentLocale; }).forEach(function (spec) {
+              var figure = document.createElement('figure');
+              figure.className = 'preview-card';
+              figure.innerHTML = '<img src="renders/' + spec.device + '/' + spec.locale + '/' + spec.number + '-' + spec.scene + '.png" alt="' + spec.label + '"><figcaption>' + (spec.device === 'phone' ? 'Phone' : '7-inch tablet') + ' ' + spec.number + ' · ' + spec.label + '</figcaption>';
+              grid.appendChild(figure);
+            });
+          }
+
+          gallery.querySelectorAll('button[data-locale]').forEach(function (button) {
+            button.addEventListener('click', function () {
+              currentLocale = button.getAttribute('data-locale');
+              gallery.querySelectorAll('button[data-locale]').forEach(function (candidate) { candidate.classList.toggle('active', candidate === button); });
+              draw();
+            });
+          });
+          draw();
+        }
+
+        function renderContact(key) {
+          var parts = key.split('-');
+          var device = parts[0];
+          var locale = parts[1];
+          var selected = specs.filter(function (spec) { return spec.device === device && spec.locale === locale; });
+          var contact = document.createElement('main');
+          contact.className = 'contact';
+          contact.setAttribute('dir', locale === 'ar' ? 'rtl' : 'ltr');
+          var deviceLabel = device === 'phone' ? (locale === 'ar' ? 'لقطات الهاتف' : 'Phone screenshots') : (locale === 'ar' ? 'لقطات جهاز لوحي ٧ بوصات' : '7-inch tablet screenshots');
+          contact.innerHTML = '<div class="contact-head"><div><h1>' + deviceLabel + '</h1><p>MusicMute · ' + (locale === 'ar' ? 'أربع صور عمودية بنسبة ٩:١٦' : 'Four portrait images · exact 9:16 ratio') + '</p></div><div class="contact-badge">' + (locale === 'ar' ? 'مسودة للمراجعة' : 'REVIEW DRAFT') + '</div></div><div class="contact-grid"></div>';
+          var grid = contact.querySelector('.contact-grid');
+          selected.forEach(function (spec) {
+            var figure = document.createElement('figure');
+            figure.innerHTML = '<img src="renders/' + device + '/' + locale + '/' + spec.number + '-' + spec.scene + '.png"><figcaption>' + spec.number + ' · ' + spec.label + '</figcaption>';
+            grid.appendChild(figure);
+          });
+          document.body.className = 'asset-mode';
+          document.body.appendChild(contact);
+        }
+
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('asset')) renderAsset(params.get('asset'));
+        else if (params.has('contact')) renderContact(params.get('contact'));
+        else renderGallery();
+      }());
+    </script>
+  </body>
+</html>

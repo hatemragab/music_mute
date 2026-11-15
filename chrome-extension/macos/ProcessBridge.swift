@@ -4,6 +4,28 @@ import Foundation
 import LocalAuthentication
 import Security
 
+// Release compilation removes every diagnostic environment forwarding branch.
+func developmentLoggingEnvironment(_ base: [String: String]) -> [String: String] {
+  #if DEBUG
+    var environment = base
+    let inherited = ProcessInfo.processInfo.environment
+    if inherited["NODE_ENV"] == "development", inherited["MUSICMUTE_LOG_ENABLED"] == "1",
+      let key = inherited["MUSICMUTE_LOG_KEY"],
+      key.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+    {
+      for name in [
+        "NODE_ENV", "MUSICMUTE_LOG_ENABLED", "MUSICMUTE_LOG_PAYLOADS",
+        "MUSICMUTE_LOG_CONSOLE", "MUSICMUTE_LOG_KEY", "MUSICMUTE_LOG_ENDPOINT",
+      ] {
+        if let value = inherited[name] { environment[name] = value }
+      }
+    }
+    return environment
+  #else
+    return base
+  #endif
+}
+
 enum RuntimeBootstrapFailure: Error, Equatable, Sendable {
   case code(String)
   case cancelled
@@ -488,7 +510,7 @@ enum RuntimeFileSecurity {
     _ url: URL, maximumBytes: Int64, requireCurrentOwner: Bool,
     privatePermissions: Bool, code: String
   ) throws -> Data {
-    let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+    let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
     guard descriptor >= 0 else { throw RuntimeBootstrapFailure.code(code) }
     var information = stat()
     guard fstat(descriptor, &information) == 0,
@@ -2040,7 +2062,7 @@ enum NativeHostLauncher {
     return NativeHostLaunchPlan(
       executable: python,
       arguments: ["-I", "-B", "-S", wrapper.path, node.path, host.path, arguments[0]],
-      environment: [
+      environment: developmentLoggingEnvironment([
         "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
         "PATH": "/usr/bin:/bin",
         "LANG": "en_US.UTF-8",
@@ -2049,7 +2071,7 @@ enum NativeHostLauncher {
         "MUSICMUTE_LOCAL_ROOT": support.path,
         "MUSICMUTE_LOCAL_LAUNCH_MS": String(
           (ProcessInfo.processInfo.systemUptime - started) * 1000),
-      ],
+      ]),
       verifiedRuntime: verifiedRuntime)
   }
 
@@ -2581,18 +2603,24 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
   private let allowedHosts: Set<String>
   private let configuration: URLSessionConfiguration
   private let progress: @Sendable (Double, String) -> Void
+  private let retryDelays: [TimeInterval]
+  private let retryWake = DispatchSemaphore(value: 0)
   private var attempt: Attempt?
   private var cancelled = false
 
   init(
     file: URL, manifest: RuntimeBootstrapManifest,
     configuration: URLSessionConfiguration = .ephemeral,
+    retryDelays: [TimeInterval] = [1, 3],
     progress: @escaping @Sendable (Double, String) -> Void
   ) {
     self.file = file
     self.manifest = manifest
     allowedHosts = Set(manifest.downloadHosts.map { $0.lowercased() })
     self.configuration = configuration.copy() as? URLSessionConfiguration ?? .ephemeral
+    precondition(
+      retryDelays.count <= 2 && retryDelays.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 30 })
+    self.retryDelays = retryDelays
     self.progress = progress
   }
 
@@ -2601,6 +2629,7 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
       throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED")
     }
     var retriedFromZero = false
+    var transientRetries = 0
     while true {
       try checkCancellation()
       var resume = try RuntimeDownloadResumeState.validated(
@@ -2634,6 +2663,18 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
       switch outcome {
       case .success:
         return
+      case .retryable:
+        // Revalidate the private validator/partial before every retry. Unvalidated bytes never
+        // authorize a Range request, and source/security failures do not enter this path.
+        _ = try RuntimeDownloadResumeState.validated(partial: file, manifest: manifest)
+        guard transientRetries < retryDelays.count else {
+          throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED")
+        }
+        let delay = retryDelays[transientRetries]
+        transientRetries += 1
+        try checkCancellation()
+        _ = retryWake.wait(timeout: .now() + delay)
+        try checkCancellation()
       case .retryFromZero:
         try RuntimeDownloadResumeState.discard(partial: file)
         guard resume != nil, !retriedFromZero else {
@@ -2649,6 +2690,7 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
     cancelled = true
     let attempt = attempt
     lock.unlock()
+    retryWake.signal()
     attempt?.cancel()
   }
 
@@ -2669,11 +2711,38 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
     RuntimeDownloadRequestPolicy.safeURL(url, allowedHosts: allowedHosts)
   }
 
+  static func storageFailureCode(_ error: Error) -> String {
+    if let failure = error as? RuntimeBootstrapFailure {
+      return failure.errorCode == "RUNTIME_DOWNLOAD_FAILED"
+        ? "RUNTIME_INSTALL_FAILED" : failure.errorCode
+    }
+    var information = error as NSError
+    for _ in 0..<4 {
+      if information.domain == NSPOSIXErrorDomain {
+        if [Int(ENOSPC), Int(EDQUOT)].contains(information.code) { return "DISK_SPACE_LOW" }
+        if [Int(EACCES), Int(EPERM), Int(EROFS)].contains(information.code) {
+          return "LOCAL_DIRECTORY_NOT_PRIVATE"
+        }
+        if information.code == Int(ELOOP) { return "RUNTIME_DOWNLOAD_UNSAFE" }
+      }
+      if information.domain == NSCocoaErrorDomain {
+        if information.code == NSFileWriteOutOfSpaceError { return "DISK_SPACE_LOW" }
+        if information.code == NSFileWriteNoPermissionError { return "LOCAL_DIRECTORY_NOT_PRIVATE" }
+      }
+      guard let underlying = information.userInfo[NSUnderlyingErrorKey] as? NSError else { break }
+      information = underlying
+    }
+    return "RUNTIME_INSTALL_FAILED"
+  }
+
   private final class Attempt: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate,
     @unchecked Sendable
   {
-    enum Outcome { case success, retryFromZero }
-    private enum Failure: Equatable { case failed, retryFromZero }
+    enum Outcome { case success, retryable, retryFromZero }
+    private enum Failure: Equatable {
+      case failed, retryable, retryFromZero
+      case storage(String)
+    }
 
     private let lock = NSLock()
     private let file: URL
@@ -2743,7 +2812,14 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
       let receivedBytes = receivedBytes
       lock.unlock()
       if cancelled { throw RuntimeBootstrapFailure.cancelled }
+      if case .storage(let code)? = failure { throw RuntimeBootstrapFailure.code(code) }
       if failure == .retryFromZero { return .retryFromZero }
+      if failure == .retryable { return .retryable }
+      if failure == nil, accepted, let expectedResponseBytes,
+        responseBytes < expectedResponseBytes, receivedBytes < manifest.archiveBytes
+      {
+        return .retryable
+      }
       guard failure == nil, accepted, let expectedResponseBytes,
         responseBytes == expectedResponseBytes, receivedBytes == manifest.archiveBytes
       else { throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") }
@@ -2781,7 +2857,9 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
         : O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW
       let descriptor = open(file.path, flags, 0o600)
       guard descriptor >= 0 else {
-        throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED")
+        throw RuntimeBootstrapFailure.code(
+          RuntimeDownloadDelegate.storageFailureCode(
+            NSError(domain: NSPOSIXErrorDomain, code: Int(errno))))
       }
       var information = stat()
       guard fstat(descriptor, &information) == 0,
@@ -2821,6 +2899,13 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
       _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
       completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
     ) {
+      lock.lock()
+      let stopped = cancelled || completed || failure != nil
+      lock.unlock()
+      guard !stopped else {
+        completionHandler(.cancel)
+        return
+      }
       guard let response = response as? HTTPURLResponse, safeResponseURL(response.url) else {
         recordFailure(.failed)
         completionHandler(.cancel)
@@ -2828,10 +2913,16 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
       }
       switch response.statusCode {
       case 200:
+        guard identityEncoded(response), exactContentLength(response) == manifest.archiveBytes
+        else {
+          recordFailure(.failed)
+          completionHandler(.cancel)
+          return
+        }
         do {
-          if startingBytes > 0 { try resetForFullResponse() }
-          guard identityEncoded(response), exactContentLength(response) == manifest.archiveBytes
-          else { throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") }
+          // URLSession may replay a fresh GET inside this same task after a connection loss.
+          // A validated full response replaces all earlier bytes; it must never append to them.
+          if startingBytes > 0 || responseAccepted { try resetForFullResponse() }
           let etag = strongResponseETag(response)
           if let etag {
             try RuntimeDownloadResumeState.persist(
@@ -2842,7 +2933,7 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
           acceptResponse(bytes: manifest.archiveBytes)
           completionHandler(.allow)
         } catch {
-          recordFailure(.failed)
+          recordFailure(.storage(RuntimeDownloadDelegate.storageFailureCode(error)))
           completionHandler(.cancel)
         }
       case 206 where startingBytes > 0:
@@ -2858,10 +2949,20 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
           completionHandler(.cancel)
           return
         }
+        if responseAccepted {
+          // A replayed Range still begins at this task's original offset. Keep only the already
+          // validated prefix and let a new task request the remaining range from its actual end.
+          recordFailure(.retryable)
+          completionHandler(.cancel)
+          return
+        }
         acceptResponse(bytes: remaining)
         completionHandler(.allow)
       case 412 where startingBytes > 0, 416 where startingBytes > 0:
         recordFailure(.retryFromZero)
+        completionHandler(.cancel)
+      case 408, 425, 429, 500...599:
+        recordFailure(.retryable)
         completionHandler(.cancel)
       default:
         recordFailure(.failed)
@@ -2888,7 +2989,7 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
         guard let handle else { throw RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") }
         try handle.write(contentsOf: data)
       } catch {
-        recordFailure(.failed)
+        recordFailure(.storage(RuntimeDownloadDelegate.storageFailureCode(error)))
         dataTask.cancel()
         return
       }
@@ -2906,10 +3007,20 @@ final class RuntimeDownloadDelegate: @unchecked Sendable {
       do {
         try handle?.synchronize()
         try handle?.close()
-      } catch { recordFailure(.failed) }
+      } catch { recordFailure(.storage(RuntimeDownloadDelegate.storageFailureCode(error))) }
       handle = nil
       lock.lock()
-      if error != nil, !cancelled, failure == nil { failure = .failed }
+      if let error, !cancelled, failure == nil {
+        let networkError = error as NSError
+        let retryableCodes: Set<Int> = [
+          NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost, NSURLErrorCannotFindHost,
+          NSURLErrorCannotConnectToHost, NSURLErrorDNSLookupFailed,
+          NSURLErrorNotConnectedToInternet,
+        ]
+        failure =
+          networkError.domain == NSURLErrorDomain && retryableCodes.contains(networkError.code)
+          ? .retryable : .failed
+      }
       guard !completed else {
         lock.unlock()
         return
@@ -4000,6 +4111,15 @@ final class ProcessBridge: @unchecked Sendable {
         }
         return
       }
+      if command == .status, hasBootstrap,
+        !RuntimeInstallationResolver.criticalFilesReady(runtime)
+      {
+        // A valid, safely owned active selection can outlive removed runtime executables.
+        // Report missing setup rather than incorrectly blaming the immutable app bundle.
+        onEvent(Self.missingRuntimeStatus(resources: resources))
+        finish(task, .success, callback: onFinish)
+        return
+      }
       let node = runtime.appendingPathComponent("runtime/node/bin/node")
       guard
         let launch = BundledControlLaunch.command(
@@ -4023,7 +4143,7 @@ final class ProcessBridge: @unchecked Sendable {
       if let home = inherited["HOME"], home.hasPrefix("/"), !home.contains("\0") {
         environment["HOME"] = home
       }
-      task.process.environment = environment
+      task.process.environment = developmentLoggingEnvironment(environment)
       task.process.standardInput = FileHandle.nullDevice
       task.process.standardOutput = task.stdout
       task.process.standardError = task.stderr
@@ -4064,8 +4184,10 @@ final class ProcessBridge: @unchecked Sendable {
         stop(task)
       }
       task.timeout = timeout
+      // Model acquisition has a shared twenty-minute budget, followed by finite tool checks.
+      // The parent deadline must allow that recovery budget rather than killing it early.
       DispatchQueue.global().asyncAfter(
-        deadline: .now() + (command == .setup ? 900 : 60), execute: timeout)
+        deadline: .now() + (command == .setup ? 25 * 60 : 60), execute: timeout)
       var pending = Data()
       while true {
         let chunk = task.stdout.fileHandleForReading.availableData

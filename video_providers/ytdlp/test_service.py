@@ -31,6 +31,7 @@ class ServiceTests(unittest.TestCase):
             path.write_bytes(b'native-audio-fixture')
             return SimpleNamespace(path=path, content_type='audio/webm',
                                    metadata={'title': 'Fixture', 'channel': 'secret-res-password',
+                                             'thumbnail_url': 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
                                              'delivery_url': 'https://never-forward.invalid'},
                                    timings_ms={'extraction_ms': 1, 'transfer_ms': 2, 'token_generation_ms': 0})
         self.server = service.Server(('127.0.0.1', 0), KEY,
@@ -78,10 +79,39 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(headers['Cache-Control'], 'no-store')
         metadata = json.loads(base64.b64decode(headers['X-Import-Extra-Data-Base64']))
         self.assertEqual(metadata['title'], 'Fixture')
+        self.assertEqual(metadata['thumbnail_url'], 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg')
+        self.assertEqual(len(self.calls), 1)
         self.assertNotIn('channel', metadata)
         self.assertNotIn('delivery_url', metadata)
         self.assertNotIn('Cookie', self.calls[0])
         self.assertLessEqual(self.calls[0]['deadline'] - time.monotonic(), 30)
+        self.assert_cleaned()
+
+    def test_oversized_thumbnail_keeps_existing_metadata_and_native_audio(self):
+        original = self.server.acquire
+
+        def acquire(**values):
+            audio = original(**values)
+            audio.metadata.update({
+                'title': 'ع' * 200, 'artist': 'a' * 200, 'channel': 'c' * 200,
+                'audio_codec': 'opus',
+                'thumbnail_url': 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg'
+                                 + '?sqp=' + 'x' * 1024 + '&rs=' + 'x' * 500,
+            })
+            return audio
+
+        self.server.acquire = acquire
+        status, headers, body = self.post()
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'native-audio-fixture')
+        self.assertEqual(headers['Content-Length'], str(len(body)))
+        encoded = headers['X-Import-Extra-Data-Base64']
+        self.assertLessEqual(len(encoded), 4096)
+        self.assertEqual(json.loads(base64.b64decode(encoded)), {
+            'schema_version': 1, 'provider': 'yt-dlp', 'title': 'ع' * 200,
+            'artist': 'a' * 200, 'channel': 'c' * 200, 'audio_codec': 'opus',
+        })
+        self.assertEqual(len(self.calls), 1)
         self.assert_cleaned()
 
     def test_playlist_radio_context_downloads_only_the_selected_video(self):

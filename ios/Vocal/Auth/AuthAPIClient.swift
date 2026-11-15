@@ -64,7 +64,8 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
 
   func profileSync() async throws -> ProfileSyncResponse {
     try await send(
-      "POST", "/auth/profile-synchronizations", body: encoder.encode(EmptyBody()), authenticated: true)
+      "POST", "/auth/profile-synchronizations", body: encoder.encode(EmptyBody()),
+      authenticated: true)
   }
 
   func deleteAccount() async throws -> AccountDeletionReceipt {
@@ -73,7 +74,7 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
     let token = try await tokenSource.idToken(forceRefresh: true)
     guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
     let (data, response) = try await transport.perform(
-      method: "DELETE", path: "/users/me", body: nil, bearer: token)
+      method: "DELETE", path: "/users/me", body: nil, bearer: token, userID: fence?.uid)
     let receipt = try decode(AccountDeletionReceipt.self, data: data, response: response)
     guard response.statusCode == 202, receipt.status == "accepted", !receipt.requestId.isEmpty,
       receipt.recoverUntil != nil
@@ -124,6 +125,7 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
   }
 
   func removeDeviceHistory(id: String) async throws {
+    let loggingTraceID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
     guard let uuid = UUID(uuidString: id), uuid.uuidString.lowercased() == id.lowercased(),
       id.split(separator: "-")[2].first == "4"
     else { throw AuthFailure.invalidInput }
@@ -133,14 +135,14 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
     guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
     var (data, response) = try await transport.perform(
       method: "DELETE", path: "/users/me/devices/\(uuid.uuidString.lowercased())", body: nil,
-      bearer: token)
+      bearer: token, userID: fence?.uid, traceID: loggingTraceID)
     guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
     if response.statusCode == 401 {
       let refreshed = try await tokenSource.idToken(forceRefresh: true)
       guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
       (data, response) = try await transport.perform(
         method: "DELETE", path: "/users/me/devices/\(uuid.uuidString.lowercased())", body: nil,
-        bearer: refreshed)
+        bearer: refreshed, userID: fence?.uid, traceID: loggingTraceID)
       guard tokenSource.tokenSession == fence else { throw AuthFailure.sessionExpired }
     }
     let _: EmptyResponse = try decode(EmptyResponse.self, data: data, response: response)
@@ -175,14 +177,18 @@ final class AuthRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
     replayOnUnauthorized: Bool = true
   ) async throws -> Response {
     try Task.checkCancellation()
+    let loggingUID = authenticated ? tokenSource?.tokenSession?.uid : nil
+    let loggingTraceID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
     let token = authenticated ? try await requireToken(forceRefresh: false) : nil
     let (data, response) = try await transport.perform(
-      method: method, path: path, body: body, bearer: token)
+      method: method, path: path, body: body, bearer: token, userID: loggingUID,
+      traceID: loggingTraceID)
 
     if response.statusCode == 401, authenticated, replayOnUnauthorized {
       let refreshed = try await requireToken(forceRefresh: true)
       let (retryData, retryResponse) = try await transport.perform(
-        method: method, path: path, body: body, bearer: refreshed)
+        method: method, path: path, body: body, bearer: refreshed, userID: loggingUID,
+        traceID: loggingTraceID)
       guard retryResponse.statusCode != 401 else { throw AuthFailure.sessionExpired }
       return try decode(Response.self, data: retryData, response: retryResponse)
     }
@@ -274,8 +280,11 @@ enum ApiWireJSON {
         wireKey = String(parts[0]) + parts.dropFirst().map { $0.capitalized }.joined()
       } else {
         wireKey = key.reduce(into: "") { output, character in
-          if character.isUppercase { output += "_" + character.lowercased() }
-          else { output.append(character) }
+          if character.isUppercase {
+            output += "_" + character.lowercased()
+          } else {
+            output.append(character)
+          }
         }
       }
       result[wireKey] = try convert(
@@ -309,7 +318,8 @@ enum ApiWireJSON {
   }
 
   func perform(
-    method: String, path: String, body: Data?, bearer: String?, headers: [String: String] = [:]
+    method: String, path: String, body: Data?, bearer: String?, headers: [String: String] = [:],
+    userID: String? = nil, traceID: String? = nil
   ) async throws
     -> (Data, HTTPURLResponse)
   {
@@ -334,10 +344,48 @@ enum ApiWireJSON {
 
     for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
 
+    // Debug correlation is metadata only. The ordinary/release request stays unchanged.
+    let capturedContext = LocalDiagnostics.context
+    let requestID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
+    if let requestID { request.setValue(requestID, forHTTPHeaderField: "X-Request-Id") }
+    let started = ProcessInfo.processInfo.systemUptime
+    var observedStatus: Int?
+    var responsePayload: Data?
+    var observedRequestID = requestID
+    var result = "failed"
+    var failure: [String: Any] = [:]
+    defer {
+      if LocalDiagnostics.enabled {
+        var details: [String: Any] = [
+          "method": method, "url": url.absoluteString, "operation": "http.request",
+          "result": result, "durationMs": (ProcessInfo.processInfo.systemUptime - started) * 1000,
+          "request": LocalDiagnostics.payload(request.httpBody),
+          "response": LocalDiagnostics.payload(responsePayload),
+          "headers": request.allHTTPHeaderFields ?? [:], "error": failure,
+          "path": url.path,
+          "query": (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+            .prefix(64).reduce(into: [String: [String]]()) { values, item in
+              values[item.name, default: []].append(item.value ?? "")
+            },
+        ]
+        if let observedStatus { details["status"] = observedStatus }
+        LocalDiagnostics.emit(
+          "http.completed", category: "http", level: result == "completed" ? "info" : "warn",
+          data: details,
+          userID: userID ?? capturedContext?.userID, requestID: observedRequestID,
+          traceID: traceID ?? capturedContext?.traceID ?? requestID)
+      }
+    }
     do {
       let (bytes, response) = try await session.bytes(for: request)
       guard let http = response as? HTTPURLResponse else {
         throw AuthFailure.malformedResponse
+      }
+      observedStatus = http.statusCode
+      if let serverID = http.value(forHTTPHeaderField: "X-Request-Id"),
+        UUID(uuidString: serverID) != nil
+      {
+        observedRequestID = serverID.lowercased()
       }
       var data = Data()
       data.reserveCapacity(min(max(Int(http.expectedContentLength), 0), 1_048_576))
@@ -349,14 +397,22 @@ enum ApiWireJSON {
         http.url?.host == configuration.apiOrigin.host,
         http.url?.port == configuration.apiOrigin.port
       else { throw AuthFailure.configuration }
-      let wireData = (200...299).contains(http.statusCode)
+      responsePayload = data
+      result = (200...299).contains(http.statusCode) ? "completed" : "http_error"
+      let wireData =
+        (200...299).contains(http.statusCode)
         ? try ApiWireJSON.response(data) : data
       return (wireData, http)
-    } catch is CancellationError {
+    } catch let error as CancellationError {
+      result = "aborted"
+      failure = LocalDiagnostics.error(error)
       throw CancellationError()
-    } catch let failure as AuthFailure {
-      throw failure
+    } catch let error as AuthFailure {
+      failure = LocalDiagnostics.error(error)
+      throw error
     } catch let error as URLError where error.code == .cancelled {
+      result = "aborted"
+      failure = LocalDiagnostics.error(error)
       throw CancellationError()
     } catch let error as URLError
       where [
@@ -364,8 +420,10 @@ enum ApiWireJSON {
         .cannotFindHost, .dnsLookupFailed,
       ].contains(error.code)
     {
+      failure = LocalDiagnostics.error(error)
       throw AuthFailure.offline
     } catch {
+      failure = LocalDiagnostics.error(error)
       throw AuthFailure.serviceUnavailable
     }
   }

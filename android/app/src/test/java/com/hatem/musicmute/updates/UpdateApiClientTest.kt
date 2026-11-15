@@ -14,32 +14,25 @@ import org.junit.Test
 
 class UpdateApiClientTest {
     @Test
-    fun policyAndGrantUsePublicNoStoreContractsWithoutFirebaseCredentials() = runTest {
-        var call = 0
-        val api =
-            UpdateApiClient(
-                AuthConfiguration("https://api.example.test", false),
-                "direct",
-                AuthHttpTransport { url, method, headers, body ->
-                    call++
-                    assertFalse(headers.containsKey("Authorization"))
-                    assertEquals("no-store", headers["Cache-Control"])
-                    if (call == 1) {
-                        assertTrue(url.endsWith("/app-updates/policy?platform=android&distribution=direct"))
-                        assertEquals("GET", method)
-                        assertNull(body)
-                        AuthHttpResponse(200, POLICY)
-                    } else {
-                        assertTrue(url.endsWith("/app-updates/releases/6aa46ad418983c1bd08b5749/download-grants"))
-                        assertEquals("POST", method)
-                        assertEquals("{}", body)
-                        AuthHttpResponse(200, GRANT)
-                    }
-                },
-            )
-
+    fun policyUsesPublicPlayNoStoreContractWithoutFirebaseCredentials() = runTest {
+        val api = UpdateApiClient(AuthConfiguration("https://api.example.test", false), "play",
+            AuthHttpTransport { url, method, headers, body ->
+                assertFalse(headers.containsKey("Authorization"))
+                assertEquals("no-store", headers["Cache-Control"])
+                assertTrue(url.endsWith("/app-updates/policy?platform=android&distribution=play"))
+                assertEquals("GET", method)
+                assertNull(body)
+                AuthHttpResponse(200, POLICY)
+            })
         assertEquals(2, api.policy().target?.buildNumber)
-        assertEquals(80_000_000L, api.downloadGrant("6aa46ad418983c1bd08b5749").bytes)
+        assertNull(api.policy().target?.artifact)
+    }
+
+    @Test
+    fun directDistributionFailsBeforeAnyRequest() = runTest {
+        val api = UpdateApiClient(AuthConfiguration("https://api.example.test", false), "direct",
+            AuthHttpTransport { _, _, _, _ -> error("Network must not be called") })
+        assertEquals(UpdateProblem.INVALID_POLICY, (runCatching { api.policy() }.exceptionOrNull() as UpdateFailure).problem)
     }
 
     @Test
@@ -47,12 +40,12 @@ class UpdateApiClientTest {
         val api =
             UpdateApiClient(
                 AuthConfiguration("https://api.example.test", false),
-                "direct",
+                "play",
                 AuthHttpTransport { _, _, _, _ ->
                     AuthHttpResponse(404, """{"code":"RESOURCE_NOT_FOUND","message":"private"}""")
                 },
             )
-        val failure = runCatching { api.downloadGrant("6aa46ad418983c1bd08b5749") }.exceptionOrNull()
+        val failure = runCatching { api.policy() }.exceptionOrNull()
         assertEquals(UpdateProblem.RELEASE_UNAVAILABLE, (failure as UpdateFailure).problem)
     }
 
@@ -61,7 +54,7 @@ class UpdateApiClientTest {
         val api =
             UpdateApiClient(
                 AuthConfiguration("https://api.example.test", false),
-                "direct",
+                "play",
                 AuthHttpTransport { _, _, _, _ ->
                     withTimeout(1) { awaitCancellation() }
                 },
@@ -75,8 +68,6 @@ class UpdateApiClientTest {
 
     private companion object {
         val POLICY =
-            """{"schema_version":1,"revision":1,"platform":"android","distribution":"direct","minimum_build":2,"target":{"id":"6aa46ad418983c1bd08b5749","version_name":"0.1.1","build_number":2,"changelog_en":"test","source":"direct_apk","store_url":null,"artifact":{"bytes":80000000,"sha256_hex":"${"a".repeat(64)}","signer_sha256_hex":"${"b".repeat(64)}"}},"checked_at":"2026-09-12T00:00:00.000Z"}"""
-        val GRANT =
-            """{"release_id":"6aa46ad418983c1bd08b5749","url":"https://signed.example.test/release.apk?token=redacted","expires_at":"2026-09-12T00:15:00.000Z","bytes":80000000,"sha256_hex":"${"a".repeat(64)}","signer_sha256_hex":"${"b".repeat(64)}"}"""
+            """{"schema_version":1,"revision":1,"platform":"android","distribution":"play","minimum_build":2,"target":{"id":"6aa46ad418983c1bd08b5749","version_name":"0.1.1","build_number":2,"changelog_en":"test","source":"google_play","store_url":"https://play.google.com/store/apps/details?id=com.hatem.musicmute","artifact":null},"checked_at":"2026-09-12T00:00:00.000Z"}"""
     }
 }

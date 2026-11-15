@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import soundfile as sf
@@ -61,6 +61,34 @@ class FakeSeparator:
 
 
 class PipelineTests(unittest.TestCase):
+    def test_directml_startup_result_keeps_actual_model_load_and_observed_first_run_separate(self) -> None:
+        fake = FakeSeparator()
+        fake.first_inference_seconds = 0.125
+        pipeline = RuntimePipeline(lambda *_args: fake)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / "models"; cache.mkdir()
+            model = root / "fixture.onnx"; model.write_bytes(b"test-only-model-sentinel")
+            attempt_id = str(uuid.uuid4()); attempt = root / attempt_id; attempt.mkdir()
+            source = attempt / "input.wav"
+            tone = 0.25 * np.sin(2 * np.pi * 440 * np.arange(RATE) / RATE)
+            sf.write(source, np.column_stack((tone, tone)), RATE, subtype="PCM_16")
+            request = ProcessRequest.from_payload({**self.payload(attempt_id, attempt, source, cache, "kim-vocals-v2"),
+                "provider": "directml", "directmlDeviceId": 2})
+            with patch("musicmute_engine.pipeline.verified_cached_model", return_value=model):
+                result = pipeline.process(request)
+            self.assertEqual(result["startupTimings"]["firstInferenceSeconds"], 0.125)
+            self.assertEqual(result["startupTimings"]["modelLoadSeconds"], result["stageTimings"]["modelLoad"])
+            second_id = str(uuid.uuid4()); second = root / second_id; second.mkdir()
+            second_source = second / "input.wav"; shutil.copyfile(source, second_source)
+            second_request = ProcessRequest.from_payload({**self.payload(second_id, second, second_source, cache, "kim-vocals-v2"),
+                "provider": "directml", "directmlDeviceId": 2})
+            with patch("musicmute_engine.pipeline.verified_cached_model", side_effect=AssertionError("cached graph must remain resident")):
+                warm_result = pipeline.process(second_request)
+            self.assertNotIn("startupTimings", warm_result)
+            self.assertEqual(result["sha256"], warm_result["sha256"])
+            self.assertEqual(fake.calls, 2)
+
     def test_cached_stage_retains_sub_millisecond_duration(self) -> None:
         timings: dict[str, float] = {}
         sentinel = object()
@@ -394,6 +422,43 @@ class PipelineTests(unittest.TestCase):
                 with self.assertRaises(ProcessingFailure):
                     pipeline.preload(Path("/cache"), "mps")
             self.assertEqual(verify.call_count, 2)
+
+    def test_explicit_prepared_model_resolver_checks_identity_again_before_warm_use(self) -> None:
+        model = Path("/model.onnx")
+        resolver = Mock(return_value=model)
+        factory = Mock(return_value=FakeSeparator())
+        pipeline = RuntimePipeline(factory, model_resolver=resolver)
+        cache = Path("/cache")
+        pipeline.preload(cache, "directml", 0)
+        self.assertEqual(pipeline._verified_model(cache), model)
+        self.assertEqual(resolver.call_count, 2)
+        resolver.return_value = Path("/replacement.onnx")
+        with self.assertRaises(ProcessingFailure):
+            pipeline._verified_model(cache)
+        self.assertEqual(factory.call_count, 1)
+
+    def test_detach_preserves_graph_and_invalidation_drops_all_cached_model_references(self) -> None:
+        separator = FakeSeparator()
+        separator.detach_job = Mock()
+        pipeline = RuntimePipeline(lambda *_: separator)
+        graph = pipeline._get_separator("directml", Path("/model.onnx"), 0)
+        pipeline._model_cache_root = Path("/cache")
+        pipeline._startup_progress = lambda _: None
+        pipeline.detach_job()
+        separator.detach_job.assert_called_once_with()
+        self.assertIs(pipeline._separator, graph)
+        self.assertTrue(pipeline.model_loaded)
+        self.assertIsNone(pipeline._startup_progress)
+        pipeline.invalidate()
+        self.assertFalse(pipeline.model_loaded)
+        self.assertIsNone(pipeline._separator_key)
+        self.assertIsNone(pipeline._model_cache_root)
+
+    def test_detach_requires_an_explicit_upstream_state_release(self) -> None:
+        pipeline = RuntimePipeline(lambda *_: FakeSeparator())
+        pipeline._get_separator("directml", Path("/model.onnx"), 0)
+        with self.assertRaises(SeparatorError):
+            pipeline.detach_job()
 
     def payload(
         self,

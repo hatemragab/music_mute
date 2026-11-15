@@ -93,6 +93,7 @@ test(
         active: true,
       });
       const accountId = new Types.ObjectId();
+      const otherAccountId = new Types.ObjectId();
       const now = new Date();
       await users.create({
         _id: accountId,
@@ -107,19 +108,33 @@ test(
         profileSyncedAt: now,
         lastSeenAt: now,
       });
+      await users.create({
+        _id: otherAccountId,
+        firebaseUid: 'account-policy-other-user',
+        email: 'account-policy-other-user@example.invalid',
+        emailVerified: true,
+        displayName: 'Other Account Policy User',
+        nameSource: 'email_prefix',
+        providerIds: ['password'],
+        status: 'active',
+        sessionsRevokedAfterSec: 0,
+        profileSyncedAt: now,
+        lastSeenAt: now,
+      });
       const operations = new AdminOperationsService(
         connection,
         accesses,
         receipts,
         new AdminAuditService(events),
       );
+      const config = new ConfigService({ AUDIO_PROCESSING_ENABLED: true });
       const service = new AccountPolicyService(
         policies,
         overrides,
         fences,
         users,
         operations,
-        new ConfigService({ AUDIO_PROCESSING_ENABLED: true }),
+        config,
       );
 
       const globalRace = await Promise.allSettled([
@@ -134,6 +149,106 @@ test(
       assert.equal(global.revision, 1);
       assert.ok(
         [7_200, 10_800].includes(global.values.monthlyProcessingSeconds),
+      );
+      assert.equal(global.linkImportEnabled, false);
+      assert.deepEqual(global.linkImportDisabledUserIds, []);
+      const selectedUserIds = [
+        String(accountId),
+        String(otherAccountId),
+      ].sort();
+      const visibilityUpdate = await service.update(actor, {
+        ...policyCommand(1, global.values.monthlyProcessingSeconds),
+        linkImportEnabled: true,
+        linkImportDisabledCountries: ['US', 'EG'],
+        linkImportDisabledUserIds: [...selectedUserIds].reverse(),
+      });
+      assert.equal(visibilityUpdate.revision, 2);
+      assert.deepEqual(visibilityUpdate.linkImportDisabledCountries, [
+        'EG',
+        'US',
+      ]);
+      assert.equal(visibilityUpdate.linkImportForcedOff, true);
+      assert.deepEqual(
+        visibilityUpdate.linkImportDisabledUserIds,
+        selectedUserIds,
+      );
+      assert.equal(
+        (await policies.findById('standard').lean()).linkImportEnabled,
+        true,
+      );
+      assert.deepEqual(
+        (await policies.findById('standard').lean()).linkImportDisabledUserIds,
+        selectedUserIds,
+      );
+      config.set('URL_IMPORT_ENABLED', true);
+      const selectedPolicy = await service.publicPolicy(
+        '2',
+        '1',
+        'GB',
+        String(accountId),
+      );
+      assert.equal(selectedPolicy.linkImportVisible, false);
+      assert.equal(selectedPolicy.linkImportReason, 'user_hidden');
+      assert.equal('linkImportDisabledUserIds' in selectedPolicy, false);
+      assert.equal(
+        JSON.stringify(selectedPolicy).includes(String(otherAccountId)),
+        false,
+      );
+      assert.equal(
+        (await service.publicPolicy('2', '1', 'GB')).linkImportVisible,
+        true,
+      );
+      // Existing exclusions can survive deletion and be cleared using the same policy write.
+      await users.deleteOne({ _id: otherAccountId });
+      const legacyUpdate = await service.update(
+        actor,
+        policyCommand(2, global.values.monthlyProcessingSeconds),
+      );
+      assert.equal(legacyUpdate.revision, 3);
+      assert.equal(legacyUpdate.linkImportEnabled, true);
+      assert.deepEqual(legacyUpdate.linkImportDisabledCountries, ['EG', 'US']);
+      assert.deepEqual(legacyUpdate.linkImportDisabledUserIds, selectedUserIds);
+      for (const [userIds, code] of [
+        [[String(new Types.ObjectId())], 'RESOURCE_NOT_FOUND'],
+        [[String(accountId), String(accountId)], 'INVALID_REQUEST'],
+        [['ABCDEFABCDEFABCDEFABCDEF'], 'INVALID_REQUEST'],
+        [[`${String(accountId)}\n`], 'INVALID_REQUEST'],
+        [[null], 'INVALID_REQUEST'],
+      ]) {
+        await assert.rejects(
+          service.update(actor, {
+            ...policyCommand(3, global.values.monthlyProcessingSeconds),
+            linkImportDisabledUserIds: userIds,
+          }),
+          (error) => error.getResponse().code === code,
+        );
+      }
+      assert.equal((await service.current()).revision, 3);
+      const restoreCommand = {
+        ...policyCommand(3, global.values.monthlyProcessingSeconds),
+        linkImportDisabledUserIds: [],
+      };
+      const restored = await service.update(actor, restoreCommand);
+      assert.equal(restored.revision, 4);
+      assert.deepEqual(restored.linkImportDisabledUserIds, []);
+      assert.deepEqual(await service.update(actor, restoreCommand), restored);
+      assert.equal((await service.current()).revision, 4);
+      assert.equal(
+        (await service.publicPolicy('2', '1', 'GB', String(accountId)))
+          .linkImportVisible,
+        true,
+      );
+      assert.equal(
+        (await service.publicPolicy('2', '1', 'EG', String(accountId)))
+          .linkImportReason,
+        'country_hidden',
+      );
+      await assert.rejects(
+        service.update(actor, {
+          ...policyCommand(2, global.values.monthlyProcessingSeconds),
+          linkImportEnabled: false,
+        }),
+        (error) => error.getResponse().code === 'REVISION_CONFLICT',
       );
 
       const created = await service.putOverride(actor, accountId, {
@@ -236,7 +351,16 @@ test(
       );
 
       const successfulEvents = await events.find().lean();
-      assert.equal(successfulEvents.length, 4);
+      assert.equal(successfulEvents.length, 7);
+      assert.ok(
+        successfulEvents.some((event) =>
+          event.processingChanges?.some(
+            (change) =>
+              change.field === 'linkImportDisabledUserIds' &&
+              change.after === selectedUserIds.join(','),
+          ),
+        ),
+      );
       assert.deepEqual(
         new Set(successfulEvents.map((event) => event.resourceType)),
         new Set(['account_policy', 'account_policy_override']),

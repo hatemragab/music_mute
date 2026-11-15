@@ -110,15 +110,24 @@ def relay_input(child: subprocess.Popen[bytes]) -> None:
     os._exit(2)
 
 
+def guardian_arguments(arguments: list[str]) -> tuple[int, list[str], bool]:
+    """Private trusted launch modes; arbitrary creation flags are never accepted."""
+    if len(arguments) < 4 or arguments[0] != "--parent-pid":
+        raise ValueError("Invalid Windows guardian arguments")
+    parent_pid = int(arguments[1])
+    if parent_pid <= 0:
+        raise ValueError("Invalid Windows guardian parent")
+    detached_console = arguments[2] == "--detached-console"
+    separator = 3 if detached_console else 2
+    if (len(arguments) <= separator + 1 or arguments[separator] != "--"
+            or (detached_console and sys.platform != "win32")):
+        raise ValueError("Invalid Windows guardian mode")
+    return parent_pid, arguments[separator + 1:], detached_console
+
+
 def main() -> int:
-    arguments = sys.argv[1:]
-    if len(arguments) < 4 or arguments[0] != "--parent-pid" or arguments[2] != "--":
-        return 2
     try:
-        parent_pid = int(arguments[1])
-        if parent_pid <= 0:
-            return 2
-        arguments = arguments[3:]
+        parent_pid, arguments, detached_console = guardian_arguments(sys.argv[1:])
         job = own_job()
         watch_parent(parent_pid)
         import msvcrt
@@ -126,6 +135,10 @@ def main() -> int:
         child = subprocess.Popen(
             [sys.executable, "-B", *arguments], stdin=subprocess.PIPE,
             stdout=None, stderr=None, bufsize=0, close_fds=True,
+            # A console-detached parent otherwise creates an extra console host
+            # for this engine. DETACHED_PROCESS preserves the inherited Job chain
+            # and explicit pipes; CREATE_BREAKAWAY_FROM_JOB is never supplied.
+            creationflags=0x00000008 if detached_console else 0,
         )
         threading.Thread(target=relay_input, args=(child,), daemon=True).start()
         code = child.wait()

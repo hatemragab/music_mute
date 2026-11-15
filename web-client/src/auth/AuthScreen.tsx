@@ -4,9 +4,11 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
 } from "firebase/auth";
-import { useState, type FormEvent } from "react";
-import { auth } from "./AuthProvider";
+import { useRef, useState, type FormEvent } from "react";
+import { auth, useAuth } from "./AuthProvider";
+import { googleSignInErrorCode, usesGoogleRedirect } from "./googleSignIn";
 import { friendlyError, useI18n } from "../i18n";
 import { SoloSignalMark } from "../brand/SoloSignalMark";
 import { GoogleGMark } from "../brand/GoogleGMark";
@@ -15,20 +17,28 @@ import { MacDownloadCallout } from "../product/MacDownloadCallout";
 type Mode = "login" | "register" | "reset";
 export function AuthScreen() {
   const { t, lang, setLang } = useI18n();
+  const { state } = useAuth();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const authBusy = useRef(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const shownMessage =
+    message ??
+    (state.phase === "signedOut" && state.message
+      ? friendlyError(new Error(state.message), t)
+      : "");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (authBusy.current) return;
     if (mode === "register" && password !== confirm) {
       setMessage(t("passwordMismatch"));
       return;
     }
+    authBusy.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -41,18 +51,24 @@ export function AuthScreen() {
     } catch (error) {
       setMessage(friendlyError(error, t));
     } finally {
+      authBusy.current = false;
       setBusy(false);
     }
   }
 
   async function google() {
+    if (authBusy.current) return;
+    authBusy.current = true;
     setBusy(true);
     setMessage("");
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      const provider = new GoogleAuthProvider();
+      if (usesGoogleRedirect()) await signInWithRedirect(auth, provider);
+      else await signInWithPopup(auth, provider);
     } catch (error) {
-      setMessage(friendlyError(error, t));
+      setMessage(friendlyError({ code: googleSignInErrorCode(error) }, t));
     } finally {
+      authBusy.current = false;
       setBusy(false);
     }
   }
@@ -132,9 +148,9 @@ export function AuthScreen() {
               />
             </label>
           )}
-          {message && (
+          {shownMessage && (
             <p role="alert" className="notice">
-              {message}
+              {shownMessage}
             </p>
           )}
           <button className="primary" type="submit" disabled={busy}>

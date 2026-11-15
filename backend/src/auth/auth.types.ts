@@ -1,6 +1,13 @@
 export type SupportedProvider = 'password' | 'google.com' | 'apple.com';
 export type Platform = 'android' | 'ios';
-export type ClientPlatform = Platform | 'macos' | 'web';
+export const CLIENT_PLATFORMS = [
+  'android',
+  'ios',
+  'macos',
+  'windows',
+  'web',
+] as const;
+export type ClientPlatform = (typeof CLIENT_PLATFORMS)[number];
 
 export interface VerifiedIdentity {
   uid: string;

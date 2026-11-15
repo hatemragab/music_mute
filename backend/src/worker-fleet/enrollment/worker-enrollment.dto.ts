@@ -47,6 +47,9 @@ export class ExchangeWorkerInvitationDto {
 
 export class GetWorkerInstallationArtifactsDto {
   @IsIn(WORKER_PLATFORMS) platform!: WorkerPlatform;
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn(['windows-user'])
+  installationProfile?: 'windows-user';
 }
 
 export class CreateWorkerQualificationUploadDto {
@@ -90,6 +93,9 @@ export class WorkerHardwareReportDto {
 }
 
 export class WorkerRuntimeIdentityDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsIn(['windows-user'])
+  installationProfile?: 'windows-user';
   @Transform(trim) @IsString() @Length(1, 100) workerVersion!: string;
   @IsIn([WORKER_PROTOCOL_VERSION]) protocolVersion!: number;
   @Matches(/^[a-f0-9]{64}$/) manifestDigest!: string;

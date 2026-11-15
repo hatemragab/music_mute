@@ -15,7 +15,7 @@ class UpdateStoreTest {
                 schemaVersion = 1,
                 revision = 9,
                 platform = "android",
-                distribution = "direct",
+                distribution = "play",
                 minimumBuild = 3,
                 target =
                     ReleaseTarget(
@@ -23,8 +23,8 @@ class UpdateStoreTest {
                         versionName = "0.1.2",
                         buildNumber = 3,
                         changelogEn = "In-app updates",
-                        source = "direct_apk",
-                        artifact = ReleaseArtifact(4, "a".repeat(64), "b".repeat(64)),
+                        source = "google_play",
+                        storeUrl = "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
                     ),
                 checkedAt = "2026-09-12T00:00:00.000Z",
             )

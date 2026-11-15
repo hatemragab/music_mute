@@ -23,6 +23,8 @@ import {
 import { createMacUserLayout } from "../src/platform/macos/user-paths.js";
 import type { MacUserCommandContext } from "../src/platform/macos/user-cli.js";
 import { runOperatorCommand } from "../src/platform/shared/operator-cli.js";
+import { MacLaunchAgentError } from "../src/platform/macos/launch-agent.js";
+import { WorkerEnrollmentError } from "../src/enrollment/enrollment-client.js";
 
 const requestId = "7161b679-e633-4280-bbb5-831992549700";
 const roots: string[] = [];
@@ -156,6 +158,186 @@ describe("macOS app command facade", () => {
       type: "RESULT",
       payload: { nested: { note: "[REDACTED]" } },
     });
+  });
+
+  it.each([
+    "WORKER_SERVICE_ENABLE_FAILED",
+    "WORKER_SERVICE_START_FAILED",
+  ] as const)(
+    "reports %s without exposing launchctl output or its cause",
+    async (code) => {
+      const output: AppControlResponse[] = [];
+      await executeAppControlCommand(
+        frame("install", { label: "Mac" }),
+        (value) => output.push(value),
+        {
+          runCommand: async () => {
+            throw new MacLaunchAgentError(
+              code,
+              new Error("credential=private-value"),
+            );
+          },
+        },
+      );
+      expect(output).toEqual([
+        {
+          protocol_version: 1,
+          request_id: requestId,
+          type: "ERROR",
+          error_code: code,
+        },
+      ]);
+      expect(JSON.stringify(output)).not.toContain("private-value");
+    },
+  );
+
+  it.each([
+    ["WORKER_CONFLICT", 409, false],
+    ["WORKER_EXPIRED", 410, false],
+    ["WORKER_RATE_LIMITED", 429, true],
+    ["WORKER_DEPENDENCY_UNAVAILABLE", 503, true],
+    ["NETWORK_UNAVAILABLE", 0, true],
+  ] as const)(
+    "preserves safe enrollment details for %s within the v1 error envelope",
+    async (code, status, retryable) => {
+      const output: AppControlResponse[] = [];
+      await executeAppControlCommand(
+        frame("install", { label: "Mac" }),
+        (value) => output.push(value),
+        {
+          runCommand: async () => {
+            throw new WorkerEnrollmentError(code, status, retryable);
+          },
+        },
+      );
+      expect(output).toEqual([
+        {
+          protocol_version: 1,
+          request_id: requestId,
+          type: "ERROR",
+          error_code: "ENROLLMENT_FAILED",
+          payload: {
+            backend_error_code: code,
+            http_status: status,
+            retryable,
+          },
+        },
+      ]);
+    },
+  );
+
+  it("retains enrollment details through a CLI conflict wrapper without exposing its text", async () => {
+    const output: AppControlResponse[] = [];
+    await executeAppControlCommand(
+      frame("install", { label: "Mac" }),
+      (value) => output.push(value),
+      {
+        runCommand: async () => {
+          throw new Error("credential=private-value https://private.example", {
+            cause: new WorkerEnrollmentError("WORKER_CONFLICT", 409, false),
+          });
+        },
+      },
+    );
+    expect(output).toEqual([
+      {
+        protocol_version: 1,
+        request_id: requestId,
+        type: "ERROR",
+        error_code: "ENROLLMENT_FAILED",
+        payload: {
+          backend_error_code: "WORKER_CONFLICT",
+          http_status: 409,
+          retryable: false,
+        },
+      },
+    ]);
+    expect(JSON.stringify(output)).not.toContain("private");
+  });
+
+  it.each([
+    "PRIVATE_CREDENTIAL_VALUE",
+    "credential=secret https://private.example",
+  ])(
+    "replaces an unrecognized enrollment code with the bounded HTTP status",
+    async (code) => {
+      const output: AppControlResponse[] = [];
+      await executeAppControlCommand(
+        frame("install", { label: "Mac" }),
+        (value) => output.push(value),
+        {
+          runCommand: async () => {
+            throw Object.assign(new WorkerEnrollmentError(code, 403, false), {
+              credential: "private-credential",
+              url: "https://private.example",
+              response: { code },
+            });
+          },
+        },
+      );
+      expect(output).toEqual([
+        {
+          protocol_version: 1,
+          request_id: requestId,
+          type: "ERROR",
+          error_code: "ENROLLMENT_FAILED",
+          payload: {
+            backend_error_code: "HTTP_403",
+            http_status: 403,
+            retryable: false,
+          },
+        },
+      ]);
+      expect(JSON.stringify(output)).not.toContain(code);
+      expect(JSON.stringify(output)).not.toContain("private");
+    },
+  );
+
+  it.each([-1, 0, 200, 399, 600, 503.5, Number.NaN])(
+    "omits enrollment details for invalid HTTP status %s",
+    async (status) => {
+      const output: AppControlResponse[] = [];
+      await executeAppControlCommand(
+        frame("install", { label: "Mac" }),
+        (value) => output.push(value),
+        {
+          runCommand: async () => {
+            throw new WorkerEnrollmentError("WORKER_CONFLICT", status, false);
+          },
+        },
+      );
+      expect(output).toEqual([
+        {
+          protocol_version: 1,
+          request_id: requestId,
+          type: "ERROR",
+          error_code: "ENROLLMENT_FAILED",
+        },
+      ]);
+    },
+  );
+
+  it("bounds cyclic error causes and preserves the generic envelope", async () => {
+    const error = new Error("credential=private-value");
+    error.cause = error;
+    const output: AppControlResponse[] = [];
+    await executeAppControlCommand(
+      frame("install", { label: "Mac" }),
+      (value) => output.push(value),
+      {
+        runCommand: async () => {
+          throw error;
+        },
+      },
+    );
+    expect(output).toEqual([
+      {
+        protocol_version: 1,
+        request_id: requestId,
+        type: "ERROR",
+        error_code: "OPERATION_FAILED",
+      },
+    ]);
   });
 
   it("uses a safe code for any raw dependency error", async () => {

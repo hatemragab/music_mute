@@ -45,6 +45,7 @@ function fixture() {
       tokensValidAfterTime: undefined as string | undefined,
     })),
   };
+  const devices = { observeLocation: vi.fn() };
   const service = new RealtimeAuthService(
     redis as never,
     {
@@ -53,6 +54,7 @@ function fixture() {
     firebase as never,
     { findOne: () => query(user) } as never,
     { findOne: () => query(admin) } as never,
+    devices as never,
   );
   const req = {
     headers: { origin: 'https://app.example.test' },
@@ -65,10 +67,31 @@ function fixture() {
     },
     user: { _id: new Types.ObjectId() },
   } as unknown as AuthRequest;
-  return { service, redis, entries, firebase, req, user, admin };
+  return { service, redis, entries, firebase, req, user, admin, devices };
 }
 
 describe('realtime tickets', () => {
+  it('pins the country to each ticket and observes only its identified installation', async () => {
+    const f = fixture();
+    f.req.headers['cf-ipcountry'] = 'EG';
+    f.req.headers['x-installation-id'] = 'd7ea7de6-52e9-4b96-8834-3b517941bdb0';
+    const egypt = await f.service.mint(f.req, 'owner');
+    f.req.headers['cf-ipcountry'] = 'US';
+    const usa = await f.service.mint(f.req, 'owner');
+    expect(
+      (await f.service.consume(egypt.ticket, f.req.headers.origin))
+        .visitorCountry,
+    ).toBe('EG');
+    expect(
+      (await f.service.consume(usa.ticket, f.req.headers.origin))
+        .visitorCountry,
+    ).toBe('US');
+    expect(f.devices.observeLocation).toHaveBeenCalledWith(
+      f.req.user!._id.toHexString(),
+      'd7ea7de6-52e9-4b96-8834-3b517941bdb0',
+      expect.objectContaining({ country: 'EG' }),
+    );
+  });
   it('stores a digest and scoped identity, never the Firebase bearer; consumes once', async () => {
     const f = fixture();
     const grant = await f.service.mint(f.req, 'owner');

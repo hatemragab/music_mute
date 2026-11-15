@@ -376,7 +376,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
 
     const releaseProposalResponse = await fetch(
-      `${api}/admin/releases/proposal?platform=android&source=direct_apk`,
+      `${api}/admin/releases/proposal?platform=android&source=google_play`,
       {
         headers: {
           accept: "application/json",
@@ -390,29 +390,15 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
     results.releaseCreate = await request("POST", "/admin/releases", {
       platform: "android",
-      source: "direct_apk",
+      source: "google_play",
       versionName: releaseProposal.suggested.versionName,
       buildNumber: releaseProposal.suggested.buildNumber,
       changelogEn: "Validate release creation contract",
-      storeUrl: null,
+      storeUrl:
+        "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
       operationId: crypto.randomUUID(),
       reason: "Validate release creation contract",
     });
-    results.releaseUploadReserve = await request(
-      "POST",
-      `/admin/releases/${missingId}/uploads`,
-      {
-        bytes: 1024,
-        sha256Hex: "a".repeat(64),
-        expectedRevision: 0,
-        operationId: crypto.randomUUID(),
-      },
-    );
-    results.releaseUploadComplete = await request(
-      "POST",
-      `/admin/releases/${missingId}/uploads/${missingId}/completions`,
-      { operationId: crypto.randomUUID() },
-    );
 
     return results;
   }, E2E_API_ORIGIN);

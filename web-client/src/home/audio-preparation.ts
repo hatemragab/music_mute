@@ -1,3 +1,4 @@
+import { localDiagnostics } from "../diagnostics/local-debug";
 import type { Conversion as ConversionType } from "mediabunny";
 
 export const AUDIO_TYPES = {
@@ -210,6 +211,19 @@ export function uploadWithProgress(
       reject(new DOMException("Cancelled", "AbortError"));
       return;
     }
+    const started = performance.now();
+    const fields = {
+      operationId: crypto.randomUUID(),
+      operation: "PUT",
+      bytes: blob.size,
+      contentType: declaration.contentType,
+    };
+    localDiagnostics.emit(
+      "http.upload_started",
+      { body: { omitted: "binary_upload_and_private_grant" } },
+      "debug",
+      fields,
+    );
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", grant.url);
     xhr.withCredentials = false;
@@ -221,15 +235,39 @@ export function uploadWithProgress(
         onProgress(Math.round((event.loaded / event.total) * 100));
     };
     xhr.onload = () => {
+      localDiagnostics.emit(
+        "http.upload_completed",
+        { body: { omitted: "binary_upload_and_private_grant" } },
+        xhr.status >= 200 && xhr.status < 300 ? "info" : "warn",
+        {
+          ...fields,
+          status: xhr.status,
+          durationMs: Math.round(performance.now() - started),
+          phase: "http_completed",
+          result: xhr.status >= 200 && xhr.status < 300 ? "success" : "failure",
+        },
+      );
       signal.removeEventListener("abort", abort);
       if (xhr.status >= 200 && xhr.status < 300) resolve();
       else reject(new Error(`UPLOAD_HTTP_${xhr.status}`));
     };
     xhr.onerror = () => {
+      localDiagnostics.emit("http.upload_failed", undefined, "error", {
+        ...fields,
+        durationMs: Math.round(performance.now() - started),
+        phase: "network_failure",
+        result: "failure",
+      });
       signal.removeEventListener("abort", abort);
       reject(new Error("UPLOAD_NETWORK_ERROR"));
     };
     xhr.onabort = () => {
+      localDiagnostics.emit("http.upload_aborted", undefined, "warn", {
+        ...fields,
+        durationMs: Math.round(performance.now() - started),
+        phase: "aborted",
+        result: "cancelled",
+      });
       signal.removeEventListener("abort", abort);
       reject(new DOMException("Cancelled", "AbortError"));
     };

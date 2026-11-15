@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import type { Platform } from '../../auth/auth.types.js';
 import type { UpdateSource } from '../release.types.js';
+import { adminError } from '../../admin/admin-errors.js';
 export class ReleaseMutationDto {
   @IsUUID('4') operationId!: string;
   @Transform(({ value }: { value: unknown }) =>
@@ -22,7 +23,13 @@ export class ReleaseMutationDto {
 }
 export class ReleaseDraftDto extends ReleaseMutationDto {
   @IsIn(['android', 'ios']) platform!: Platform;
-  @IsIn(['direct_apk', 'google_play', 'app_store']) source!: UpdateSource;
+  @Transform(({ value }: { value: unknown }) => {
+    // Retired clients receive the domain's stable error before generic DTO validation.
+    if (value === 'direct_apk') throw adminError('INVALID_REQUEST');
+    return value;
+  })
+  @IsIn(['google_play', 'app_store'])
+  source!: UpdateSource;
   @IsString() @Length(1, 64) versionName!: string;
   @IsInt() @Min(1) @Max(2147483647) buildNumber!: number;
   @IsString() @Length(1, 10000) changelogEn!: string;

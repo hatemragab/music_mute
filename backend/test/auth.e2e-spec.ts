@@ -16,6 +16,30 @@ describe('Firebase account API composition', () => {
     await f?.app.close();
   });
   const token = 'Bearer fixture-owner-token';
+  it('bootstraps a Windows desktop through the shared account/device and independent policy contract', async () => {
+    f.state.policy.platforms.windows = { minimumBuild: 2 };
+    const response = await request(f.app.getHttpServer())
+      .post('/auth/sessions')
+      .set('Authorization', token)
+      .send({
+        ...wireDeviceReport,
+        platform: 'windows',
+        os_version: '10.0.19045',
+      })
+      .expect(200);
+    expect(f.devices.sync).toHaveBeenCalledWith(
+      f.ownerId.toString(),
+      100,
+      expect.objectContaining({ platform: 'windows' }),
+    );
+    expect(response.body.policy.platforms.windows).toEqual({
+      minimum_build: 2,
+    });
+    expect(response.body.access).toEqual({
+      allowed: false,
+      reason: 'APP_UPDATE_REQUIRED',
+    });
+  });
   it('rejects real duplicate Authorization headers before checking the token', async () => {
     await f.app.listen(0, '127.0.0.1');
     const address = f.app.getHttpServer().address() as AddressInfo;

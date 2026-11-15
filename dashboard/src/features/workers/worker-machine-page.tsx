@@ -55,6 +55,7 @@ import {
 } from "./worker-insight-panels";
 import type { WorkerMachineDetail } from "./worker-types";
 import { DeleteWorkerMachineControl } from "./delete-worker-machine-control";
+import { workerInstallationProfile } from "./worker-platform";
 
 type MachineAction =
   | "pause"
@@ -340,6 +341,12 @@ export function WorkerMachinePage() {
                 <Datum label="Release">
                   {data.machine.runtime?.workerVersion ?? "Not reported"}
                 </Datum>
+                <Datum label="Installation profile">
+                  {workerInstallationProfile(data.machine).label}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {workerInstallationProfile(data.machine).detail}
+                  </p>
+                </Datum>
                 <Datum label="Protocol">
                   {data.machine.runtime?.protocolVersion ?? "Not reported"}
                 </Datum>
@@ -356,6 +363,12 @@ export function WorkerMachinePage() {
                   {data.installation?.phase ?? "Not available"}
                 </Datum>
               </dl>
+              <p className="text-xs text-muted-foreground">
+                Hardware and runtime fields are reported by the installation.
+                Backend qualification outcome and current machine policy remain
+                separate; a displayed local benchmark or profile does not grant
+                processing capacity.
+              </p>
             </PageSection>
             <PageSection title="Session and capacity">
               {data.machine.session ? (

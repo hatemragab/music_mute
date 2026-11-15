@@ -1,3 +1,4 @@
+import { initializeLocalDiagnostics } from "../src/diagnostics/local-debug";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
@@ -11,12 +12,20 @@ import "../src/styles.css";
 import { RealtimeClient } from "../src/realtime/client";
 import { realtimeFixture } from "./realtime-fixture";
 
+initializeLocalDiagnostics();
+
 const networkRealtime = new URLSearchParams(location.search).has(
   "network-realtime",
 );
 const importRetryPreview = new URLSearchParams(location.search).has(
   "import-retry",
 );
+const playerArtworkPreview = new URLSearchParams(location.search).has(
+  "player-thumbnails",
+);
+const thumbnailPreview =
+  playerArtworkPreview ||
+  new URLSearchParams(location.search).has("library-thumbnails");
 const failedImportId = "4123456789abcdef01234567";
 const retryHttp = new ApiClient({
   origin: "http://127.0.0.1:3000",
@@ -29,6 +38,9 @@ const jobs = [
     id: "0123456789abcdef01234567",
     requestId: crypto.randomUUID(),
     sourceTitle: "City lights",
+    thumbnailUrl: thumbnailPreview
+      ? "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
+      : null,
     displayName: "City lights — vocals",
     sourceKind: "file",
     status: "ready",
@@ -59,6 +71,9 @@ const jobs = [
     id: "3123456789abcdef01234567",
     requestId: crypto.randomUUID(),
     sourceTitle: "Second take",
+    thumbnailUrl: thumbnailPreview
+      ? "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"
+      : null,
     displayName: "Second take",
     sourceKind: "file",
     status: "ready",
@@ -153,6 +168,11 @@ const api = {
     throw new Error(`Unmocked read: ${path}`);
   },
   post: async (path: string, body: unknown, signal?: AbortSignal) => {
+    if (playerArtworkPreview && /^\/jobs\/[^/]+\/download-grants$/.test(path))
+      return {
+        url: "https://media.example.invalid/synthetic-audio.mp3",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      };
     if (importRetryPreview && path === "/media-imports")
       return retryHttp.post(path, body, signal);
     throw new Error("Preview is read-only");

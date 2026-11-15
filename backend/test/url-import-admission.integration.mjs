@@ -9,7 +9,14 @@ import { accountFixture } from './helpers/account-fixture.mjs';
 import { PROCESSING_MODELS } from '../dist/processing/processing-persistence.module.js';
 import { ProcessingTransactions } from '../dist/processing/processing-transactions.js';
 import { ProcessingUsageService } from '../dist/processing-usage/processing-usage.service.js';
-import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../dist/admin-settings/account-policy.schema.js';
+import {
+  AccountPolicy,
+  AccountPolicySchema,
+  AccountPolicyOverride,
+  AccountPolicyOverrideSchema,
+  DEFAULT_ACCOUNT_POLICY_VALUES,
+} from '../dist/admin-settings/account-policy.schema.js';
+import { AccountPolicyService } from '../dist/admin-settings/account-policy.service.js';
 import { ProcessingAdmissionService } from '../dist/admin-settings/processing-admission.service.js';
 import { JobsService } from '../dist/jobs/jobs.service.js';
 import {
@@ -31,7 +38,7 @@ test('URL acquisition holds allowance before paid work and releases safely', asy
   for (const { name, schema } of PROCESSING_MODELS)
     connection.model(name, schema);
   const records = connection.model(MediaImport.name, MediaImportSchema);
-  const owners = Array.from({ length: 6 }, () => new Types.ObjectId());
+  const owners = Array.from({ length: 7 }, () => new Types.ObjectId());
   const { users } = await accountFixture(connection, owners.map(String));
   await Promise.all(
     Object.values(connection.models).map((model) => model.init()),
@@ -44,15 +51,6 @@ test('URL acquisition holds allowance before paid work and releases safely', asy
     dailyUploadGrants: 2,
     monthlyUploadGrants: 3,
   };
-  const policies = {
-    effective: async () => ({
-      values,
-      acceptNewJobs: true,
-      globalRevision: 1,
-      overrideRevision: null,
-    }),
-    touchGlobalFence: async () => {},
-  };
   const config = new ConfigService({
     AUDIO_PROCESSING_ENABLED: true,
     PROCESSING_URL_SECONDS: 900,
@@ -60,6 +58,35 @@ test('URL acquisition holds allowance before paid work and releases safely', asy
     URL_IMPORT_MAX_OUTSTANDING: 20,
     URL_IMPORT_MIN_FREE_BYTES: 0,
     URL_IMPORT_TEMP_ROOT: join(native.directory, 'imports'),
+  });
+  const policyRecords = connection.model(
+    AccountPolicy.name,
+    AccountPolicySchema,
+  );
+  const policyOverrides = connection.model(
+    AccountPolicyOverride.name,
+    AccountPolicyOverrideSchema,
+  );
+  const policies = new AccountPolicyService(
+    policyRecords,
+    policyOverrides,
+    model('ProcessingAdmissionFence'),
+    users,
+    {},
+    config,
+  );
+  await policies.onModuleInit();
+  await policyRecords.create({
+    _id: 'standard',
+    ...values,
+    revision: 1,
+    acceptNewJobs: true,
+    maintenanceMessageEn: '',
+    maintenanceMessageAr: null,
+    updatedBy: 'fixture',
+    updatedAt: new Date(),
+    linkImportEnabled: false,
+    linkImportDisabledCountries: ['EG'],
   });
   const usage = new ProcessingUsageService(
     model('AccountUsagePeriod'),
@@ -334,6 +361,86 @@ test('URL acquisition holds allowance before paid work and releases safely', asy
         ),
         errorCode('PROCESSING_ALLOWANCE_EXHAUSTED'),
       );
+    },
+  );
+
+  await t.test(
+    'native UI visibility does not gate import creation, acquisition or its durable retry',
+    async () => {
+      const owner = owners[6];
+      assert.equal(
+        (await policies.publicPolicy('2', '1', 'EG')).linkImportVisible,
+        false,
+      );
+      const created = await imports.create(
+        String(owner),
+        'https://youtu.be/aqz-KE-bpKQ',
+        randomUUID(),
+      );
+      assert.equal(created.status, 'queued');
+      await policyRecords.updateOne(
+        { _id: 'standard' },
+        {
+          $set: {
+            linkImportEnabled: true,
+            linkImportDisabledUserIds: [String(owner)],
+          },
+          $inc: { revision: 1 },
+        },
+      );
+      assert.equal(
+        (await policies.publicPolicy('2', '1', 'EG')).linkImportVisible,
+        false,
+      );
+      assert.equal(
+        (await policies.publicPolicy('2', '1', 'US')).linkImportVisible,
+        true,
+      );
+      const ownerPolicy = await policies.publicPolicy(
+        '2',
+        '1',
+        'US',
+        String(owner),
+      );
+      assert.equal(ownerPolicy.linkImportVisible, false);
+      assert.equal(ownerPolicy.linkImportReason, 'user_hidden');
+      assert.equal('linkImportDisabledUserIds' in ownerPolicy, false);
+      assert.equal(
+        (await records.findById(created.importId).lean()).status,
+        'queued',
+      );
+      await records.updateOne(
+        { _id: created.importId },
+        {
+          $set: {
+            status: 'downloading',
+            executionId: randomUUID(),
+            acquisitionAttempt: 1,
+            maxAcquisitionAttempts: 2,
+          },
+        },
+      );
+      let record = await records.findById(created.importId).lean();
+      const limits = await imports.reserveAcquisition(record);
+      await policyRecords.updateOne(
+        { _id: 'standard' },
+        { $set: { linkImportEnabled: false }, $inc: { revision: 1 } },
+      );
+      await records.updateOne(
+        { _id: record._id },
+        { $set: { acquisitionAttempt: 2 } },
+      );
+      record = await records.findById(record._id).lean();
+      assert.equal(record.status, 'downloading');
+      assert.deepEqual(await imports.reserveAcquisition(record), limits);
+      assert.equal(
+        (await usage.readUsage(owner)).processing.reservedSeconds,
+        limits.maxDuration,
+      );
+      await imports.failAcquisition(record, {
+        code: 'IMPORT_DEPENDENCY_FAILED',
+        message: 'End synthetic regression fixture',
+      });
     },
   );
 });

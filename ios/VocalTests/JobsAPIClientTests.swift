@@ -4,6 +4,61 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class JobsAPIClientTests: XCTestCase {
+  func testPolicyCheckoutIsPublicWhenSignedOutAndDoesNotAcquireAToken() async throws {
+    let token = JobsTokenFixture()
+    token.tokenSession = nil
+    let api = client(token)
+    JobsURLProtocol.handler = { request in
+      XCTAssertEqual(request.url?.path, "/processing-policy")
+      XCTAssertEqual(request.url?.query, "schema_version=2")
+      XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "X-Installation-Id"))
+      return (
+        200, ["Cache-Control": "no-store"],
+        Data(
+          """
+          {"schema_version":2,"accept_new_jobs":true,"accept_long_jobs":true,
+          "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,
+          "max_local_source_bytes":200000000,"max_preparation_seconds":120,"long_job_threshold_seconds":600},
+          "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
+          "fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}},
+          "link_import_visible":false,"link_import_policy_revision":3}
+          """.utf8)
+      )
+    }
+    let policy = try await api.processingPolicy()
+    XCTAssertEqual(policy.linkImportVisible, false)
+    XCTAssertEqual(try policy.validated(), .standard)
+    XCTAssertTrue(token.refreshes.isEmpty)
+  }
+
+  func testPolicyCheckoutUsesOwnerTokenWhenSignedIn() async throws {
+    let token = JobsTokenFixture()
+    token.tokenSession = IDTokenSession(uid: "hidden-owner", epoch: 1)
+    let api = client(token)
+    JobsURLProtocol.handler = { request in
+      XCTAssertEqual(request.url?.path, "/processing-policy")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer initial")
+      return (
+        200, [:],
+        Data(
+          """
+          {"schema_version":2,"accept_new_jobs":true,"accept_long_jobs":true,
+          "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,
+          "max_local_source_bytes":200000000,"max_preparation_seconds":120,"long_job_threshold_seconds":600},
+          "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
+          "fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}},
+          "link_import_visible":false,"link_import_reason":"user_hidden","link_import_policy_revision":3}
+          """.utf8)
+      )
+    }
+    let policy = try await api.processingPolicy()
+    XCTAssertEqual(policy.linkImportVisible, false)
+    XCTAssertEqual(policy.linkImportReason, "user_hidden")
+    XCTAssertEqual(token.refreshes, [false])
+  }
+
   func testImportQueueCooldownPreventsEarlyRetry() async throws {
     let token = JobsTokenFixture()
     var clock: TimeInterval = 0
@@ -233,6 +288,63 @@ import XCTest
       XCTAssertNil(job.finishedAt)
       XCTAssertEqual(job.workerAvailable, false)
     }
+  }
+
+  func testNullableThumbnailSurvivesHTTPRealtimeAndCachedHistory() async throws {
+    let thumbnail =
+      "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=fixture_123&rs=signature-123"
+    let token = JobsTokenFixture()
+    let api = client(token)
+    for value in [NSNull(), thumbnail, "https://private.invalid/video.jpg", 1, ["untrusted"]]
+      as [Any]
+    {
+      var payload = try XCTUnwrap(
+        JSONSerialization.jsonObject(with: Data(jobJSON(status: "ready").utf8))
+          as? [String: Any])
+      payload["thumbnail_url"] = value
+      let data = try JSONSerialization.data(withJSONObject: payload)
+      JobsURLProtocol.handler = { _ in (200, [:], data) }
+      let job = try await api.detail(id: id)
+      let expected = value as? String == thumbnail ? thumbnail : nil
+      XCTAssertEqual(job.thumbnailUrl, expected)
+      XCTAssertEqual(job.thumbnailURL?.absoluteString, expected)
+
+      let snapshot = try JSONSerialization.data(withJSONObject: ["items": [payload]])
+      let page = try JSONDecoder.authDecoder().decode(
+        JobPage.self, from: ApiWireJSON.response(snapshot))
+      XCTAssertEqual(page.items.first?.thumbnailURL?.absoluteString, expected)
+
+      let encoder = JSONEncoder()
+      encoder.dateEncodingStrategy = .iso8601
+      let restored = try JSONDecoder.authDecoder().decode(Job.self, from: encoder.encode(job))
+      XCTAssertEqual(restored.thumbnailURL?.absoluteString, expected)
+      XCTAssertEqual(restored.id, job.id)
+    }
+    let old = try JSONDecoder.authDecoder().decode(
+      Job.self, from: ApiWireJSON.response(Data(jobJSON(status: "ready").utf8)))
+    XCTAssertNil(old.thumbnailUrl)
+    XCTAssertNil(old.thumbnailURL)
+  }
+
+  func testThumbnailURLRejectsUnsafeHostsPathsAndParameters() {
+    let thumbnail = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
+    XCTAssertEqual(JobThumbnailURL.validated(thumbnail)?.absoluteString, thumbnail)
+    XCTAssertNotNil(
+      JobThumbnailURL.validated("https://i.ytimg.com/vi_webp/jNQXAC9IVRw/hqdefault.webp"))
+    for value in [
+      thumbnail.replacingOccurrences(of: "https:", with: "http:"),
+      thumbnail.replacingOccurrences(of: "i.ytimg.com", with: "i.ytimg.com.evil.invalid"),
+      thumbnail.replacingOccurrences(of: "i.ytimg.com", with: "user:secret@i.ytimg.com"),
+      thumbnail.replacingOccurrences(of: "i.ytimg.com", with: "i.ytimg.com:443"),
+      thumbnail.replacingOccurrences(of: "/vi/", with: "/vi/../vi/"),
+      thumbnail.replacingOccurrences(of: "/vi/", with: "\\vi/"),
+      thumbnail + "#", thumbnail + "\n", thumbnail + "?token=secret",
+      thumbnail + "?sqp=one&sqp=two", thumbnail + "?sqp=one&",
+      thumbnail + "?rs=" + String(repeating: "x", count: 1025),
+    ] {
+      XCTAssertNil(JobThumbnailURL.validated(value), value)
+    }
+    XCTAssertNil(JobThumbnailURL.validated(nil))
   }
 
   func testAudioExperienceMetadataActionsAndDiagnosticContract() async throws {

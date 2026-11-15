@@ -82,7 +82,69 @@ step stalls, the screen shows a localized explanation and Retry; retry starts a
 new auth subscription and cancels the previous session request. This avoids an
 unbounded loading screen without signing users out or discarding their data.
 
+## Google sign-in in mobile browsers
+
+Google sign-in uses a same-tab Firebase redirect on iPhone, iPad (including
+desktop mode) and Android browsers. Desktop browsers keep popup sign-in. Redirect
+results are resolved during startup; failures appear on the sign-in screen with
+English/Arabic guidance and require another explicit attempt. Existing signed-in
+sessions take precedence over a late redirect failure.
+
+For production, set `PUBLIC_FIREBASE_AUTH_DOMAIN=app.music-mute.com`. Keep that
+domain in Firebase Authentication's authorized domains and add
+`https://app.music-mute.com/__/auth/handler` to the existing Google web OAuth
+client's authorized redirect URIs, preserving the previous Firebase callback.
+The app origin is also registered as an authorized JavaScript origin. Changing
+only the SDK redirect call is insufficient when browser privacy protections block
+cross-origin authentication storage.
+
+The browser server transparently proxies Firebase's exact `/__/auth/` helper
+paths to `https://<PUBLIC_FIREBASE_PROJECT_ID>.firebaseapp.com`; it does not
+redirect the browser to that domain. The upstream project is validated and fixed,
+and application cookies and authorization headers are not forwarded. Helper
+responses are uncached and use Firebase's helper policy; the authentication iframe
+permits same-origin framing. Normal application routes retain their existing CSP
+and frame restrictions. Helpers accept GET/HEAD/POST, preserve Firebase's statuses
+and media types, and bound each request to 15 seconds, 1 MiB of request data and
+2 MiB of response data. Oversized requests return 413; upstream failures return
+502 and deadline failures return 504, with no private error details. GET/HEAD
+`/__/firebase/init.json` supplies the same public Firebase settings as `/config.js`.
+See [Firebase redirect guidance](https://firebase.google.com/docs/auth/web/redirect-best-practices).
+
+These routes preserve Firebase's HTML/JavaScript OAuth protocol rather than
+introducing a MusicMute REST API. Their vendor-defined names, query parameters and
+media types remain unchanged. Proxy checks follow the applicable HTTP method,
+status/header preservation and compatibility rules in the
+[Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+(reviewed 2026-10-09).
+
+The [2026-10-09 release evidence](tasks/2026-10-09-google-sign-in.md) records
+deployment, live callback checks and a successful real Google sign-in in a desktop
+browser with an iPhone Chrome user agent. That check is not physical iOS Chrome
+certification.
+
 ## Audio behavior
+
+Library, Now playing, the mini player and Up Next use the nullable original
+`thumbnail_url` from job HTTP responses and
+WebSocket snapshots. Only public HTTPS `i.ytimg.com` video image URLs with optional
+bounded `sqp`/`rs` parameters are accepted. The browser loads Library/queue images lazily,
+and the currently playing image eagerly, with
+no referrer and normal browser caching; it does not request extra video metadata
+or copy thumbnails to R2. Older jobs, local audio, invalid links and failed image
+loads keep the existing music placeholder. A changed track or URL resets image
+loading. The same rounded artwork with soft shadows is shared across these views.
+
+Library offers a one-click **Show starred** checkbox and a **Most played** tab
+and sort option. Stars, hidden tracks, and play counts are stored in this browser,
+separately for each account; they are never sent to the API or synchronized to
+another device. Successful track starts and repeat/loop replays count; pauses,
+resumes, seeks, failed starts, and switching between original and vocal audio do
+not add plays. The Most played tab includes only played tracks, ranks by count, and
+combines with search and the starred checkbox. Playback queues use the displayed
+order. Ranking covers the loaded Library pages; Load more includes older songs.
+Clearing browser storage removes these local preferences; when storage is
+unavailable, changes last only for the current page session.
 
 Local intake accepts audio only. Browser-decodable MP3, AAC/M4A, Ogg/Opus and
 WebM at an average bitrate no higher than 160 kbps are preserved; higher-bitrate
@@ -227,3 +289,14 @@ requests `status=ready`, retains loaded pages, and bounds live subscriptions to
 the newest page plus nine tail pages. See
 [release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
 and distribution status.
+
+## Private local diagnostics
+
+From the repository root, start `node tools/local-logging/cli.mjs up`, then
+`node tools/local-logging/cli.mjs run web-client`. The Vite development server logs
+HTTP, raw WebSocket reception/sends, lifecycle, actions, storage operation metadata
+and safe errors. `globalThis.__MUSICMUTE_LOCAL_LOG_STATUS__` reports bounded queue,
+delivery, drops and failures. Payload, console and collector controls are separate;
+release builds compile the collector gate off even when development environment
+variables are supplied. See the [local logging guide](../docs/local-logging/README.md)
+for privacy, retained files, source coverage, Logdy and read-only MCP setup.

@@ -44,7 +44,8 @@ elif mode == 'bad-path':
 else:
     (root / 'audio.webm').write_bytes(b'audio')
     print(json.dumps({'filename': 'audio.webm', 'content_type': 'audio/webm',
-        'metadata': {'schema_version': 1, 'provider': 'ytdlp', 'site': 'youtube', 'title': 'https://fixture.invalid'},
+        'metadata': {'schema_version': 1, 'provider': 'ytdlp', 'site': 'youtube', 'title': 'https://fixture.invalid',
+                     'thumbnail_url': 'https://i.ytimg.com/vi/fixture_123/hqdefault.jpg'},
         'timings_ms': {'extraction_ms': 1, 'token_generation_ms': 0, 'transfer_ms': 1},
         'bytes_downloaded': 5}))
 '''
@@ -88,6 +89,8 @@ class AcquisitionTest(unittest.TestCase):
         self.assertEqual(result.bytes_downloaded, 5)
         self.assertEqual(result.content_type, 'audio/webm')
         self.assertNotIn('title', result.metadata)
+        self.assertEqual(result.metadata['thumbnail_url'], 'https://i.ytimg.com/vi/fixture_123/hqdefault.jpg')
+        self.assertEqual(len(self.calls), 1)
         self.assertEqual(result.timings_ms['extraction_ms'], 1)
 
     def test_proxy_credentials_stay_out_of_process_arguments_and_environment(self):

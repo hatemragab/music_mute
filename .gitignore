@@ -104,3 +104,8 @@ ios/DerivedData*/
 *.xcuserstate
 xcuserdata/
 *.xcresult/
+
+# Private local diagnostics, tools, captures and MCP build
+/.runtime/
+/tools/logs-mcp/node_modules/
+/tools/logs-mcp/dist/

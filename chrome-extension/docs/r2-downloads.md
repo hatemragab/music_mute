@@ -8,9 +8,15 @@ release folder in R2, and corrected macOS Prepare URLs. No benchmarks were run.
 - Bucket: `musicmute-downloads`, Standard, Western Europe.
 - Folder: `releases/`, with the original release tags as subfolders.
 - Public domain: `https://downloads.music-mute.com`.
-- Current app: [MusicMute Local 0.1.1, build 1791395910](https://downloads.music-mute.com/releases/macos-store-companion-2026-10-07/MusicMuteLocal-0.1.1-arm64-development-build-1791395910.dmg).
-- Checksums: [SHA256SUMS-build-1791395910.txt](https://downloads.music-mute.com/releases/macos-store-companion-2026-10-07/SHA256SUMS-build-1791395910.txt).
+- Current development app: [MusicMute Local 0.1.3, build 1791502214](https://downloads.music-mute.com/releases/macos-player-thumbnails-2026-10-09/MusicMuteLocal-0.1.3-arm64-development-build-1791502214.dmg).
+- Current checksums: [SHA256SUMS-build-1791502214.txt](https://downloads.music-mute.com/releases/macos-player-thumbnails-2026-10-09/SHA256SUMS-build-1791502214.txt).
 - Current runtime manifest: [runtime-bootstrap-r2.json](https://downloads.music-mute.com/releases/macos-runtime-2026-10-06/runtime-bootstrap-r2.json).
+
+The [October 9 artwork release](../../docs/player-thumbnails-2026-10-09.md) also
+provides a public development Chrome ZIP. Its downloads passed exact byte/hash
+read-back. The app remains ad-hoc signed and unnotarized; the ZIP is not a Chrome
+Web Store publication. Runtime/model sources and private media permissions remain
+unchanged. Earlier migration and validation records below describe their dates.
 
 All 21 original release assets (494,803,244 bytes) were matched against the
 GitHub-published SHA-256 identities locally and uploaded through Chrome. This
@@ -62,3 +68,21 @@ updater. The app-data Chrome extension folder and Library control fix are includ
 Evidence is under `output/r2-release-migration.noindex/` and
 `output/macos/build-04b2ebc7-a637-4923-b5fb-8cc9bede748e.noindex/distribution.noindex/`.
 The application's private `music-mute` bucket and its access policy were not changed.
+
+## Native visibility update — October 8, 2026
+
+Development build `1791422383` was published in the new immutable folder
+`releases/macos-store-companion-2026-10-08/`. Older objects were retained. The
+DMG is 16,211,926 bytes, SHA-256
+`037090aea06a7f0889a06341ad71e56a099b5fc8971dec4186be70aff5437cbc`.
+Its checksum text is 126 bytes. Both public downloads returned HTTP 200 and
+matched their local bytes and hashes. Runtime components and model URLs were
+reused unchanged; no runtime or model objects were uploaded.
+
+The exact app was installed, its 160 inventory leaves and strict deep signature
+verified, and synthetic local file processing completed while the live policy
+hid link controls. English and Arabic file-only layouts were inspected. This
+remains an ad hoc, unnotarized development download with no configured updater.
+See [the complete validation record](../../docs/link-import-ui/VALIDATION.md).
+Public transfer evidence is in
+`output/link-import-visibility-proof.noindex/public-download-proof.json`.

@@ -42,6 +42,7 @@ export interface JobView {
   id: string;
   requestId: string;
   sourceTitle: string | null;
+  thumbnailUrl?: string | null;
   displayName: string | null;
   sourceKind: string | null;
   status: JobStatus;

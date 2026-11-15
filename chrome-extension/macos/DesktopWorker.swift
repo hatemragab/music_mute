@@ -191,10 +191,40 @@ struct DesktopWorkerRequest: Sendable {
   }
 }
 
+struct DesktopWorkerBackendError: Sendable, Equatable {
+  let code: String
+  let httpStatus: Int
+  let retryable: Bool
+  static func decode(_ value: DesktopJSON) throws -> Self {
+    let allowed = Set([
+      "WORKER_INVALID_REQUEST", "WORKER_UNAUTHENTICATED", "WORKER_MACHINE_DELETED",
+      "WORKER_FORBIDDEN", "WORKER_NOT_FOUND", "WORKER_CONFLICT", "WORKER_EXPIRED",
+      "WORKER_RATE_LIMITED", "WORKER_DEPENDENCY_UNAVAILABLE", "NETWORK_UNAVAILABLE",
+      "RESPONSE_INVALID", "RESPONSE_TOO_LARGE",
+    ])
+    guard case .object(let fields) = value,
+      Set(fields.keys) == Set(["backend_error_code", "http_status", "retryable"]),
+      let code = value["backend_error_code"].string,
+      let status = value["http_status"].number, status.isFinite,
+      status.rounded() == status, status == 0 || (400...599).contains(status),
+      let retryable = value["retryable"].bool,
+      allowed.contains(code) || code == "HTTP_\(Int(status))",
+      status != 0 || code == "NETWORK_UNAVAILABLE"
+    else { throw DesktopWorkerFailure("WORKER_CONTROL_INVALID_RESPONSE") }
+    return Self(code: code, httpStatus: Int(status), retryable: retryable)
+  }
+}
+
 struct DesktopWorkerFailure: Error, Sendable, Equatable {
   let code: String
-  init(_ code: String) {
+  let backend: DesktopWorkerBackendError?
+  init(_ code: String, backend: DesktopWorkerBackendError? = nil) {
     self.code = Self.safeCode(code) ? code : "WORKER_OPERATION_FAILED"
+    self.backend = self.code == "ENROLLMENT_FAILED" ? backend : nil
+  }
+  var diagnosticCode: String {
+    guard let backend else { return code }
+    return "\(code) · \(backend.code) · HTTP \(backend.httpStatus)"
   }
   static func safeCode(_ code: String) -> Bool {
     code.range(of: "^[A-Z][A-Z0-9_]{0,95}$", options: .regularExpression) != nil
@@ -211,6 +241,8 @@ struct DesktopWorkerFailure: Error, Sendable, Equatable {
       "Prepare your Mac in Setup before opening Worker controls."
     case "WORKER_PERSONAL_BUSY":
       "Finish or cancel personal app or Chrome audio before running worker maintenance."
+    case "WORKER_SERVICE_ENABLE_FAILED", "WORKER_SERVICE_START_FAILED":
+      "macOS could not start the background worker. Allow MusicMute in Login Items & Extensions, then retry worker setup."
     case "NOT_INSTALLED":
       "Open Worker setup to check registration or restore a preserved installation."
     case "MAINTENANCE_RECOVERY_REQUIRED":
@@ -225,7 +257,9 @@ struct DesktopWorkerFailure: Error, Sendable, Equatable {
     case "ENROLLMENT_REQUIRED", "WORKER_ENROLLMENT_REQUIRED":
       "Worker registration could not resume. Check administrator approval and retry registration."
     case "ENROLLMENT_FAILED":
-      "Worker registration was refused or could not complete. Retry the preserved installation, or review Worker health."
+      backend?.code == "WORKER_EXPIRED"
+        ? "Worker setup expired. Retry registration when offered; an uncertain activation must be recovered first."
+        : "Worker registration was refused or could not complete. Retry the preserved installation, or review Worker health."
     case "WORKER_REGISTRATION_NOT_ALLOWED", "WORKER_REGISTRATION_FORBIDDEN":
       "Administrator approval is required to register this Mac."
     case "WORKER_REGISTRATION_GOOGLE_REQUIRED", "GOOGLE_SIGN_IN_REQUIRED":
@@ -255,6 +289,7 @@ struct DesktopWorkerFrame: Sendable, Equatable {
   let kind: Kind
   let payload: DesktopJSON
   let errorCode: String?
+  let backendError: DesktopWorkerBackendError?
   static func decode(_ data: Data, requestID: String) throws -> Self {
     guard !data.isEmpty, data.count <= 4 * 1024 * 1024 + 1024,
       let value = try? JSONDecoder().decode(DesktopJSON.self, from: data),
@@ -268,11 +303,20 @@ struct DesktopWorkerFrame: Sendable, Equatable {
     if kind == .error {
       guard let code = value["error_code"].string, DesktopWorkerFailure.safeCode(code)
       else { throw DesktopWorkerFailure("WORKER_CONTROL_INVALID_RESPONSE") }
-      return Self(kind: kind, payload: .null, errorCode: code)
+      let details: DesktopWorkerBackendError?
+      if fields["payload"] != nil, value["payload"] != .null {
+        guard code == "ENROLLMENT_FAILED" else {
+          throw DesktopWorkerFailure("WORKER_CONTROL_INVALID_RESPONSE")
+        }
+        details = try DesktopWorkerBackendError.decode(value["payload"])
+      } else {
+        details = nil
+      }
+      return Self(kind: kind, payload: .null, errorCode: code, backendError: details)
     }
     guard case .object = value["payload"], Self.bounded(value["payload"], depth: 0)
     else { throw DesktopWorkerFailure("WORKER_CONTROL_INVALID_RESPONSE") }
-    return Self(kind: kind, payload: value["payload"], errorCode: nil)
+    return Self(kind: kind, payload: value["payload"], errorCode: nil, backendError: nil)
   }
   private static func bounded(_ value: DesktopJSON, depth: Int) -> Bool {
     guard depth <= 16 else { return false }
@@ -532,7 +576,8 @@ private final class WorkerPipeReader: @unchecked Sendable {
                 throw DesktopWorkerFailure("WORKER_CONTROL_INVALID_RESPONSE")
               }
               if frame.kind == .error {
-                throw DesktopWorkerFailure(frame.errorCode ?? "WORKER_OPERATION_FAILED")
+                throw DesktopWorkerFailure(
+                  frame.errorCode ?? "WORKER_OPERATION_FAILED", backend: frame.backendError)
               }
               if subscription {
                 guard frame.kind == .snapshot else {
@@ -907,9 +952,11 @@ private enum DesktopWorkerDeletionPhase: String {
   private var observation: Task<Void, Never>?
   private var logsObservation: Task<Void, Never>?
   private let inspectInstallation: @Sendable () throws -> DesktopWorkerInstallation
+  private let setupRetryWait: @MainActor (Duration) async throws -> Void
   private let preferences: UserDefaults
   private static let pendingUIDKey = "worker.pendingRegistrationFirebaseUID"
   private static let removedKey = "worker.automaticRegistrationRemoved"
+  private static let stoppedMachineKey = "worker.explicitlyStoppedMachine"
   private static let deletionKey = "worker.deletedMachineCleanup"
   private static let deletionTargetKey = "worker.deletedMachineTarget"
   private static let deletedObservedKey = "worker.deletedMachineObserved"
@@ -922,6 +969,8 @@ private enum DesktopWorkerDeletionPhase: String {
   private var registrationTask: Task<Void, Never>?
   private var registrationRequested = false
   private var attemptedScope: DesktopSessionScope?
+  private var automaticRecoveryAttempted = false
+  private var automaticStartAttempted = false
   private var previousPermission: Bool?
   var isCriticalOperation = false
   var canOperate: (() -> Bool)?
@@ -932,11 +981,15 @@ private enum DesktopWorkerDeletionPhase: String {
     preferences: UserDefaults = .standard,
     inspectInstallation: @escaping @Sendable () throws -> DesktopWorkerInstallation = {
       try DesktopWorkerInstallation.inspect()
+    },
+    setupRetryWait: @escaping @MainActor (Duration) async throws -> Void = {
+      try await Task.sleep(for: $0)
     }
   ) {
     self.fixture = fixture
     self.transport = transport ?? DesktopWorkerBridge(resources: resources)
     self.inspectInstallation = inspectInstallation
+    self.setupRetryWait = setupRetryWait
     self.preferences = preferences
     deletedRegistrationObserved = !fixture && preferences.bool(forKey: Self.deletedObservedKey)
   }
@@ -989,13 +1042,22 @@ private enum DesktopWorkerDeletionPhase: String {
         preferences.removeObject(forKey: Self.pendingUIDKey)
         registrationState =
           authenticationRejected ? .authenticationRejected : (installed ? .registered : .preserved)
-        if checkedDeletionEvent != registrationEvent, canOperate?() != false {
+        if checkedDeletionEvent != registrationEvent, canOperate?() != false,
+          canRegister?() != false
+        {
           checkedDeletionEvent = registrationEvent
           await checkInstalledRegistration()
         }
         return
       case .interrupted, .activationRecovery:
         registrationState = .interrupted
+        if !automaticRecoveryAttempted, !preferences.bool(forKey: Self.removedKey),
+          canOperate?() != false, canRegister?() != false
+        {
+          await recoverRegistration(local)
+        } else if canRegister?() == false {
+          registrationState = .setupRequired
+        }
         return
       case .unpaired:
         registrationState = .unpaired
@@ -1127,11 +1189,29 @@ private enum DesktopWorkerDeletionPhase: String {
       registrationChanged()
     }
     do {
-      let result = try await transport.execute(
+      let result = try await executeSetupCommand(
         .status, parameters: .object(["local": .bool(false)])
-      ) { _ in }
+      )
       snapshot = try DesktopWorkerSnapshot(result)
       receiveCheckedRegistration(result)
+      if !automaticStartAttempted, !authenticationRejected,
+        preferences.object(forKey: Self.deletionKey) == nil,
+        !preferences.bool(forKey: Self.removedKey),
+        !explicitlyStopped(result),
+        result["installed"].bool == true, result["lifecycle"].string == "active",
+        result["service"]["loaded"].bool == false,
+        result["service"]["running"].bool == false,
+        result["remote"]["available"].bool == true,
+        result["remote"]["state"]["status"].string == "active",
+        result["remote"]["state"]["claimsAllowed"].bool == true
+      {
+        automaticStartAttempted = true
+        currentCommand = .start
+        _ = try await executeSetupCommand(
+          .start, parameters: .object(["wait_ready": .bool(true)])
+        )
+        try await receiveLocalCompletionSnapshot()
+      }
     } catch {
       failure = error as? DesktopWorkerFailure ?? DesktopWorkerFailure("BACKEND_UNAVAILABLE")
     }
@@ -1266,11 +1346,9 @@ private enum DesktopWorkerDeletionPhase: String {
       let local = try await Task.detached { try inspect() }.value
       guard !busy, canOperate?() != false else { return }
       if local == .interrupted || local == .activationRecovery {
-        await run(
-          local == .activationRecovery ? .recover : .install,
-          parameters: local == .activationRecovery ? .object([:]) : Self.installLabel,
-          confirmed: true)
-        registrationChanged()
+        localActionInspecting = false
+        await recoverRegistration(local)
+        localActionInspecting = true
       } else {
         attemptedScope = nil
         if let account, let scope = account.scope {
@@ -1295,12 +1373,23 @@ private enum DesktopWorkerDeletionPhase: String {
     }
   }
   var canReplacePendingRegistration: Bool {
-    registrationState == .interrupted && pendingRegistrationUID != nil
-      && pendingRegistrationUID == account?.firebaseUid
-      && account?.workerRegistrationPermission == true
-      && account?.currentSignInProvider == "google.com"
-      && ["ENROLLMENT_FAILED", "ENROLLMENT_REQUIRED", "OPERATION_FAILED"].contains(
-        failure?.code ?? "")
+    guard
+      registrationState == .interrupted && pendingRegistrationUID != nil
+        && pendingRegistrationUID == account?.firebaseUid
+        && account?.workerRegistrationPermission == true
+        && account?.currentSignInProvider == "google.com"
+        && ["ENROLLMENT_FAILED", "ENROLLMENT_REQUIRED", "OPERATION_FAILED"].contains(
+          failure?.code ?? "")
+    else { return false }
+    return replacementHintAllows(failure)
+  }
+  private func replacementHintAllows(_ failure: DesktopWorkerFailure?) -> Bool {
+    switch snapshot?.raw["pendingEnrollment"]["replacement"].string {
+    case "pre-exchange": return true
+    case "expired-unactivated":
+      return failure?.backend?.code == "WORKER_EXPIRED" && failure?.backend?.httpStatus == 410
+    default: return false
+    }
   }
   private var pendingRegistrationUID: String? {
     guard let uid = preferences.string(forKey: Self.pendingUIDKey), !uid.isEmpty,
@@ -1319,9 +1408,59 @@ private enum DesktopWorkerDeletionPhase: String {
       .contains(failure?.code ?? "")
     {
       attemptedScope = nil
+      automaticRecoveryAttempted = false
+      automaticStartAttempted = false
       failure = nil
     }
+    checkedDeletionEvent = nil
     registrationChanged()
+  }
+  /// Resume the controller's own journal once per app launch; credentials remain in the controller.
+  private func recoverRegistration(_ local: DesktopWorkerInstallation) async {
+    guard !busy, !localActionInspecting, canOperate?() != false,
+      canRegister?() != false, local == .interrupted || local == .activationRecovery
+    else { return }
+    automaticRecoveryAttempted = true
+    busy = true
+    isCriticalOperation = true
+    currentCommand = local == .activationRecovery ? .recover : .install
+    registrationState = .preparing
+    failure = nil
+    defer {
+      busy = false
+      isCriticalOperation = false
+      currentCommand = nil
+      progress = .null
+      registrationChanged()
+    }
+    do {
+      _ = try await executeSetupCommand(
+        local == .activationRecovery ? .recover : .install,
+        parameters: local == .activationRecovery ? .object([:]) : Self.installLabel
+      )
+      // Activation recovery may preserve Pause or Drain. Read its authoritative
+      // local intent before waiting for a model that was deliberately suspended.
+      let result = try await transport.execute(
+        .status, parameters: .object(["local": .bool(true)])
+      ) { _ in }
+      snapshot = try DesktopWorkerSnapshot(result)
+      if result["lifecycle"].string == "active", !explicitlyStopped(result) {
+        _ = try await startSetupWorker()
+      }
+      preferences.removeObject(forKey: Self.pendingUIDKey)
+      registrationState = .registered
+    } catch {
+      failure = error as? DesktopWorkerFailure ?? DesktopWorkerFailure("WORKER_OPERATION_FAILED")
+      registrationState = .interrupted
+      // A single local read supplies the controller's safe replacement hint.
+      // It does not retry enrollment or replace an uncertain installation.
+      if let result = try? await transport.execute(
+        .status, parameters: .object(["local": .bool(true)]), progress: { _ in }),
+        let observed = try? DesktopWorkerSnapshot(result)
+      {
+        snapshot = observed
+      }
+    }
   }
   func replacePendingRegistration() async {
     guard canReplacePendingRegistration, let scope = account?.scope, !busy,
@@ -1332,9 +1471,155 @@ private enum DesktopWorkerDeletionPhase: String {
   private static var installLabel: DesktopJSON {
     .object(["label": .string("MusicMute Mac")])
   }
+  private func receiveLocalCompletionSnapshot() async throws {
+    let result = try await executeSetupCommand(
+      .status, parameters: .object(["local": .bool(true)])
+    )
+    snapshot = try DesktopWorkerSnapshot(result)
+  }
+  /// Retries commands that have no remote enrollment ambiguity. Installation
+  /// retries retain the original private transaction and never obtain a new code.
+  private func executeSetupCommand(
+    _ command: DesktopWorkerCommand, parameters: DesktopJSON
+  ) async throws -> DesktopJSON {
+    let token = operationGeneration.value
+    var nextCommand = command
+    var nextParameters = parameters
+    var expectedMachine =
+      (command == .start || command == .recover)
+      ? snapshot?.raw["machineId"].string.flatMap(Self.machineId) : nil
+    for attempt in 0..<3 {
+      try Task.checkCancellation()
+      guard operationGeneration.accepts(token), canOperate?() != false else {
+        throw DesktopWorkerFailure("WORKER_OPERATION_CANCELLED")
+      }
+      if attempt > 0 {
+        guard !preferences.bool(forKey: Self.removedKey),
+          preferences.object(forKey: Self.deletionKey) == nil, !authenticationRejected,
+          command == .status || !explicitlyStopped(snapshot?.raw ?? .null)
+        else { throw DesktopWorkerFailure("WORKER_OPERATION_CANCELLED") }
+      }
+      do {
+        return try await transport.execute(nextCommand, parameters: nextParameters) {
+          [weak self] in self?.progress = $0
+        }
+      } catch {
+        let failure = error as? DesktopWorkerFailure
+        let uncertain =
+          [
+            "WORKER_CONTROL_INPUT_FAILED", "WORKER_CONTROL_PROCESS_EXITED",
+            "WORKER_CONTROL_RESULT_MISSING",
+          ].contains(failure?.code ?? "") && (command == .install || command == .recover)
+        let transient =
+          ["COMMAND_BUSY", "WORKER_PERSONAL_BUSY"].contains(failure?.code ?? "")
+          || (failure?.code == "BACKEND_UNAVAILABLE" && (command == .status || command == .start))
+        guard attempt < 2, transient || uncertain else { throw error }
+        try await setupRetryWait(.seconds(attempt == 0 ? 1 : 3))
+        try Task.checkCancellation()
+        guard operationGeneration.accepts(token), canOperate?() != false,
+          !preferences.bool(forKey: Self.removedKey),
+          preferences.object(forKey: Self.deletionKey) == nil, !authenticationRejected
+        else { throw error }
+        let inspect = inspectInstallation
+        let local = try await Task.detached { try inspect() }.value
+        guard operationGeneration.accepts(token), canOperate?() != false else { throw error }
+        if command == .install || command == .recover {
+          if preferences.object(forKey: Self.stoppedMachineKey) != nil { throw error }
+          switch local {
+          case .registered:
+            // A lost result may follow committed enrollment. Inspect that machine;
+            // replaying install would be both unnecessary and unsafe.
+            let result = try await transport.execute(
+              .status, parameters: .object(["local": .bool(false)]), progress: { _ in })
+            guard operationGeneration.accepts(token), canOperate?() != false else { throw error }
+            if let expectedMachine,
+              result["machineId"].string.flatMap(Self.machineId) != expectedMachine
+            {
+              throw DesktopWorkerFailure("WORKER_LOCAL_STATE_UNSAFE")
+            }
+            snapshot = try DesktopWorkerSnapshot(result)
+            receiveCheckedRegistration(result)
+            return result
+          case .interrupted:
+            nextCommand = .install
+            nextParameters = Self.installLabel
+          case .activationRecovery:
+            nextCommand = .recover
+            nextParameters = .object([:])
+          case .fresh:
+            guard command == .install else { throw error }
+            // Contention before the controller wrote its journal still uses the
+            // same in-memory credential, not another account issuance.
+            nextCommand = command
+            nextParameters = parameters
+          case .unpaired, .deletionRecovery: throw error
+          }
+        } else if command == .start {
+          guard case .registered = local else { throw error }
+          let result = try await transport.execute(
+            .status, parameters: .object(["local": .bool(false)]), progress: { _ in })
+          snapshot = try DesktopWorkerSnapshot(result)
+          receiveCheckedRegistration(result)
+          let machine = result["machineId"].string.flatMap(Self.machineId)
+          guard machine != nil, expectedMachine == nil || expectedMachine == machine else {
+            throw DesktopWorkerFailure("WORKER_LOCAL_STATE_UNSAFE")
+          }
+          expectedMachine = machine
+          guard setupStartAllowed(result) else { return result }
+        }
+      }
+    }
+    throw DesktopWorkerFailure("WORKER_OPERATION_FAILED")
+  }
+  private func setupStartAllowed(_ result: DesktopJSON) -> Bool {
+    !preferences.bool(forKey: Self.removedKey)
+      && preferences.object(forKey: Self.deletionKey) == nil && !authenticationRejected
+      && !explicitlyStopped(result) && result["installed"].bool == true
+      && result["lifecycle"].string == "active" && result["remote"]["available"].bool == true
+      && result["remote"]["state"]["status"].string == "active"
+      && result["remote"]["state"]["claimsAllowed"].bool == true
+  }
+  private func startSetupWorker() async throws -> Bool {
+    let result = try await executeSetupCommand(
+      .status, parameters: .object(["local": .bool(false)]))
+    snapshot = try DesktopWorkerSnapshot(result)
+    receiveCheckedRegistration(result)
+    guard setupStartAllowed(result) else { return false }
+    currentCommand = .start
+    _ = try await executeSetupCommand(.start, parameters: .object(["wait_ready": .bool(true)]))
+    try await receiveLocalCompletionSnapshot()
+    return !explicitlyStopped(snapshot?.raw ?? .null)
+  }
+  private func explicitlyStopped(_ value: DesktopJSON) -> Bool {
+    guard let saved = preferences.object(forKey: Self.stoppedMachineKey) else { return false }
+    guard let target = saved as? String, let machine = Self.machineId(target) else { return true }
+    guard let current = value["machineId"].string.flatMap(Self.machineId) else { return true }
+    return current == machine
+  }
+  private func rememberExplicitStop() async {
+    // A failed completion read must still preserve Stop across app relaunch.
+    // Replace the conservative fence only with this controller's current machine identity.
+    preferences.set("unknown", forKey: Self.stoppedMachineKey)
+    if let result = try? await transport.execute(
+      .status, parameters: .object(["local": .bool(true)]), progress: { _ in }),
+      let observed = try? DesktopWorkerSnapshot(result),
+      let machine = result["machineId"].string.flatMap(Self.machineId)
+    {
+      snapshot = observed
+      preferences.set(machine, forKey: Self.stoppedMachineKey)
+    }
+  }
+  private func clearExplicitStop() {
+    preferences.removeObject(forKey: Self.stoppedMachineKey)
+    automaticStartAttempted = false
+    checkedDeletionEvent = nil
+  }
   private func installRegistration(scope: DesktopSessionScope, replace: Bool) async {
     guard let account, !busy, !localActionInspecting, canOperate?() != false else { return }
+    guard !replace || canReplacePendingRegistration else { return }
+    let replacementFailure = failure
     if !replace { attemptedScope = scope }
+    automaticRecoveryAttempted = true
     busy = true
     isCriticalOperation = true
     currentCommand = .install
@@ -1348,6 +1633,12 @@ private enum DesktopWorkerDeletionPhase: String {
       registrationChanged()
     }
     do {
+      if replace {
+        try await receiveLocalCompletionSnapshot()
+        guard replacementHintAllows(replacementFailure) else {
+          throw DesktopWorkerFailure("WORKER_LOCAL_STATE_UNSAFE")
+        }
+      }
       var response = try await account.api(
         "POST", "/users/me/worker-installation", body: .object([:]))
       defer { response = .null }
@@ -1385,21 +1676,14 @@ private enum DesktopWorkerDeletionPhase: String {
         response = .null
         // Once handed to the controller, sign-out never interrupts setup or the service.
         preferences.set(scope.firebaseUid, forKey: Self.pendingUIDKey)
-        _ = try await transport.execute(.install, parameters: parameters) { [weak self] in
-          self?.progress = $0
-        }
+        _ = try await executeSetupCommand(.install, parameters: parameters)
       }
       preferences.removeObject(forKey: Self.pendingUIDKey)
       preferences.removeObject(forKey: Self.deletedObservedKey)
       deletedRegistrationObserved = false
       authenticationRejected = false
       checkedDeletionEvent = nil
-      currentCommand = .start
-      _ = try await transport.execute(
-        .start, parameters: .object(["wait_ready": .bool(true)])
-      ) { [weak self] in
-        self?.progress = $0
-      }
+      if try await startSetupWorker() { clearExplicitStop() }
       registrationState = .registered
     } catch {
       failure =
@@ -1603,6 +1887,10 @@ private enum DesktopWorkerDeletionPhase: String {
     if command == .uninstall || command == .unpair {
       // Persist the operator's removal intent before invoking a possibly interrupted command.
       preferences.set(true, forKey: Self.removedKey)
+    } else if command == .stop {
+      // Unload may succeed before its reply is lost. A deliberate Stop remains
+      // authoritative until a later explicit lifecycle action succeeds.
+      preferences.set("unknown", forKey: Self.stoppedMachineKey)
     }
     isCriticalOperation = command.isCritical(parameters)
     let token = operationGeneration.advance()
@@ -1620,6 +1908,11 @@ private enum DesktopWorkerDeletionPhase: String {
         self.progress = payload
       }
       guard operationGeneration.accepts(token) else { return }
+      if command == .stop {
+        await rememberExplicitStop()
+      } else if command == .start || command == .resume || command == .restart {
+        clearExplicitStop()
+      }
       if command == .status || (command == .adopt && parameters["apply"].bool != true) {
         snapshot = try DesktopWorkerSnapshot(result)
       }

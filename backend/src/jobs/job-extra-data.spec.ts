@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { decodeExtraData, normalizeExtraData } from './job-extra-data.js';
+import {
+  decodeExtraData,
+  normalizeExtraData,
+  normalizeThumbnailUrl,
+} from './job-extra-data.js';
 import { JobSchema } from './job.schema.js';
+import { SharedMediaSourceSchema } from '../shared-media/shared-media.schema.js';
 import { model } from 'mongoose';
 
 describe('included acquisition metadata', () => {
@@ -73,5 +78,68 @@ describe('included acquisition metadata', () => {
     const Job = model('ExtraDataFixture', JobSchema);
     expect(new Job().extra_data).toBeNull();
     expect(new Job({ extra_data: value }).extra_data).toEqual(safe);
+  });
+  it('retains the exact original thumbnail in headers, shared sources and jobs', () => {
+    const thumbnail =
+      'https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=fixture%3D&rs=fixture';
+    const metadata = {
+      schema_version: 1,
+      title: 'Synthetic video',
+      thumbnail_url: thumbnail,
+    };
+    expect(
+      decodeExtraData(Buffer.from(JSON.stringify(metadata)).toString('base64')),
+    ).toEqual(metadata);
+    const Job = model('ThumbnailExtraDataFixture', JobSchema);
+    const Source = model(
+      'ThumbnailSharedSourceFixture',
+      SharedMediaSourceSchema,
+    );
+    expect(new Job({ extra_data: metadata }).extra_data).toEqual(metadata);
+    expect(new Source({ extraData: metadata }).extraData).toEqual(metadata);
+    expect(normalizeExtraData(metadata)).toEqual(metadata);
+  });
+  it('allows only bounded original public YouTube image URLs', () => {
+    const thumbnail = 'https://i.ytimg.com/vi/fixture_123/hqdefault.jpg';
+    for (const value of [
+      thumbnail,
+      thumbnail.replace('/vi/', '/vi_webp/').replace('.jpg', '.webp'),
+    ])
+      expect(normalizeThumbnailUrl(value)).toBe(value);
+    for (const value of [
+      null,
+      undefined,
+      '',
+      1,
+      [],
+      thumbnail.replace('https:', 'http:'),
+      thumbnail.replace('i.ytimg.com', 'i.ytimg.com.evil.invalid'),
+      thumbnail.replace('i.ytimg.com', 'user:secret@i.ytimg.com'),
+      thumbnail.replace('i.ytimg.com', 'i.ytimg.com:443'),
+      thumbnail.replace('/vi/', '/vi/../vi/'),
+      thumbnail + '#fragment',
+      ' ' + thumbnail,
+      thumbnail + '\n',
+      thumbnail + '?token=secret',
+      thumbnail + '?sqp=one&sqp=two',
+      thumbnail + '?sqp=one&',
+      thumbnail + '?sqp=',
+      thumbnail + '?sqp=one+two',
+      thumbnail + '?sqp=one&rs=two&third=three',
+      thumbnail + '?rs=' + 'x'.repeat(1025),
+      thumbnail.replace('.jpg', '.svg'),
+    ]) {
+      expect(normalizeThumbnailUrl(value)).toBeNull();
+      expect(
+        normalizeExtraData({
+          schema_version: 1,
+          title: 'Synthetic video',
+          thumbnail_url: value,
+        }),
+      ).toEqual({
+        schema_version: 1,
+        title: 'Synthetic video',
+      });
+    }
   });
 });

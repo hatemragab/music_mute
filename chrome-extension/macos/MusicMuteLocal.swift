@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Network
 import SwiftUI
 
 enum Brand {
@@ -46,15 +47,16 @@ enum CompanionPage: String, CaseIterable {
   case overview = "Home"
   case library = "Library"
   case account = "Account"
-  case worker = "Worker"
   case setup = "Setup"
   case diagnostics = "Diagnostics"
+  static func restored(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? .overview
+  }
   var symbol: String {
     switch self {
     case .overview: "square.grid.2x2"
     case .library: "music.note.list"
     case .account: "person.crop.circle"
-    case .worker: "server.rack"
     case .setup: "slider.horizontal.3"
     case .diagnostics: "waveform.path.ecg"
     }
@@ -175,9 +177,12 @@ struct SetupPresentation {
     if activeCommand == .status { return "Checking readiness…" }
     if activeCommand == .setup { return "Preparing your Mac…" }
     if needsChromeRepair { return "Repair Chrome connection" }
-    if needsYouTubeRepair { return "Check YouTube tools" }
+    if needsYouTubeRepair { return "Prepare local tools" }
     if ready { return "Check readiness" }
     return hasFailure ? "Retry setup" : "Prepare my Mac"
+  }
+  var primaryCommand: AppCommand {
+    ready && !needsYouTubeRepair ? .status : .setup
   }
   var completionMessage: String {
     if status?.youtubeReady == false {
@@ -189,9 +194,225 @@ struct SetupPresentation {
   }
 }
 
+/// A missing installation starts one preparation attempt. A failed or cancelled attempt stays
+/// on Setup until the user retries; observing a ready installation permits future repair.
+struct AutomaticSetupCoordinator {
+  enum Decision: Equatable { case none, showSetup, showModelRepair, showAppRepair, prepare }
+  private(set) var initialCheckStarted = false
+  private(set) var preparationAttempted = false
+  private var modelExecutionFailed = false
+  private var appExecutionFailed = false
+
+  mutating func beginInitialCheck() -> Bool {
+    guard !initialCheckStarted else { return false }
+    initialCheckStarted = true
+    return true
+  }
+
+  mutating func preparationStarted() { preparationAttempted = true }
+
+  mutating func completed(
+    command: AppCommand, outcome: ProcessOutcome, status: CompanionStatus?, hasFailure: Bool,
+    executionFailure: DesktopAuthFailure? = nil
+  ) -> Decision {
+    guard command == .status || command == .setup else { return .none }
+    if executionFailure == .service("MODEL_INVALID") { modelExecutionFailed = true }
+    if executionFailure == .service("DESKTOP_RUNTIME_UNAVAILABLE") { appExecutionFailed = true }
+    guard case .success = outcome, !hasFailure, let status, status.supported else {
+      preparationAttempted = true
+      return .showSetup
+    }
+    if command == .setup, status.runtimeReady && status.modelReady {
+      modelExecutionFailed = false
+      appExecutionFailed = false
+    }
+    if modelExecutionFailed, status.modelReady {
+      // Metadata readiness cannot erase an actual engine failure for the installed model.
+      if command == .status, !preparationAttempted {
+        preparationAttempted = true
+        return .prepare
+      }
+      preparationAttempted = true
+      return .showModelRepair
+    }
+    if appExecutionFailed, status.complete {
+      // The status entrypoint cannot establish that the separate desktop entrypoint is intact.
+      preparationAttempted = true
+      return .showAppRepair
+    }
+    if status.complete && !Self.hasMissingTools(status) {
+      preparationAttempted = false
+      return .none
+    }
+    guard command == .status, !preparationAttempted else { return .showSetup }
+    preparationAttempted = true
+    return .prepare
+  }
+
+  private static func hasMissingTools(_ status: CompanionStatus) -> Bool {
+    let toolComponents = Set(["downloader", "javascript", "token_provider"])
+    let installationErrors = Set([
+      "YT_DLP_MISSING", "YT_DLP_IDENTITY_INVALID", "YT_DLP_VERSION_INVALID", "YT_DLP_EJS_MISSING",
+      "DENO_MISSING", "DENO_VERSION_INVALID", "PO_TOKEN_PROVIDER_MISSING",
+      "PO_TOKEN_PROVIDER_INVALID",
+    ])
+    return (status.components ?? []).contains { component in
+      guard toolComponents.contains(component.component), component.errorCode != "SETUP_REQUIRED"
+      else { return false }
+      return component.state == "missing"
+        || (component.state == "invalid"
+          && component.errorCode.map(installationErrors.contains) == true)
+    }
+  }
+}
+
+/// Recovery stays within the same pinned setup command. Downloaders own their own retry budgets.
+struct SetupCommandRecovery {
+  private(set) var generation: UInt64 = 0
+  private(set) var cancelled = false
+  private var lockWaitStartedAt: TimeInterval?
+  private var lockRetries = 0
+  private var probeRetries = 0
+
+  mutating func begin() -> UInt64 {
+    generation &+= 1
+    cancelled = false
+    lockWaitStartedAt = nil
+    lockRetries = 0
+    probeRetries = 0
+    return generation
+  }
+
+  mutating func cancel() {
+    cancelled = true
+    generation &+= 1
+  }
+
+  func isCurrent(_ expectedGeneration: UInt64) -> Bool {
+    !cancelled && generation == expectedGeneration
+  }
+
+  static func failureCode(outcome: ProcessOutcome, receivedFailureCode: String?) -> String? {
+    if case .cancelled = outcome { return nil }
+    let completionCode: String?
+    if case .failed(let code) = outcome { completionCode = code } else { completionCode = nil }
+    if let receivedFailureCode, let completionCode, receivedFailureCode != completionCode,
+      completionCode != "APP_PROCESS_EXITED"
+    {
+      return nil
+    }
+    return receivedFailureCode ?? completionCode
+  }
+
+  mutating func nextDelay(
+    command: AppCommand, outcome: ProcessOutcome, status: CompanionStatus?,
+    receivedFailureCode: String?, now: TimeInterval
+  ) -> TimeInterval? {
+    guard !cancelled, command == .status || command == .setup, now.isFinite else { return nil }
+    if case .cancelled = outcome { return nil }
+    let failureCode = Self.failureCode(outcome: outcome, receivedFailureCode: receivedFailureCode)
+    if let failureCode,
+      ["RUNTIME_SETUP_BUSY", "SETUP_BUSY", "APP_OPERATION_BUSY"].contains(failureCode)
+    {
+      let startedAt = lockWaitStartedAt ?? now
+      lockWaitStartedAt = startedAt
+      let delay = TimeInterval(min(15, 1 << min(lockRetries, 4)))
+      guard lockRetries < 24, now >= startedAt, now - startedAt + delay <= 300 else {
+        return nil
+      }
+      lockRetries += 1
+      return delay
+    }
+    guard command == .setup else { return nil }
+    let retryableProbes = Set(["TOOL_TIMEOUT", "PO_TOKEN_PROVIDER_UNAVAILABLE"])
+    let probeFailed: Bool
+    if let failureCode {
+      probeFailed = retryableProbes.contains(failureCode)
+    } else if case .success = outcome, status?.supported == true,
+      status?.runtimeReady == true, status?.modelReady == true, status?.youtubeReady == false
+    {
+      probeFailed = (status?.components ?? []).contains {
+        $0.state != "ready" && $0.errorCode.map(retryableProbes.contains) == true
+      }
+    } else {
+      probeFailed = false
+    }
+    guard probeFailed, probeRetries < 2 else { return nil }
+    let delay: TimeInterval = probeRetries == 0 ? 1 : 3
+    probeRetries += 1
+    return delay
+  }
+}
+
+/// One connection-restoration event may resume exhausted downloads in each setup cycle.
+struct SetupConnectivityRecovery {
+  enum PathState: Equatable, Sendable { case satisfied, unsatisfied, requiresConnection }
+  enum Decision: Equatable { case ignore, wait, stop, resume }
+  private var allowanceUsed = false
+  private var observing = false
+  private var initialPathObserved = false
+
+  mutating func beginCycle() { self = Self() }
+  mutating func beginWait() -> Bool {
+    guard !allowanceUsed else { return false }
+    allowanceUsed = true
+    observing = true
+    initialPathObserved = false
+    return true
+  }
+  mutating func pathChanged(_ path: PathState) -> Decision {
+    guard observing else { return .ignore }
+    if !initialPathObserved {
+      initialPathObserved = true
+      if path == .satisfied {
+        observing = false
+        return .stop
+      }
+      return .wait
+    }
+    guard path == .satisfied else { return .wait }
+    observing = false
+    return .resume
+  }
+  mutating func cancel() { observing = false }
+  mutating func expire() -> Decision {
+    guard observing else { return .ignore }
+    observing = false
+    return .stop
+  }
+}
+
+private struct SetupConnectivityWait {
+  let outcome: ProcessOutcome
+  let failure: VisibleFailure?
+  let operation: UUID
+  let generation: UInt64
+}
+
+/// The running bundle owns its version; clearing readiness must not invent a different release.
+struct CompanionVersion {
+  private let bundleVersion: String?
+  private(set) var value: String?
+
+  init(bundleVersion: String?) {
+    let valid = bundleVersion.flatMap { DiagnosticIdentity.validVersion($0) ? $0 : nil }
+    self.bundleVersion = valid
+    value = valid
+  }
+
+  mutating func observe(_ reportedVersion: String?) {
+    guard bundleVersion == nil, let reportedVersion,
+      DiagnosticIdentity.validVersion(reportedVersion)
+    else { return }
+    value = reportedVersion
+  }
+}
+
 @MainActor final class CompanionModel: ObservableObject {
   @Published var page: CompanionPage = .overview
-  @Published var status: CompanionStatus?
+  @Published var status: CompanionStatus? {
+    didSet { appVersion.observe(status?.version) }
+  }
   @Published var report: LocalReport?
   @Published var progress: SetupProgress?
   @Published var failure: VisibleFailure? {
@@ -208,48 +429,101 @@ struct SetupPresentation {
   @Published private(set) var setupStorageEstimate: SetupStorageEstimate?
   @Published private(set) var setupStorageMetadataLoaded = false
   let fixture: Bool
+  let fixtureSettingsSection: DesktopSettingsSection?
   let resources: URL?
   let account: DesktopAccountModel
   let workspace: DesktopWorkspace
   let updater: DesktopUpdater
   let worker: DesktopWorkerModel
+  var workerSettingsVisible = false
   private var updaterObservation: AnyCancellable?
+  private var workspaceObservation: AnyCancellable?
   private let bridge = ProcessBridge()
   private let journal: UIJournal?
   private var currentCommand: AppCommand?
   private var commandStart: Task<Void, Never>?
+  private var automaticSetup = AutomaticSetupCoordinator()
+  private var setupRecovery = SetupCommandRecovery()
+  private var connectivityRecovery = SetupConnectivityRecovery()
+  private var scheduledRecovery: Task<Void, Never>?
+  private var connectivityMonitor: NWPathMonitor?
+  private var connectivityDeadline: Task<Void, Never>?
+  private var connectivityWait: SetupConnectivityWait?
+  private var currentOperation: UUID?
+  private var cancelledOperation: UUID?
+  private var executionSetupFailure: DesktopAuthFailure?
+  private var appVersion = CompanionVersion(
+    bundleVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+  )
+  var displayedVersion: String? { appVersion.value }
   var onStopped: (() -> Void)?
 
-  init() {
+  init(fixtureName suppliedFixture: String? = nil, preferences: UserDefaults = .standard) {
     resources = Bundle.main.resourceURL
     let arguments = ProcessInfo.processInfo.arguments
     let fixtureName: String?
-    if let index = arguments.firstIndex(of: "--ui-fixture"), index + 1 < arguments.count {
+    if let suppliedFixture {
+      fixtureName = suppliedFixture
+    } else if let index = arguments.firstIndex(of: "--ui-fixture"), index + 1 < arguments.count {
       fixtureName = arguments[index + 1]
     } else {
       fixtureName = nil
     }
     fixture = fixtureName != nil
+    fixtureSettingsSection = fixtureName == "worker" ? .worker : nil
     journal = fixture ? nil : UIJournal()
-    let desktopAccount = DesktopAccountModel(
-      configuration: try? DesktopPublicConfiguration.load(resources: resources), journal: journal)
+    let desktopAccount: DesktopAccountModel
+    #if DEBUG
+      if LocalUIDebugSession.active {
+        desktopAccount = DesktopAccountModel(
+          configuration: nil, vault: LocalUIDebugVault(), transport: LocalUIDebugHTTPTransport(),
+          preferences: preferences,
+          stateStore: DesktopAccountStateStore(support: LocalPaths.support), journal: journal)
+      } else {
+        desktopAccount = DesktopAccountModel(
+          configuration: fixture ? nil : try? DesktopPublicConfiguration.load(resources: resources),
+          preferences: preferences,
+          journal: journal)
+      }
+    #else
+      desktopAccount = DesktopAccountModel(
+        configuration: fixture ? nil : try? DesktopPublicConfiguration.load(resources: resources),
+        preferences: preferences, journal: journal)
+    #endif
     account = desktopAccount
-    workspace = DesktopWorkspace(account: desktopAccount, resources: resources, journal: journal)
-    updater = DesktopUpdater(fixture: fixture)
-    worker = DesktopWorkerModel(resources: resources, fixture: fixture)
+    workspace = DesktopWorkspace(
+      account: desktopAccount, resources: resources, journal: journal, preferences: preferences)
+    updater = DesktopUpdater(fixture: fixture || LocalUIDebugSession.active)
+    worker = DesktopWorkerModel(
+      resources: resources, fixture: fixture || LocalUIDebugSession.active, preferences: preferences
+    )
     worker.canOperate = { [weak self] in
       guard let self else { return false }
       return !self.busy && !self.updater.installationReserved
         && !self.updater.installationPreparing
     }
-    worker.canRegister = { [weak self] in self?.ready == true }
+    worker.canRegister = { [weak self] in
+      guard let self else { return false }
+      return !self.fixture && !self.busy && self.status?.supported == true
+        && self.status?.runtimeReady == true && self.status?.modelReady == true
+    }
     worker.coordinateRegistration(account: desktopAccount)
+    workspace.onPreparationRequired = { [weak self] failure in
+      Task { @MainActor [weak self] in
+        guard let self, !self.fixture, !self.busy, !self.worker.busy,
+          !self.updater.installationReserved, !self.updater.installationPreparing
+        else { return }
+        self.executionSetupFailure = failure
+        self.page = .setup
+        self.run(.status)
+      }
+    }
     updater.prepareInstallation = { [weak self] in
       guard let self else { throw DesktopWorkerFailure("APP_OPERATION_BUSY") }
       await self.worker.suspendSubscriptions()
     }
     updater.onInstallationReleased = { [weak self] in
-      guard let self, self.page == .worker else { return }
+      guard let self, self.workerSettingsVisible else { return }
       self.worker.resumeSubscriptionsAfterSuspension()
     }
     updater.isApplicationBusy = { [weak self] in
@@ -258,6 +532,12 @@ struct SetupPresentation {
         || self.worker.busy
     }
     updaterObservation = updater.objectWillChange.sink { [weak self] in
+      self?.objectWillChange.send()
+      DispatchQueue.main.async { self?.cancelRecoveryForUpdateIfNeeded() }
+    }
+    // Scene commands read nested workspace state (selected track, play/pause and volume).
+    // Relay its changes so menu availability follows the same state as the player views.
+    workspaceObservation = workspace.objectWillChange.sink { [weak self] in
       self?.objectWillChange.send()
     }
     if let fixtureName {
@@ -271,20 +551,35 @@ struct SetupPresentation {
       loadSetupStorageMetadata()
     }
   }
+  func recordLocalUIAction(_ action: String) { journal?.recordLocalUIAction(action) }
   var setupPresentation: SetupPresentation {
     SetupPresentation(
-      status: status, activeCommand: busy ? currentCommand : nil, hasFailure: failure != nil)
+      status: status,
+      activeCommand: busy ? (scheduledRecovery == nil ? currentCommand : .setup) : nil,
+      hasFailure: failure != nil)
   }
   var ready: Bool { setupPresentation.ready && !fixture }
   var displayedReady: Bool { setupPresentation.ready }
   var setupActionLabel: String { setupPresentation.actionLabel }
-  var preparingSetup: Bool { currentCommand == .setup }
+  var preparingSetup: Bool { currentCommand == .setup || scheduledRecovery != nil }
+  func beginInitialReadinessCheck() {
+    if LocalUIDebugSession.active {
+      notice =
+        "Isolated local UI session. Owned synthetic playback and settings are available; setup, account, cloud, processing and worker operations are unavailable."
+      return
+    }
+    guard !fixture, !busy, !worker.busy, !updater.installationReserved,
+      !updater.installationPreparing, automaticSetup.beginInitialCheck()
+    else { return }
+    run(.status)
+  }
   var operationLabel: String {
+    if scheduledRecovery != nil { return "Preparing" }
     switch currentCommand {
-    case .status: "Checking"
-    case .snapshot: "Inspecting"
-    case .export: "Exporting"
-    default: "Preparing"
+    case .status: return "Checking"
+    case .snapshot: return "Inspecting"
+    case .export: return "Exporting"
+    default: return "Preparing"
     }
   }
   private func loadSetupStorageMetadata() {
@@ -306,25 +601,48 @@ struct SetupPresentation {
     return candidate
   }
   func run(_ command: AppCommand) {
+    _ = start(command, recoveryGeneration: nil)
+  }
+  @discardableResult private func start(_ command: AppCommand, recoveryGeneration: UInt64?) -> Bool
+  {
+    if LocalUIDebugSession.active {
+      notice =
+        "This isolated UI session does not prepare tools, register Chrome, change workers or access account services."
+      journal?.recordLocalUIAction("operation.omitted")
+      return false
+    }
     guard !fixture else {
       notice = "Preview only. No setup or processing commands run in this fixture."
-      return
+      return false
     }
     guard !busy, !worker.busy, !updater.installationReserved, !updater.installationPreparing else {
-      return
+      return false
     }
     guard let resources else {
       failure = VisibleFailure(
         code: "APP_RESOURCES_INCOMPLETE",
         action: "Install the complete MusicMute Local app, then open it again.")
-      return
+      return false
     }
+    let generation: UInt64
+    if let recoveryGeneration {
+      guard setupRecovery.isCurrent(recoveryGeneration) else { return false }
+      generation = recoveryGeneration
+    } else {
+      generation = setupRecovery.begin()
+      connectivityRecovery.beginCycle()
+    }
+    let operation = UUID()
+    currentOperation = operation
+    cancelledOperation = nil
     busy = true
     failure = nil
     notice = nil
     currentCommand = command
     if command == .status || command == .setup { status = nil }
     if command == .setup {
+      executionSetupFailure = nil
+      automaticSetup.preparationStarted()
       page = .setup
       progress = SetupProgress(phase: "starting", percent: 0, label: "Preparing your Mac…")
     }
@@ -333,17 +651,27 @@ struct SetupPresentation {
       // Status subscriptions also own app/runtime execution leases. Release their disposable
       // controllers before Prepare or an explicit integrity check; fleet attempts stay running.
       await worker.suspendSubscriptions()
-      guard !Task.isCancelled, busy, currentCommand == command else { return }
+      guard !Task.isCancelled, busy, currentCommand == command, currentOperation == operation,
+        setupRecovery.isCurrent(generation)
+      else { return }
       commandStart = nil
       bridge.run(
         command, resources: resources,
         onEvent: { [weak self] event in
-          DispatchQueue.main.async { self?.receive(event, command: command) }
+          DispatchQueue.main.async {
+            guard let self, self.currentOperation == operation,
+              self.setupRecovery.isCurrent(generation)
+            else { return }
+            self.receive(event, command: command)
+          }
         },
         onFinish: { [weak self] outcome in
-          DispatchQueue.main.async { self?.finish(outcome, command: command) }
+          DispatchQueue.main.async {
+            self?.finish(outcome, command: command, operation: operation, generation: generation)
+          }
         })
     }
+    return true
   }
   private func receive(_ event: ControlEvent, command: AppCommand) {
     switch event.type {
@@ -378,12 +706,59 @@ struct SetupPresentation {
     default: break
     }
   }
-  private func finish(_ outcome: ProcessOutcome, command: AppCommand) {
+  private func finish(
+    _ receivedOutcome: ProcessOutcome, command: AppCommand, operation: UUID, generation: UInt64
+  ) {
+    guard currentOperation == operation else { return }
+    let outcome: ProcessOutcome = cancelledOperation == operation ? .cancelled : receivedOutcome
+    if setupRecovery.isCurrent(generation),
+      let delay = setupRecovery.nextDelay(
+        command: command, outcome: outcome, status: status, receivedFailureCode: failure?.code,
+        now: ProcessInfo.processInfo.systemUptime)
+    {
+      scheduleRecovery(command: command, generation: generation, delay: delay)
+      return
+    }
+    if command == .setup, setupRecovery.isCurrent(generation),
+      let code = SetupCommandRecovery.failureCode(
+        outcome: outcome, receivedFailureCode: failure?.code),
+      ["RUNTIME_DOWNLOAD_FAILED", "MODEL_DOWNLOAD_FAILED"].contains(code),
+      connectivityRecovery.beginWait()
+    {
+      beginConnectivityWait(outcome: outcome, generation: generation)
+      return
+    }
     busy = false
+    let setupDecision = automaticSetup.completed(
+      command: command, outcome: outcome, status: status, hasFailure: failure != nil,
+      executionFailure: command == .status ? executionSetupFailure : nil)
+    if setupDecision == .prepare, executionSetupFailure == .service("MODEL_INVALID") {
+      // Cheap model metadata cannot release worker/local readiness before execution repair.
+      status = nil
+    }
+    if command == .status { executionSetupFailure = nil }
+    if setupDecision == .showModelRepair {
+      status = nil
+      failure = VisibleFailure(
+        code: "MODEL_CACHE_INVALID",
+        action:
+          "Open the model folder in this app, move the damaged Kim_Vocal_2.onnx file aside, then retry setup."
+      )
+    } else if setupDecision == .showAppRepair {
+      status = nil
+      failure = VisibleFailure(
+        code: "APP_RESOURCES_INCOMPLETE",
+        action: "This MusicMute app is incomplete. Reinstall the app, then retry Prepare my Mac.")
+    }
     switch outcome {
     case .success:
       if command == .setup && status?.complete == true {
         notice = setupPresentation.completionMessage
+      }
+      if command == .setup, status?.runtimeReady == true, status?.modelReady == true,
+        workspace.failure == DesktopAuthFailure.service("MODEL_INVALID").message
+      {
+        workspace.failure = nil
       }
       if (command == .status || command == .setup) && status?.runtimeReady == true
         && status?.modelReady == true
@@ -414,9 +789,119 @@ struct SetupPresentation {
       }
     }
     currentCommand = nil
-    if page == .worker { worker.resumeSubscriptionsAfterSuspension() }
+    currentOperation = nil
+    cancelledOperation = nil
+    if setupDecision != .none { page = .setup }
+    if workerSettingsVisible { worker.resumeSubscriptionsAfterSuspension() }
     onStopped?()
     onStopped = nil
+    if setupDecision == .prepare { start(.setup, recoveryGeneration: generation) }
+  }
+  private func scheduleRecovery(command: AppCommand, generation: UInt64, delay: TimeInterval) {
+    let waitingOperation = UUID()
+    currentOperation = waitingOperation
+    currentCommand = command
+    busy = true
+    failure = nil
+    notice = nil
+    page = .setup
+    progress = SetupProgress(
+      phase: "recovery", percent: progress?.percent ?? 0, label: "Preparing your Mac…")
+    scheduledRecovery = Task { @MainActor [weak self] in
+      do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+      guard let self, self.currentOperation == waitingOperation,
+        self.setupRecovery.isCurrent(generation)
+      else { return }
+      self.scheduledRecovery = nil
+      self.busy = false
+      self.currentCommand = nil
+      self.currentOperation = nil
+      if !self.start(command, recoveryGeneration: generation) {
+        self.busy = true
+        self.currentCommand = command
+        self.currentOperation = waitingOperation
+        self.finish(
+          .failed("APP_OPERATION_BUSY"), command: command, operation: waitingOperation,
+          generation: generation)
+      }
+    }
+  }
+  private func beginConnectivityWait(outcome: ProcessOutcome, generation: UInt64) {
+    let operation = UUID()
+    let wait = SetupConnectivityWait(
+      outcome: outcome, failure: failure, operation: operation, generation: generation)
+    connectivityWait = wait
+    currentOperation = operation
+    currentCommand = .setup
+    busy = true
+    page = .setup
+    let monitor = NWPathMonitor()
+    connectivityMonitor = monitor
+    monitor.pathUpdateHandler = { [weak self] path in
+      let event: SetupConnectivityRecovery.PathState
+      switch path.status {
+      case .satisfied: event = .satisfied
+      case .requiresConnection: event = .requiresConnection
+      default: event = .unsatisfied
+      }
+      Task { @MainActor [weak self] in
+        guard let self, self.currentOperation == operation,
+          self.setupRecovery.isCurrent(generation), self.connectivityWait != nil
+        else { return }
+        self.completeConnectivityWait(self.connectivityRecovery.pathChanged(event), wait: wait)
+      }
+    }
+    monitor.start(
+      queue: DispatchQueue(label: "com.musicmute.local.setup-connectivity", qos: .utility))
+    connectivityDeadline = Task { @MainActor [weak self] in
+      do { try await Task.sleep(for: .seconds(300)) } catch { return }
+      guard let self, self.currentOperation == operation,
+        self.setupRecovery.isCurrent(generation), self.connectivityWait != nil
+      else { return }
+      self.completeConnectivityWait(self.connectivityRecovery.expire(), wait: wait)
+    }
+  }
+  private func completeConnectivityWait(
+    _ decision: SetupConnectivityRecovery.Decision, wait: SetupConnectivityWait
+  ) {
+    switch decision {
+    case .ignore: return
+    case .wait:
+      failure = nil
+      notice = nil
+      progress = SetupProgress(
+        phase: "connectivity", percent: progress?.percent ?? 0, label: "Reconnecting")
+    case .stop:
+      closeConnectivityWait()
+      failure = wait.failure
+      finish(wait.outcome, command: .setup, operation: wait.operation, generation: wait.generation)
+    case .resume:
+      closeConnectivityWait()
+      busy = false
+      currentCommand = nil
+      currentOperation = nil
+      if !start(.setup, recoveryGeneration: wait.generation) {
+        busy = true
+        currentCommand = .setup
+        currentOperation = wait.operation
+        finish(
+          .failed("APP_OPERATION_BUSY"), command: .setup, operation: wait.operation,
+          generation: wait.generation)
+      }
+    }
+  }
+  private func closeConnectivityWait() {
+    connectivityMonitor?.cancel()
+    connectivityMonitor = nil
+    connectivityDeadline?.cancel()
+    connectivityDeadline = nil
+    connectivityWait = nil
+  }
+  private func cancelRecoveryForUpdateIfNeeded() {
+    guard scheduledRecovery != nil || connectivityWait != nil,
+      updater.installationReserved || updater.installationPreparing
+    else { return }
+    cancel()
   }
   func cancel() {
     if fixture {
@@ -424,13 +909,28 @@ struct SetupPresentation {
       progress = nil
       return
     }
+    let generation = setupRecovery.generation
+    setupRecovery.cancel()
+    connectivityRecovery.cancel()
+    cancelledOperation = currentOperation
     if currentCommand == .setup {
       journal?.record(.appSetupCancelled, code: "SETUP_CANCELLED", command: .setup)
     }
-    if let commandStart, let command = currentCommand {
+    if let wait = connectivityWait {
+      closeConnectivityWait()
+      finish(.cancelled, command: .setup, operation: wait.operation, generation: generation)
+      return
+    }
+    if let scheduledRecovery, let command = currentCommand, let operation = currentOperation {
+      scheduledRecovery.cancel()
+      self.scheduledRecovery = nil
+      finish(.cancelled, command: command, operation: operation, generation: generation)
+      return
+    }
+    if let commandStart, let command = currentCommand, let operation = currentOperation {
       commandStart.cancel()
       self.commandStart = nil
-      finish(.cancelled, command: command)
+      finish(.cancelled, command: command, operation: operation, generation: generation)
       return
     }
     bridge.cancel()
@@ -516,7 +1016,6 @@ struct SetupPresentation {
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     status = try? decoder.decode(CompanionStatus.self, from: Data(statusJSON.utf8))
     if name == "worker" {
-      page = .worker
       worker.applyPreview()
     }
     if name == "repair" {
@@ -815,6 +1314,8 @@ struct SetupPresentation {
         let status = TerminalNativeHost.run(
           arguments: Array(arguments.dropFirst()), resources: Bundle.main.resourceURL)
         Darwin.exit(status)
+      } else if LocalUIDebugSession.active {
+        MusicMuteLocalApp.main()
       } else if InstalledAppGate.relinquishUninstalledCopy() {
         Darwin.exit(0)
       } else {
@@ -874,14 +1375,24 @@ struct SetupPresentation {
           .environment(\.layoutDirection, resolvedLanguage == "ar" ? .rightToLeft : .leftToRight)
           .frame(minWidth: 840, minHeight: 660)
           .onOpenURL { model.openSetupLink($0) }
+          .onChange(of: model.account.scope) { _, _ in
+            if !model.fixture { Task { await model.account.loadProcessingPolicy() } }
+          }
+          .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+          ) { _ in
+            if !model.fixture { Task { await model.account.loadProcessingPolicy() } }
+          }
           .task {
             delegate.model = model
-            if !model.fixture && model.status == nil && !model.busy { model.run(.status) }
+            model.beginInitialReadinessCheck()
             if !model.fixture {
+              async let visibility: Void = model.account.loadProcessingPolicy()
               await model.account.loadPublicPolicy()
               await model.account.restore()
               await model.workspace.start()
               await model.workspace.syncAccount()
+              _ = await visibility
             }
           }
       }
@@ -1040,13 +1551,16 @@ struct SetupPresentation {
       Settings {
         DesktopPreferencesView(
           workspace: model.workspace, visualPreferences: visualPreferences,
-          updater: model.updater, isPreview: model.fixture,
+          updater: model.updater, worker: model.worker, isPreview: model.fixture,
+          initialSection: model.fixtureSettingsSection ?? .appearance,
+          prepare: {
+            model.page = .setup
+            activateMainWindow()
+          },
+          workerVisibilityChanged: { model.workerSettingsVisible = $0 },
           openAccount: {
             model.page = .account
-            NSApp.activate(ignoringOtherApps: true)
-            let settingsWindow = NSApp.keyWindow
-            NSApp.windows.first(where: { $0.canBecomeMain && $0 !== settingsWindow })?
-              .makeKeyAndOrderFront(nil)
+            activateMainWindow()
           }
         )
         .preferredColorScheme(visualPreferences.appearance.colorScheme)
@@ -1057,6 +1571,12 @@ struct SetupPresentation {
         .environment(\.layoutDirection, resolvedLanguage == "ar" ? .rightToLeft : .leftToRight)
       }
       .defaultSize(width: 700, height: 660)
+    }
+    private func activateMainWindow() {
+      NSApp.activate(ignoringOtherApps: true)
+      let settingsWindow = NSApp.keyWindow
+      NSApp.windows.first(where: { $0.canBecomeMain && $0 !== settingsWindow })?
+        .makeKeyAndOrderFront(nil)
     }
     private var resolvedLanguage: String {
       if visualPreferences.language != .system {
@@ -1073,6 +1593,7 @@ private struct CompanionView: View {
   @ObservedObject var model: CompanionModel
   @Environment(\.layoutDirection) private var layoutDirection
   @Environment(\.locale) private var locale
+  @Environment(\.openSettings) private var openSettings
   @FocusState private var navigationFocused: Bool
   var body: some View {
     NavigationSplitView {
@@ -1087,12 +1608,16 @@ private struct CompanionView: View {
     .disabled(model.updater.installationReserved || model.updater.installationPreparing)
     .foregroundStyle(Brand.text)
     .onAppear {
-      if !model.fixture, restoreLastPage, let page = CompanionPage(rawValue: lastPage) {
-        model.page = page
+      if !model.fixture, !model.preparingSetup, model.status?.complete != false,
+        restoreLastPage
+      {
+        model.page = CompanionPage.restored(lastPage)
       }
       DispatchQueue.main.async { navigationFocused = true }
+      if model.fixtureSettingsSection != nil { openSettings() }
     }
     .onChange(of: model.page) { _, page in
+      model.recordLocalUIAction("navigation.\(page.rawValue.lowercased())")
       if !model.fixture { lastPage = page.rawValue }
       if page == .library, !model.fixture {
         Task { await model.workspace.libraryBecameVisible() }
@@ -1127,7 +1652,7 @@ private struct CompanionView: View {
           .accessibilityElement(children: .combine)
         }
         Section("MusicMute") {
-          ForEach([CompanionPage.overview, .library, .account, .worker], id: \.self) { page in
+          ForEach([CompanionPage.overview, .library, .account], id: \.self) { page in
             Label(LocalizedStringKey(page.rawValue), systemImage: page.symbol)
               .desktopFont(.body, weight: .medium)
               .padding(.vertical, 5)
@@ -1167,7 +1692,7 @@ private struct CompanionView: View {
               .lineLimit(nil)
               .frame(maxWidth: .infinity, alignment: .leading)
               .fixedSize(horizontal: false, vertical: true)
-            Text("macOS · Apple Silicon · v\(model.status?.version ?? "0.1.0")")
+            Text("macOS · Apple Silicon · v\(model.displayedVersion ?? "—")")
               .desktopFont(.caption2).foregroundStyle(Brand.secondary).padding(.top, 4)
           }
           .padding(.vertical, 8)
@@ -1236,10 +1761,6 @@ private struct CompanionView: View {
               overview
             case .library: DesktopLibraryView(workspace: model.workspace)
             case .account: DesktopAccountView(account: model.account, workspace: model.workspace)
-            case .worker:
-              DesktopWorkerView(
-                worker: model.worker, prepare: { model.page = .setup },
-                openAccount: { model.page = .account })
             case .setup: setup
             case .diagnostics: diagnostics
             }
@@ -1301,7 +1822,6 @@ private struct CompanionView: View {
     case .overview: "CREATE VOICE-ONLY AUDIO"
     case .library: "YOUR VOICE LIBRARY"
     case .account: "MUSICMUTE ACCOUNT"
-    case .worker: "INDEPENDENT BACKGROUND PROCESSING"
     case .setup: "LOCAL COMPANION"
     case .diagnostics: "LOCAL DIAGNOSTICS"
     }
@@ -1311,7 +1831,6 @@ private struct CompanionView: View {
     case .overview: "Keep the voice. Enjoy the original video."
     case .library: "Your account results and saved voice-only audio."
     case .account: "Your account, sign-in methods and connected devices."
-    case .worker: "Manage this Mac’s independent background worker."
     case .setup: "Prepare once, then control MusicMute inside YouTube."
     case .diagnostics: "Understand a run with safe evidence stored locally."
     }
@@ -1468,9 +1987,7 @@ private struct CompanionView: View {
         }
         HStack(spacing: 12) {
           Button(LocalizedStringKey(model.setupActionLabel)) {
-            model.run(
-              model.displayedReady && !model.setupPresentation.needsYouTubeRepair ? .status : .setup
-            )
+            model.run(model.setupPresentation.primaryCommand)
           }
           .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
           .disabled(model.busy).accessibilityIdentifier("setup_primary")

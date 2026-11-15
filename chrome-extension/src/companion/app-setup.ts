@@ -1,3 +1,4 @@
+import "./local-debug.js";
 import {
   DarwinFileLockBusyError,
   withDarwinFileLock,
@@ -8,7 +9,7 @@ import {
   type RuntimeResourceProbe,
 } from "../../../worker/src/runtime/resource-limits.js";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants, createReadStream, type Stats } from "node:fs";
 import {
   access,
   chmod,
@@ -29,10 +30,10 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
   inspectLocalReadiness,
   inspectYouTubeReadiness,
-  LocalSetupError,
   type LocalConfig,
   type ReadinessProbeEvent,
 } from "./config.js";
+import { LocalSetupError } from "./local-setup-error.js";
 import {
   MVP_MAX_DURATION_SECONDS,
   NATIVE_HOST,
@@ -44,12 +45,8 @@ import {
   DOWNLOADER_WHEELS,
 } from "./downloader-bundle.js";
 
-export const MODEL = Object.freeze({
-  filename: "Kim_Vocal_2.onnx",
-  bytes: 66_759_214,
-  sha256: "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
-  url: "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/Kim_Vocal_2.onnx",
-});
+import { MODEL } from "../shared/local-model.js";
+export { MODEL } from "../shared/local-model.js";
 export interface AppProgress {
   phase: string;
   percent: number;
@@ -124,6 +121,7 @@ export async function verifyModel(config: LocalConfig): Promise<boolean> {
       information.isSymbolicLink() ||
       information.nlink !== 1 ||
       information.size !== MODEL.bytes ||
+      information.uid !== process.getuid?.() ||
       information.mode & 0o077
     )
       return false;
@@ -132,7 +130,7 @@ export async function verifyModel(config: LocalConfig): Promise<boolean> {
     return digest.digest("hex") === MODEL.sha256;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
+    throw modelFileFailure(error);
   }
 }
 export async function extensionOrigin(resources: string): Promise<string> {
@@ -933,46 +931,285 @@ export async function inspectAppStatus(
     max_duration_seconds: MVP_MAX_DURATION_SECONDS,
   };
 }
-export async function downloadModel(
+const MODEL_DOWNLOAD_DEADLINE_MS = 20 * 60_000;
+const MODEL_DOWNLOAD_IDLE_MS = 30_000;
+const MODEL_DOWNLOAD_ATTEMPTS = 3;
+const MODEL_RETRY_AFTER_LIMIT_MS = 30_000;
+
+type ModelRetryKind = "transient" | "integrity";
+class ModelTransferFailure extends LocalSetupError {
+  constructor(
+    code: string,
+    readonly retry: ModelRetryKind,
+    readonly retryAfterMs = 0,
+  ) {
+    super(code);
+  }
+}
+
+function modelFileFailure(error: unknown): LocalSetupError {
+  if (error instanceof LocalSetupError) return error;
+  switch ((error as NodeJS.ErrnoException)?.code) {
+    case "ENOSPC":
+    case "EDQUOT":
+      return new LocalSetupError("DISK_SPACE_LOW");
+    case "EACCES":
+    case "EPERM":
+    case "EROFS":
+      return new LocalSetupError("LOCAL_DIRECTORY_NOT_PRIVATE");
+    default:
+      return new LocalSetupError("MODEL_CACHE_INVALID");
+  }
+}
+async function modelFileOperation<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw modelFileFailure(error);
+  }
+}
+function modelCertificateFailure(error: unknown): boolean {
+  const codes = new Set([
+    "CERT_HAS_EXPIRED",
+    "CERT_NOT_YET_VALID",
+    "CERT_REVOKED",
+    "CERT_UNTRUSTED",
+    "CERT_SIGNATURE_FAILURE",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_GET_ISSUER_CERT",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "ERR_SSL_TLSV1_ALERT_UNKNOWN_CA",
+    "CRL_NOT_YET_VALID",
+    "CRL_HAS_EXPIRED",
+    "CERT_CHAIN_TOO_LONG",
+    "UNABLE_TO_GET_CRL",
+    "INVALID_CA",
+    "PATH_LENGTH_EXCEEDED",
+    "HOSTNAME_MISMATCH",
+    "INVALID_PURPOSE",
+    "CERT_REJECTED",
+    "CRL_SIGNATURE_FAILURE",
+    "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+    "ERROR_IN_CERT_NOT_AFTER_FIELD",
+    "ERROR_IN_CRL_LAST_UPDATE_FIELD",
+    "ERROR_IN_CRL_NEXT_UPDATE_FIELD",
+    "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+    "UNABLE_TO_DECRYPT_CRL_SIGNATURE",
+    "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+  ]);
+  let current: unknown = error;
+  for (
+    let depth = 0;
+    depth < 5 && current && typeof current === "object";
+    depth++
+  ) {
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (
+      typeof candidate.code === "string" &&
+      (codes.has(candidate.code) || candidate.code.startsWith("ERR_TLS_CERT_"))
+    )
+      return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
+function repairableModel(info: Stats): boolean {
+  return (
+    info.isFile() &&
+    !info.isSymbolicLink() &&
+    info.nlink === 1 &&
+    info.uid === process.getuid?.() &&
+    (info.mode & 0o077) === 0 &&
+    info.size <= MODEL.bytes
+  );
+}
+function unchangedModel(before: Stats, after: Stats): boolean {
+  return (
+    repairableModel(after) &&
+    before.dev === after.dev &&
+    before.ino === after.ino &&
+    before.birthtimeMs === after.birthtimeMs &&
+    before.size === after.size &&
+    before.mode === after.mode &&
+    before.mtimeMs === after.mtimeMs &&
+    before.ctimeMs === after.ctimeMs
+  );
+}
+function preservedModelMatches(original: Stats, observed: Stats): boolean {
+  return (
+    observed.isFile() &&
+    !observed.isSymbolicLink() &&
+    observed.dev === original.dev &&
+    observed.ino === original.ino &&
+    observed.birthtimeMs === original.birthtimeMs &&
+    observed.uid === original.uid &&
+    observed.mode === original.mode &&
+    observed.size === original.size &&
+    observed.mtimeMs === original.mtimeMs &&
+    observed.nlink >= 1 &&
+    observed.nlink <= 2
+  );
+}
+async function optionalModelInfo(path: string): Promise<Stats | undefined> {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw modelFileFailure(error);
+  }
+}
+
+function modelRetryAfter(value: string | null): number {
+  if (value === null) return 0;
+  const seconds = Number(value);
+  const delay = Number.isFinite(seconds)
+    ? seconds * 1000
+    : Date.parse(value) - Date.now();
+  return Number.isFinite(delay)
+    ? Math.max(0, Math.min(MODEL_RETRY_AFTER_LIMIT_MS, delay))
+    : 0;
+}
+async function waitForModelRetry(
+  delay: number,
+  signal: AbortSignal,
+): Promise<void> {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const cancel = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", cancel);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", cancel);
+      resolve();
+    }, delay);
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
+  });
+}
+
+/** Only a fully verified replacement may move an unchanged, private owned model aside. */
+async function publishModel(
   config: LocalConfig,
+  path: string,
+  original: Stats | undefined,
+  signal: AbortSignal,
+): Promise<void> {
+  const destination = modelPath(config);
+  const quarantine = join(
+    dirname(destination),
+    `.${MODEL.filename}.quarantine`,
+  );
+  signal.throwIfAborted();
+  if (await verifyModel(config)) return;
+  const current = await optionalModelInfo(destination);
+  if (current && (!original || !unchangedModel(original, current)))
+    throw new LocalSetupError("MODEL_CACHE_INVALID");
+  let preserved = false;
+  try {
+    if (current && original) {
+      // One reserved quarantine slot bounds retained repair state and never overwrites a backup.
+      await link(destination, quarantine);
+      preserved = true;
+      const retained = await lstat(quarantine);
+      const selected = await lstat(destination);
+      if (
+        retained.dev !== original.dev ||
+        retained.ino !== original.ino ||
+        selected.dev !== original.dev ||
+        selected.ino !== original.ino ||
+        retained.nlink !== 2 ||
+        selected.nlink !== 2 ||
+        retained.uid !== original.uid ||
+        selected.uid !== original.uid ||
+        retained.mode !== original.mode ||
+        selected.mode !== original.mode ||
+        retained.size !== original.size ||
+        retained.mtimeMs !== original.mtimeMs ||
+        selected.size !== original.size ||
+        selected.mtimeMs !== original.mtimeMs
+      )
+        throw new LocalSetupError("MODEL_CACHE_INVALID");
+      await unlink(destination);
+    }
+    signal.throwIfAborted();
+    try {
+      await link(path, destination);
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code === "EEXIST" &&
+        (await verifyModel(config))
+      )
+        return;
+      throw error;
+    }
+  } catch (error) {
+    const backup =
+      preserved && original ? await optionalModelInfo(quarantine) : undefined;
+    if (
+      original &&
+      backup &&
+      preservedModelMatches(original, backup) &&
+      !(await optionalModelInfo(destination))
+    ) {
+      try {
+        await link(quarantine, destination);
+        const restored = await optionalModelInfo(destination);
+        const retained = await optionalModelInfo(quarantine);
+        if (
+          restored &&
+          retained &&
+          preservedModelMatches(original, restored) &&
+          preservedModelMatches(original, retained)
+        ) {
+          await unlink(quarantine);
+          preserved = false;
+        }
+      } catch {
+        // Keep the old bytes in quarantine when another publication or filesystem failure wins.
+      }
+    }
+    if (preserved && original) {
+      const restored = await optionalModelInfo(destination);
+      const retained = await optionalModelInfo(quarantine);
+      if (
+        restored &&
+        retained &&
+        preservedModelMatches(original, restored) &&
+        preservedModelMatches(original, retained)
+      )
+        await unlink(quarantine).catch(() => {});
+    }
+    if (!signal.aborted && (await verifyModel(config))) return;
+    throw modelFileFailure(error);
+  }
+}
+
+async function fetchModelAttempt(
+  directory: string,
   signal: AbortSignal,
   progress: (event: AppProgress) => void,
-  resourceProbe?: RuntimeResourceProbe,
-): Promise<void> {
-  if (await verifyModel(config)) return;
-  await privateDirectory(config.models_root);
-  const directory = join(config.models_root, MODEL.sha256);
-  await privateDirectory(directory);
-  const destination = modelPath(config);
-  try {
-    await lstat(destination);
-    throw new LocalSetupError("MODEL_CACHE_INVALID");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (signal.aborted) throw new LocalSetupError("CANCELLED");
-  try {
-    await new RuntimeResourceGate(directory, resourceProbe).assertAvailable(
-      MODEL.bytes,
-    );
-  } catch (error) {
-    throw new LocalSetupError(
-      error instanceof RuntimeResourceLimitError && error.resource === "disk"
-        ? "DISK_SPACE_LOW"
-        : "MEMORY_LOW",
-    );
-  }
+): Promise<string> {
   const path = join(directory, `.download-${randomUUID()}`);
   const controller = new AbortController();
   const abort = (): void => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
   if (signal.aborted) controller.abort();
-  const deadline = setTimeout(abort, 300_000);
-  let inactivity = setTimeout(abort, 30_000);
+  let inactivity = setTimeout(abort, MODEL_DOWNLOAD_IDLE_MS);
   let handle: FileHandle | undefined;
+  let response: Response | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let complete = false;
+  const cancelReader = (): void => {
+    void reader?.cancel().catch(() => {});
+  };
+  controller.signal.addEventListener("abort", cancelReader, { once: true });
   try {
     let url: string = MODEL.url;
-    let response: Response | undefined;
     for (let redirects = 0; redirects <= 2; redirects++) {
       const parsed = new URL(url);
       if (
@@ -981,51 +1218,92 @@ export async function downloadModel(
           parsed.hostname,
         ) ||
         parsed.username ||
-        parsed.password
+        parsed.password ||
+        parsed.port ||
+        parsed.hash
       )
         throw new LocalSetupError("MODEL_SOURCE_INVALID");
-      response = await fetch(url, {
-        redirect: "manual",
-        signal: controller.signal,
-        headers: { "User-Agent": "MusicMuteLocal/0.1" },
-      });
+      try {
+        response = await fetch(url, {
+          redirect: "manual",
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "MusicMuteLocal/0.1",
+            "Accept-Encoding": "identity",
+          },
+        });
+      } catch (error) {
+        if (modelCertificateFailure(error))
+          throw new LocalSetupError("MODEL_SOURCE_INVALID");
+        throw new ModelTransferFailure("MODEL_DOWNLOAD_FAILED", "transient");
+      }
+      controller.signal.throwIfAborted();
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
-        await response.body?.cancel();
+        await response.body?.cancel().catch(() => {});
         if (!location || redirects === 2)
           throw new LocalSetupError("MODEL_REDIRECT_INVALID");
-        url = new URL(location, url).href;
+        try {
+          url = new URL(location, url).href;
+        } catch {
+          throw new LocalSetupError("MODEL_REDIRECT_INVALID");
+        }
         continue;
       }
       break;
     }
-    if (!response?.ok || !response.body)
+    if (!response?.ok || !response.body) {
+      if (
+        response &&
+        ([408, 425, 429].includes(response.status) ||
+          (response.status >= 500 && response.status < 600))
+      )
+        throw new ModelTransferFailure(
+          "MODEL_DOWNLOAD_FAILED",
+          "transient",
+          modelRetryAfter(response.headers.get("retry-after")),
+        );
       throw new LocalSetupError("MODEL_DOWNLOAD_FAILED");
-    const declared = response.headers.get("content-length");
-    if (declared && Number(declared) !== MODEL.bytes) {
-      await response.body.cancel();
-      throw new LocalSetupError("MODEL_SIZE_INVALID");
     }
-    handle = await open(path, "wx", 0o600);
+    const declared = response.headers.get("content-length");
+    if (declared && Number(declared) !== MODEL.bytes)
+      throw new ModelTransferFailure("MODEL_SIZE_INVALID", "integrity");
+    handle = await modelFileOperation(() => open(path, "wx", 0o600));
     const hash = createHash("sha256");
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
+    if (controller.signal.aborted) cancelReader();
     let bytes = 0;
     let lastPercent = -1;
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      clearTimeout(inactivity);
-      inactivity = setTimeout(abort, 30_000);
-      bytes += value.byteLength;
-      if (bytes > MODEL.bytes) {
-        controller.abort();
-        throw new LocalSetupError("MODEL_SIZE_INVALID");
+      controller.signal.throwIfAborted();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (modelCertificateFailure(error))
+          throw new LocalSetupError("MODEL_SOURCE_INVALID");
+        throw new ModelTransferFailure("MODEL_DOWNLOAD_FAILED", "transient");
       }
+      controller.signal.throwIfAborted();
+      if (chunk.done) break;
+      const value = chunk.value;
+      if (value.byteLength === 0) continue;
+      clearTimeout(inactivity);
+      inactivity = setTimeout(abort, MODEL_DOWNLOAD_IDLE_MS);
+      bytes += value.byteLength;
+      if (bytes > MODEL.bytes)
+        throw new ModelTransferFailure("MODEL_SIZE_INVALID", "integrity");
       hash.update(value);
       let offset = 0;
-      while (offset < value.byteLength)
-        offset += (await handle.write(value, offset, value.byteLength - offset))
-          .bytesWritten;
+      while (offset < value.byteLength) {
+        controller.signal.throwIfAborted();
+        const selectedHandle = handle;
+        const { bytesWritten } = await modelFileOperation(() =>
+          selectedHandle.write(value, offset, value.byteLength - offset),
+        );
+        if (bytesWritten <= 0) throw new LocalSetupError("MODEL_CACHE_INVALID");
+        offset += bytesWritten;
+      }
       const percent = Math.floor((bytes / MODEL.bytes) * 55);
       if (percent !== lastPercent) {
         progress({
@@ -1037,26 +1315,117 @@ export async function downloadModel(
       }
     }
     if (bytes !== MODEL.bytes || hash.digest("hex") !== MODEL.sha256)
-      throw new LocalSetupError("MODEL_CHECKSUM_INVALID");
-    await handle.sync();
-    await handle.close();
+      throw new ModelTransferFailure("MODEL_CHECKSUM_INVALID", "integrity");
+    const selectedHandle = handle;
+    await modelFileOperation(() => selectedHandle.sync());
+    await modelFileOperation(() => selectedHandle.close());
     handle = undefined;
-    // Exclusive publication cannot replace an existing model or unrelated file.
     controller.signal.throwIfAborted();
-    await link(path, destination);
-    await unlink(path);
+    complete = true;
+    return path;
   } catch (error) {
-    if (signal.aborted) throw new LocalSetupError("CANCELLED");
-    if (error instanceof LocalSetupError) throw error;
+    if (signal.aborted) throw error;
+    if (
+      error instanceof LocalSetupError &&
+      !(error instanceof ModelTransferFailure)
+    )
+      throw error;
     if (controller.signal.aborted)
-      throw new LocalSetupError("MODEL_DOWNLOAD_TIMEOUT");
-    throw new LocalSetupError("MODEL_DOWNLOAD_FAILED");
+      throw new ModelTransferFailure("MODEL_DOWNLOAD_TIMEOUT", "transient");
+    throw error instanceof LocalSetupError ? error : modelFileFailure(error);
   } finally {
-    clearTimeout(deadline);
     clearTimeout(inactivity);
     signal.removeEventListener("abort", abort);
-    await handle?.close();
-    await unlink(path).catch(() => {});
+    controller.signal.removeEventListener("abort", cancelReader);
+    await reader?.cancel().catch(() => {});
+    reader?.releaseLock();
+    if (response?.body && !response.body.locked)
+      await response.body.cancel().catch(() => {});
+    try {
+      if (handle) {
+        const selectedHandle = handle;
+        await modelFileOperation(() => selectedHandle.close());
+      }
+    } finally {
+      if (!complete) await unlink(path).catch(() => {});
+    }
+  }
+}
+
+export async function downloadModel(
+  config: LocalConfig,
+  signal: AbortSignal,
+  progress: (event: AppProgress) => void,
+  resourceProbe?: RuntimeResourceProbe,
+): Promise<void> {
+  if (await verifyModel(config)) return;
+  await modelFileOperation(() => privateDirectory(config.models_root));
+  const directory = join(config.models_root, MODEL.sha256);
+  await modelFileOperation(() => privateDirectory(directory));
+  const original = await optionalModelInfo(modelPath(config));
+  if (original && !repairableModel(original))
+    throw new LocalSetupError("MODEL_CACHE_INVALID");
+  if (
+    original &&
+    (await optionalModelInfo(join(directory, `.${MODEL.filename}.quarantine`)))
+  )
+    throw new LocalSetupError("MODEL_CACHE_INVALID");
+  if (signal.aborted) throw new LocalSetupError("CANCELLED");
+  try {
+    await new RuntimeResourceGate(directory, resourceProbe).assertAvailable(
+      MODEL.bytes,
+    );
+  } catch (error) {
+    if (error instanceof RuntimeResourceLimitError)
+      throw new LocalSetupError(
+        error.resource === "disk" ? "DISK_SPACE_LOW" : "MEMORY_LOW",
+      );
+    throw modelFileFailure(error);
+  }
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) controller.abort();
+  const deadline = setTimeout(abort, MODEL_DOWNLOAD_DEADLINE_MS);
+  let integrityRetried = false;
+  try {
+    for (let attempt = 0; attempt < MODEL_DOWNLOAD_ATTEMPTS; attempt++) {
+      let path: string | undefined;
+      try {
+        controller.signal.throwIfAborted();
+        if (await verifyModel(config)) return;
+        path = await fetchModelAttempt(directory, controller.signal, progress);
+        await publishModel(config, path, original, controller.signal);
+        return;
+      } catch (error) {
+        if (signal.aborted) throw new LocalSetupError("CANCELLED");
+        if (controller.signal.aborted)
+          throw new LocalSetupError("MODEL_DOWNLOAD_TIMEOUT");
+        if (
+          !(error instanceof ModelTransferFailure) ||
+          attempt + 1 === MODEL_DOWNLOAD_ATTEMPTS
+        )
+          throw error;
+        if (error.retry === "integrity") {
+          if (integrityRetried) throw error;
+          integrityRetried = true;
+        }
+        await waitForModelRetry(
+          Math.max(500 * 2 ** attempt, error.retryAfterMs),
+          controller.signal,
+        );
+      } finally {
+        if (path) await unlink(path).catch(() => {});
+      }
+    }
+  } catch (error) {
+    if (signal.aborted) throw new LocalSetupError("CANCELLED");
+    if (controller.signal.aborted)
+      throw new LocalSetupError("MODEL_DOWNLOAD_TIMEOUT");
+    throw error instanceof LocalSetupError ? error : modelFileFailure(error);
+  } finally {
+    clearTimeout(deadline);
+    signal.removeEventListener("abort", abort);
   }
 }
 export async function withSetupLock<T>(

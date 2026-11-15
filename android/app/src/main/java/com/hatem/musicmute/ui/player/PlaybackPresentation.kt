@@ -1,8 +1,13 @@
 package com.hatem.musicmute.ui.player
 
 import com.hatem.musicmute.R
+import com.hatem.musicmute.library.LibraryEntry
 import com.hatem.musicmute.playback.PlaybackState
 import com.hatem.musicmute.processing.ArtifactProgress
+
+/** A delayed Library snapshot must never show the previous song or another owner's artwork. */
+internal fun PlaybackState.matchingLibraryEntry(entry: LibraryEntry?): LibraryEntry? =
+    entry?.takeIf { trackId != null && it.key == queue.getOrNull(currentIndex)?.key }
 
 /** Shared by original-audio and voice-only controls. */
 internal fun PlaybackState.canSeekAudio(): Boolean =

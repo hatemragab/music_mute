@@ -49,6 +49,11 @@ class Platforms {
     default: undefined,
   })
   macos?: DesktopPlatformPolicy;
+  @Prop({
+    type: SchemaFactory.createForClass(DesktopPlatformPolicy),
+    default: undefined,
+  })
+  windows?: DesktopPlatformPolicy;
 }
 
 @Schema({ collection: 'app_policies', strict: 'throw', versionKey: false })

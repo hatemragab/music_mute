@@ -11,6 +11,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocket, WebSocketServer } from 'ws';
+import { observeWebSocket } from '../observability/local-service-diagnostics.js';
 import { responseValue } from '../http/snake-case-wire.js';
 import { registerWebSocketUpgrade } from '../http/websocket-upgrades.js';
 import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
@@ -251,6 +252,11 @@ export class RealtimeSocketService implements OnModuleDestroy {
     }
     try {
       this.server.handleUpgrade(request, socket, head, (ws) => {
+        observeWebSocket(
+          ws,
+          { userId: principal.identity.uid, streamId },
+          'account-realtime',
+        );
         const client: Client = {
           socket: ws,
           principal,

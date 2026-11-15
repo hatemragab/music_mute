@@ -68,6 +68,19 @@ describe('durable job schema boundaries', () => {
     expect(JobSchema.path('sharedSourceKey')?.options.immutable).toBe(true);
     expect(JobSchema.path('sharedResultKey')?.options.immutable).toBe(true);
   });
+  it('indexes ready owned URL outputs without imposing uniqueness on historical jobs', () => {
+    const index = JobSchema.indexes().find(
+      ([, options]) => options.name === 'jobs_owner_cached_output',
+    );
+    expect(index?.[0]).toEqual({ userId: 1, 'outputObject.key': 1 });
+    expect(index?.[1].unique).not.toBe(true);
+    expect(index?.[1].partialFilterExpression).toEqual({
+      sourceKind: 'url',
+      status: 'ready',
+      deletedAt: null,
+      'outputObject.key': { $type: 'string' },
+    });
+  });
   it('contains no execution ownership or claim queue fields and indexes', () => {
     for (const path of [
       'workerId',

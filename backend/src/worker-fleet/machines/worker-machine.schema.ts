@@ -34,6 +34,7 @@ export interface WorkerHardwareReport {
 }
 
 export interface WorkerRuntimeIdentity {
+  installationProfile?: 'windows-user';
   workerVersion: string;
   protocolVersion: number;
   manifestDigest: string;
@@ -98,6 +99,7 @@ export const WorkerHardwareReportSchema = new MongoSchema<WorkerHardwareReport>(
 export const WorkerRuntimeIdentitySchema =
   new MongoSchema<WorkerRuntimeIdentity>(
     {
+      installationProfile: { type: String, enum: ['windows-user'] },
       workerVersion: { type: String, required: true, maxlength: 100 },
       protocolVersion: {
         type: Number,

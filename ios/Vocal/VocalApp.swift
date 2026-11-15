@@ -8,7 +8,23 @@ import UserNotifications
 
 @main struct VocalApp: App {
   @UIApplicationDelegateAdaptor(ProcessingAppDelegate.self) private var appDelegate
-  init() { SentryMonitoring.start() }
+  init() {
+    SentryMonitoring.start()
+    LocalDiagnostics.installErrorObserver()
+    LocalDiagnostics.emit("lifecycle.process_started", category: "lifecycle")
+    #if DEBUG
+      if ProcessInfo.processInfo.arguments.contains("--local-logging-smoke") {
+        LocalDiagnostics.emit(
+          "diagnostics.smoke", category: "diagnostics",
+          data: [
+            "password": "MUSICMUTE_NATIVE_SECRET_CANARY",
+            "nested": ["authorization": "Bearer MUSICMUTE_NATIVE_SECRET_CANARY"],
+            "result": "synthetic",
+          ])
+        Task { await LocalDiagnosticsSmoke.run() }
+      }
+    #endif
+  }
   var body: some Scene {
     WindowGroup {
       #if DEBUG
@@ -140,7 +156,8 @@ private struct ProductionVocalView: View {
         artifacts.onSessionChanged()
         originals.onSessionChanged()
         push.sessionChanged()
-      }, reportFailure: reportFailure)
+      }, policyCacheFile: support.appendingPathComponent("ProcessingPolicy/policy.json"),
+      reportFailure: reportFailure)
     let processing = self.processing
     auth.purgeAccountData = { uid in
       var owned: [AudioPipelineIntent] = []
@@ -209,6 +226,7 @@ private struct ProductionContentView: View {
     .preferredColorScheme(preferences.colorScheme)
     .task {
       auth.start()
+      await processing.refreshAvailability()
       await notificationDelegate.refreshAuthorization()
     }
     .task(id: "\(auth.phase):\(auth.identity?.uid ?? "")") {
@@ -226,6 +244,7 @@ private struct ProductionContentView: View {
         auth.validateOnForeground()
         Task {
           await notificationDelegate.refreshAuthorization()
+          await processing.refreshAvailability()
           await processing.resumePending()
         }
       }
@@ -249,12 +268,13 @@ struct VocalRootView: View {
   @State private var tab = 0
   @State private var showingProcessing = false
   @State private var showingPlayer = false
-  @StateObject private var libraryPreferences = LibraryPreferencesStore()
+  private var libraryPreferences: LibraryPreferencesStore { processing.libraryPreferences }
   var body: some View {
     TabView(selection: $tab) {
       NavigationStack {
         HomeView(
           urlImports: processing.urlImports,
+          linkImportVisible: processing.linkImportVisible,
           openImportedJob: { id in
             processing.selectedJobID = id
             Task { await processing.history.select(id) }

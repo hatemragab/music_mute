@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminUsersController } from '../src/admin-users/admin-users.controller.js';
 import { AdminUsersService } from '../src/admin-users/admin-users.service.js';
+import { AdminUserDevicesService } from '../src/admin-users/admin-user-devices.service.js';
 import {
   createAdminHarness,
   type AdminHarness,
@@ -43,11 +44,51 @@ describe('admin users HTTP boundary', () => {
         effectivePolicySource: 'global',
       }),
     };
+    const devices = {
+      list: vi.fn().mockResolvedValue({
+        items: [
+          {
+            installationId: 'd7ea7de6-52e9-4b96-8834-3b517941bdb0',
+            platform: 'ios',
+            deviceModel: 'iPhone 17 Pro',
+            osVersion: '26.0',
+            appVersion: '1.2.0',
+            buildNumber: 12,
+            metadataRevision: 2,
+            firstSeenAt: new Date('2026-09-01T10:00:00.000Z'),
+            lastSeenAt: new Date('2026-10-09T10:00:00.000Z'),
+            lastAuthenticatedAt: '2026-10-09T09:00:00.000Z',
+            historyHiddenAt: null,
+            sessionStatus: 'unknown',
+            location: {
+              country: 'EG',
+              regionCode: 'C',
+              city: 'Cairo',
+              source: 'cloudflare',
+              observedAt: new Date('2026-10-09T10:00:00.000Z'),
+            },
+            versionHistory: [
+              {
+                appVersion: '1.2.0',
+                buildNumber: 12,
+                metadataRevision: 2,
+                observedAt: new Date('2026-10-09T10:00:00.000Z'),
+              },
+            ],
+          },
+        ],
+        nextCursor: null,
+        asOf: '2026-10-09T10:00:00.000Z',
+      }),
+    };
     harness = await createAdminHarness({
       controllers: [AdminUsersController],
-      providers: [{ provide: AdminUsersService, useValue: users }],
+      providers: [
+        { provide: AdminUsersService, useValue: users },
+        { provide: AdminUserDevicesService, useValue: devices },
+      ],
     });
-    return { harness, users };
+    return { harness, users, devices };
   }
 
   it('allows support reads and denies viewer reads', async () => {
@@ -62,6 +103,90 @@ describe('admin users HTTP boundary', () => {
       .request('get', '/admin/users', undefined, harness.signInAs('viewer'))
       .expect(403);
     expect(users.list).toHaveBeenCalledOnce();
+  });
+
+  it('allows owner and support device reads and denies all other roles and regular users', async () => {
+    const { harness, devices } = await setup();
+    const id = '64b000000000000000000001';
+    const path = `/admin/users/${id}/devices`;
+    for (const role of ['owner', 'support'] as const) {
+      const result = await harness
+        .request('get', path, undefined, harness.signInAs(role))
+        .expect(200);
+      expect(result.headers['cache-control']).toBe('no-store');
+      expect(result.body).toMatchObject({
+        next_cursor: null,
+        as_of: '2026-10-09T10:00:00.000Z',
+        items: [
+          {
+            installation_id: 'd7ea7de6-52e9-4b96-8834-3b517941bdb0',
+            device_model: 'iPhone 17 Pro',
+            os_version: '26.0',
+            app_version: '1.2.0',
+            build_number: 12,
+            metadata_revision: 2,
+            first_seen_at: '2026-09-01T10:00:00.000Z',
+            last_seen_at: '2026-10-09T10:00:00.000Z',
+            last_authenticated_at: '2026-10-09T09:00:00.000Z',
+            history_hidden_at: null,
+            session_status: 'unknown',
+            location: { country: 'EG', city: 'Cairo', region_code: 'C' },
+            version_history: [{ app_version: '1.2.0', build_number: 12 }],
+          },
+        ],
+      });
+      expect(result.body.items[0].user_id).toBeUndefined();
+      expect(result.body.items[0].last_authenticated_at_sec).toBeUndefined();
+      expect(result.body.items[0]._id).toBeUndefined();
+    }
+    for (const role of ['viewer', 'release_manager'] as const)
+      await harness
+        .request('get', path, undefined, harness.signInAs(role))
+        .expect(403);
+    await harness
+      .request('get', path, undefined, 'ordinary-google-token')
+      .expect(403);
+    await harness.request('get', path).expect(401);
+    expect(devices.list).toHaveBeenCalledTimes(2);
+    expect(devices.list).toHaveBeenLastCalledWith(
+      id,
+      expect.objectContaining({ limit: 20 }),
+    );
+  });
+
+  it('validates device cursor and page bounds before calling the device service', async () => {
+    const { harness, devices } = await setup();
+    const path = '/admin/users/64b000000000000000000001/devices';
+    const token = harness.signInAs('support');
+    for (const query of [
+      'limit=0',
+      'limit=51',
+      'limit=1.5',
+      'limit=invalid',
+      'before=invalid',
+      'limit=1&limit=2',
+      'cursor=012345678901234567890123',
+      'user_id=64b000000000000000000002',
+    ])
+      await harness
+        .request('get', `${path}?${query}`, undefined, token)
+        .expect(400);
+    expect(devices.list).not.toHaveBeenCalled();
+    await harness
+      .request(
+        'get',
+        `${path}?before=012345678901234567890123&limit=50`,
+        undefined,
+        token,
+      )
+      .expect(200);
+    expect(devices.list).toHaveBeenCalledWith(
+      '64b000000000000000000001',
+      expect.objectContaining({
+        limit: 50,
+        before: '012345678901234567890123',
+      }),
+    );
   });
 
   it('protects worker registration changes with dedicated permissions, fresh auth, strict input and an operation receipt', async () => {

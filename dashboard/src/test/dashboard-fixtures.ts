@@ -15,6 +15,7 @@ import type {
   RevisionCommand,
   ReleaseDetail,
   UpdatePolicy,
+  DesktopUpdatePolicy,
   UserDetail,
 } from "../api/contracts";
 import { ROLE_DETAILS } from "../features/administrators/role-permissions";
@@ -104,7 +105,10 @@ const validPolicySelection = (value: unknown): boolean => {
       "directReleaseId",
       "storeReleaseId",
       "source",
-    ]) && hasExactKeys(selection.ios, ["minimumBuild", "storeReleaseId"])
+    ]) &&
+    (selection.android as Record<string, unknown>).source === "google_play" &&
+    (selection.android as Record<string, unknown>).directReleaseId === null &&
+    hasExactKeys(selection.ios, ["minimumBuild", "storeReleaseId"])
   );
 };
 
@@ -119,7 +123,11 @@ const permissionFor = (method: string, path: string): Permission | null => {
     return method === "GET" ? "health.read" : "alerts.manage";
   if (path.startsWith("/admin/settings"))
     return method === "GET" ? "settings.read" : "settings.manage";
-  if (path.startsWith("/admin/releases") || path === "/admin/update-policy")
+  if (
+    path.startsWith("/admin/releases") ||
+    path === "/admin/update-policy" ||
+    path === "/admin/update-policy/desktop"
+  )
     return method === "GET" ? "releases.read" : "releases.manage";
   if (path.startsWith("/admin/jobs")) {
     if (method === "GET") return "jobs.read";
@@ -167,6 +175,14 @@ export class DashboardFixture {
     string,
     { receipt: OperationReceipt; body: string; actor: string }
   >();
+  readonly desktopPolicyOperations = new Map<
+    string,
+    { receipt: OperationReceipt; body: string; actor: string }
+  >();
+  desktopGates: Omit<DesktopUpdatePolicy, "revision"> = {
+    macos: { minimumBuild: null },
+    windows: { minimumBuild: null },
+  };
   accountUsage: AccountUsage = {
     schemaVersion: 2,
     plan: "standard",
@@ -230,6 +246,10 @@ export class DashboardFixture {
     policyOverride: null,
   };
   settings: AccountPolicy = {
+    linkImportEnabled: false,
+    linkImportDisabledCountries: [],
+    linkImportDisabledUserIds: [],
+    linkImportForcedOff: false,
     plan: "standard",
     revision: 1,
     acceptNewJobs: true,
@@ -268,9 +288,9 @@ export class DashboardFixture {
     revision: 1,
     android: {
       minimumBuild: 10,
-      source: "direct_apk",
-      directReleaseId: FIXTURE_IDS.publishedRelease,
-      storeReleaseId: null,
+      source: "google_play",
+      directReleaseId: null,
+      storeReleaseId: FIXTURE_IDS.publishedRelease,
     },
     ios: { minimumBuild: 10, storeReleaseId: null },
   };
@@ -342,38 +362,40 @@ export class DashboardFixture {
     {
       id: FIXTURE_IDS.release,
       platform: "android",
-      source: "direct_apk",
+      source: "google_play",
       versionName: "2.0.0",
       buildNumber: 20,
       changelogEn: "Fixture release",
-      storeUrl: null,
+      storeUrl:
+        "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
       state: "draft",
-      artifactState: "verified",
+      artifactState: null,
       revision: 1,
       createdAt: NOW,
       publishedAt: null,
-      bytes: 1_024,
-      sha256Hex: "a".repeat(64),
-      signerSha256Hex: "b".repeat(64),
+      bytes: null,
+      sha256Hex: null,
+      signerSha256Hex: null,
       rejectionCode: null,
       publishedBy: null,
     },
     {
       id: FIXTURE_IDS.publishedRelease,
       platform: "android",
-      source: "direct_apk",
+      source: "google_play",
       versionName: "1.0.0",
       buildNumber: 10,
       changelogEn: "Current release",
-      storeUrl: null,
+      storeUrl:
+        "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
       state: "published",
-      artifactState: "verified",
+      artifactState: null,
       revision: 1,
       createdAt: NOW,
       publishedAt: NOW,
-      bytes: 1_024,
-      sha256Hex: "c".repeat(64),
-      signerSha256Hex: "b".repeat(64),
+      bytes: null,
+      sha256Hex: null,
+      signerSha256Hex: null,
       rejectionCode: null,
       publishedBy: "owner-fixture",
     },
@@ -556,7 +578,8 @@ export class DashboardFixture {
     if (operationRead && method === "GET") {
       const operation =
         this.workerRegistrationOperations.get(operationRead[1]!) ??
-        this.workerDeletionOperations.get(operationRead[1]!);
+        this.workerDeletionOperations.get(operationRead[1]!) ??
+        this.desktopPolicyOperations.get(operationRead[1]!);
       return operation?.actor === role
         ? { status: 200, body: operation.receipt }
         : error(404, "RESOURCE_NOT_FOUND", "Operation not found.");
@@ -852,6 +875,10 @@ export class DashboardFixture {
       return this.userMissing
         ? error(404, "RESOURCE_NOT_FOUND", "User not found.")
         : { status: 200, body: this.user };
+    if (path === `/admin/users/${this.user.id}/devices` && method === "GET")
+      return this.userMissing
+        ? error(404, "RESOURCE_NOT_FOUND", "User not found.")
+        : { status: 200, body: { items: [], nextCursor: null, asOf: NOW } };
     if (
       path === `/admin/users/${this.user.id}/worker-registration` &&
       method === "PUT"
@@ -1152,8 +1179,7 @@ export class DashboardFixture {
       const platform = url.searchParams.get("platform");
       const source = url.searchParams.get("source");
       if (!(
-        (platform === "android" &&
-          (source === "direct_apk" || source === "google_play")) ||
+        (platform === "android" && source === "google_play") ||
         (platform === "ios" && source === "app_store")
       ))
         return error(400, "INVALID_REQUEST", "Invalid release channel.");
@@ -1188,6 +1214,14 @@ export class DashboardFixture {
       return { status: 200, body: page(this.releases) };
     if (path === "/admin/releases" && method === "POST") {
       const body = input.body as Omit<ReleaseDetail, "id">;
+      if (
+        (body.platform === "android" &&
+          (body.source !== "google_play" ||
+            body.storeUrl !==
+              "https://play.google.com/store/apps/details?id=com.hatem.musicmute")) ||
+        (body.platform === "ios" && body.source !== "app_store")
+      )
+        return error(400, "INVALID_REQUEST", "Invalid release channel.");
       const created = {
         ...this.releases[0],
         ...body,
@@ -1203,6 +1237,12 @@ export class DashboardFixture {
       if (!release) return error(404, "NOT_FOUND", "Release was not found.");
       if (method === "GET") return { status: 200, body: release };
       if (method === "PATCH") {
+        if (release.source === "direct_apk")
+          return error(
+            400,
+            "INVALID_REQUEST",
+            "Retired direct APK releases are read-only.",
+          );
         if (
           !hasOnlyKeys(
             input.body,
@@ -1215,45 +1255,113 @@ export class DashboardFixture {
         return { status: 200, body: release };
       }
     }
-    if (
-      path === `/admin/releases/${FIXTURE_IDS.release}/uploads` &&
-      method === "POST"
-    ) {
-      this.releases[0].artifactState = "awaiting_upload";
-      const declaration = input.body as { bytes: number; sha256Hex: string };
-      const checksum = btoa(
-        String.fromCharCode(
-          ...declaration.sha256Hex
-            .match(/../g)!
-            .map((byte) => Number.parseInt(byte, 16)),
-        ),
+    if (/^\/admin\/releases\/[^/]+\/uploads(?:\/|$)/.test(path))
+      return error(
+        400,
+        "INVALID_REQUEST",
+        "Android updates are delivered by Google Play.",
       );
-      return {
-        status: 201,
-        body: {
-          uploadId: FIXTURE_IDS.upload,
-          grant: {
-            method: "PUT",
-            url: "https://upload.fixture.invalid",
-            headers: {
-              "Content-Type": "application/vnd.android.package-archive",
-              "x-amz-checksum-sha256": checksum,
-              "x-amz-meta-sha256": checksum,
-              "If-None-Match": "*",
+    if (path === "/admin/update-policy/desktop") {
+      const current = () => ({
+        revision: this.policy.revision,
+        ...structuredClone(this.desktopGates),
+      });
+      if (method === "GET") return { status: 200, body: current() };
+      if (method === "PATCH") {
+        if (
+          !hasExactKeys(input.body, [
+            "expectedRevision",
+            "operationId",
+            "reason",
+            "platforms",
+          ])
+        )
+          return error(
+            400,
+            "INVALID_REQUEST",
+            "Invalid desktop policy request.",
+          );
+        const body = input.body as {
+          expectedRevision: number;
+          operationId: string;
+          reason: string;
+          platforms: Partial<DesktopUpdatePolicy>;
+        };
+        if (
+          !Number.isSafeInteger(body.expectedRevision) ||
+          body.expectedRevision < 0 ||
+          body.expectedRevision >= Number.MAX_SAFE_INTEGER ||
+          typeof body.operationId !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            body.operationId,
+          ) ||
+          typeof body.reason !== "string" ||
+          !body.reason.trim() ||
+          body.reason.trim().length > 500 ||
+          /[\p{Cc}]/u.test(body.reason) ||
+          !body.platforms ||
+          typeof body.platforms !== "object" ||
+          Array.isArray(body.platforms) ||
+          !Object.keys(body.platforms).length ||
+          Object.keys(body.platforms).some(
+            (key) => !["macos", "windows"].includes(key),
+          ) ||
+          Object.values(body.platforms).some((gate: unknown) => {
+            if (!hasExactKeys(gate, ["minimumBuild"])) return true;
+            const minimum = (gate as { minimumBuild: unknown }).minimumBuild;
+            return (
+              minimum !== null &&
+              (!Number.isInteger(minimum) ||
+                Number(minimum) < 1 ||
+                Number(minimum) > 2147483647)
+            );
+          })
+        )
+          return error(
+            400,
+            "INVALID_REQUEST",
+            "Invalid desktop policy request.",
+          );
+        const encodedBody = JSON.stringify(body),
+          previous = this.desktopPolicyOperations.get(body.operationId);
+        if (
+          previous &&
+          (previous.actor !== role || previous.body !== encodedBody)
+        )
+          return error(
+            409,
+            "OPERATION_CONFLICT",
+            "Operation ID was already used.",
+          );
+        if (!previous) {
+          if (body.expectedRevision !== this.policy.revision)
+            return error(409, "REVISION_CONFLICT", "Policy revision changed.");
+          for (const key of ["macos", "windows"] as const)
+            if (body.platforms[key])
+              this.desktopGates[key] = structuredClone(body.platforms[key]);
+          this.policy = { ...this.policy, revision: this.policy.revision + 1 };
+          this.desktopPolicyOperations.set(body.operationId, {
+            receipt: {
+              operationId: body.operationId,
+              status: "succeeded",
+              resourceId: "global",
+              revision: this.policy.revision,
             },
-            expiresAt: "2026-09-11T00:05:00.000Z",
+            body: encodedBody,
+            actor: role,
+          });
+        }
+        return {
+          status: 200,
+          body: {
+            policy: current(),
+            appliedRevision: this.desktopPolicyOperations.get(body.operationId)!
+              .receipt.revision,
+            operationId: body.operationId,
+            replayed: Boolean(previous),
           },
-          expectedBytes: declaration.bytes,
-          expectedSha256: declaration.sha256Hex,
-        },
-      };
-    }
-    if (path.includes(`/uploads/${FIXTURE_IDS.upload}`)) {
-      this.releases[0].artifactState = "verified";
-      return {
-        status: method === "GET" ? 200 : 201,
-        body: { artifactState: "verified", checkedAt: NOW },
-      };
+        };
+      }
     }
     if (path === "/admin/update-policy" && method === "GET")
       return { status: 200, body: this.policy };
@@ -1269,7 +1377,7 @@ export class DashboardFixture {
           examples: [
             {
               platform: "android",
-              distribution: "direct_apk",
+              distribution: "play",
               installedBuild: 9,
               decision: "required",
               targetBuild: 20,
@@ -1284,6 +1392,12 @@ export class DashboardFixture {
     if (publication && method === "POST") {
       const release = this.releases.find(({ id }) => id === publication[1]);
       if (!release) return error(404, "NOT_FOUND", "Release was not found.");
+      if (release.source === "direct_apk")
+        return error(
+          400,
+          "INVALID_REQUEST",
+          "Retired direct APK releases are read-only.",
+        );
       const operation = publication[2] as "publications" | "withdrawals";
       const policyField =
         operation === "publications" ? "policy" : "replacementPolicy";
@@ -1300,6 +1414,15 @@ export class DashboardFixture {
       const body = input.body as Record<string, unknown>;
       if (!validPolicySelection(body[policyField]))
         return error(400, "INVALID_REQUEST", "Invalid policy selection.");
+      if (
+        operation === "publications" &&
+        body.storeAvailabilityConfirmed !== true
+      )
+        return error(
+          400,
+          "INVALID_REQUEST",
+          "Store availability must be confirmed.",
+        );
       release.state = operation === "publications" ? "published" : "withdrawn";
       release.revision += 1;
       this.policy = {
@@ -1329,6 +1452,15 @@ export class DashboardFixture {
       this.settings = {
         ...this.settings,
         acceptNewJobs: Boolean(body.acceptNewJobs),
+        linkImportEnabled: body.linkImportEnabled === true,
+        linkImportDisabledCountries: Array.isArray(
+          body.linkImportDisabledCountries,
+        )
+          ? (body.linkImportDisabledCountries as string[])
+          : [],
+        linkImportDisabledUserIds: Array.isArray(body.linkImportDisabledUserIds)
+          ? (body.linkImportDisabledUserIds as string[])
+          : [],
         maintenanceMessageEn: String(body.maintenanceMessageEn ?? ""),
         maintenanceMessageAr:
           typeof body.maintenanceMessageAr === "string"

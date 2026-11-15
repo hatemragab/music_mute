@@ -11,10 +11,10 @@ import {
   DesktopApiError,
   type AccountScope,
 } from "./account-api.js";
-import {
+import type {
   LocalSyncOutbox,
-  type LocalSyncRecord,
-  type LocalLibraryOwner,
+  LocalSyncRecord,
+  LocalLibraryOwner,
 } from "./sync-outbox.js";
 
 const PROFILE = "kim-vocal-2-full-timeline-v1";

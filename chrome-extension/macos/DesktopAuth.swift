@@ -476,9 +476,26 @@ private struct DesktopInstallationReport: Codable {
 
 private enum DesktopBootstrapFailure: Error { case deviceReportConflict }
 
+struct DesktopLinkImportPolicy: Equatable {
+  let revision: Int64
+  let visible: Bool
+  static func parse(_ value: DesktopJSON) -> Self? {
+    guard value["schema_version"].number == 2,
+      let revision = value["link_import_policy_revision"].number ?? value["revision"].number,
+      revision.isFinite, revision >= 0, revision <= 9_007_199_254_740_991,
+      revision.rounded() == revision
+    else { return nil }
+    return Self(revision: Int64(revision), visible: value["link_import_visible"].bool == true)
+  }
+}
+
 @MainActor final class DesktopAccountModel: ObservableObject {
   @Published private(set) var user: DesktopUser?
-  @Published private(set) var firebaseUid: String?
+  @Published private(set) var firebaseUid: String? {
+    didSet {
+      if oldValue != firebaseUid { restoreProcessingPolicyCache() }
+    }
+  }
   @Published private(set) var generation = UUID()
   @Published private(set) var busy = false
   @Published private(set) var online = false
@@ -487,6 +504,17 @@ private enum DesktopBootstrapFailure: Error { case deviceReportConflict }
   @Published var notice: String?
   @Published private(set) var access = DesktopJSON.null
   @Published private(set) var policy = DesktopJSON.null
+  @Published private(set) var processingPolicy = DesktopJSON.null
+  private var processingPolicySnapshot = 0
+  private var processingPolicyCheckout = UUID()
+  private var processingPolicyCacheKey: String {
+    let guest = "desktop.processingPolicy.\(installationId)"
+    guard let firebaseUid else { return guest }
+    let digest = SHA256.hash(data: Data(firebaseUid.utf8)).map { String(format: "%02x", $0) }
+      .joined()
+    return "\(guest).owner.\(digest)"
+  }
+  var linkImportVisible: Bool { DesktopLinkImportPolicy.parse(processingPolicy)?.visible == true }
   @Published private(set) var devices: [DesktopJSON] = []
   @Published private(set) var recovery = DesktopJSON.null
   @Published private(set) var verificationRetryAt: Date?
@@ -550,6 +578,68 @@ private enum DesktopBootstrapFailure: Error { case deviceReportConflict }
     return requiredBuild.map { build < $0 } ?? false
   }
   func receivePolicy(_ value: DesktopJSON) { policy = value }
+  func receiveProcessingPolicy(_ value: DesktopJSON) {
+    processingPolicySnapshot += 1
+    applyProcessingPolicy(value)
+  }
+  private func restoreProcessingPolicyCache() {
+    processingPolicyCheckout = UUID()
+    processingPolicySnapshot += 1
+    processingPolicy = .null
+    if let data = preferences.data(forKey: processingPolicyCacheKey), data.count <= 65_536,
+      let cached = try? JSONDecoder().decode(DesktopJSON.self, from: data),
+      DesktopLinkImportPolicy.parse(cached) != nil
+    {
+      processingPolicy = cached
+    }
+    if !linkImportVisible {
+      preferences.set(
+        DesktopImportSourcePreference.file.rawValue, forKey: DesktopPreferenceKey.importSource)
+    }
+  }
+  private func applyProcessingPolicy(_ value: DesktopJSON) {
+    guard let next = DesktopLinkImportPolicy.parse(value),
+      DesktopLinkImportPolicy.parse(processingPolicy).map({ next.revision >= $0.revision })
+        != false,
+      let data = try? JSONEncoder().encode(value), data.count <= 65_536
+    else { return }
+    processingPolicy = value
+    preferences.set(data, forKey: processingPolicyCacheKey)
+    if !next.visible {
+      preferences.set(
+        DesktopImportSourcePreference.file.rawValue, forKey: DesktopPreferenceKey.importSource)
+    }
+  }
+  func loadProcessingPolicy() async {
+    let checkout = UUID()
+    processingPolicyCheckout = checkout
+    let epoch = generation
+    let snapshot = processingPolicySnapshot
+    // Signed-in reads resolve owner visibility; guests do not need account configuration.
+    let origin = configuration?.backendBaseURL ?? "https://api.music-mute.com"
+    guard
+      let url = URL(string: "/processing-policy?schema_version=2", relativeTo: URL(string: origin))?
+        .absoluteURL
+    else { return }
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.timeoutInterval = 15
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    do {
+      if signedIn {
+        request.setValue("Bearer \(try await authorization())", forHTTPHeaderField: "Authorization")
+        guard generation == epoch, processingPolicyCheckout == checkout else { return }
+      }
+      let value = try await send(request)
+      guard generation == epoch, processingPolicyCheckout == checkout,
+        processingPolicySnapshot == snapshot, !Task.isCancelled
+      else { return }
+      applyProcessingPolicy(value)
+    } catch {
+      // Offline reopen keeps the last valid installation policy. No cache stays file-only.
+    }
+  }
   func loadPublicPolicy() async {
     guard configuration != nil else { return }
     do { policy = try await api("GET", "/app-policy", authenticated: false) } catch {
@@ -584,6 +674,7 @@ private enum DesktopBootstrapFailure: Error { case deviceReportConflict }
     let selected = installationId ?? stored ?? UUID().uuidString.lowercased()
     self.installationId =
       UUID(uuidString: selected)?.uuidString.lowercased() ?? UUID().uuidString.lowercased()
+    restoreProcessingPolicyCache()
     if installationId == nil {
       preferences.set(self.installationId, forKey: "desktop.installationId")
     }

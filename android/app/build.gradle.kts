@@ -58,8 +58,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "com.hatem.musicmute.processing.MediaPreparationTestRunner"
-        versionCode = 14
-        versionName = "0.1.13"
+        versionCode = 23
+        versionName = "1.0.3"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 
@@ -117,10 +117,6 @@ android {
     }
 
     productFlavors {
-        create("direct") {
-            dimension = "distribution"
-            buildConfigField("String", "UPDATE_DISTRIBUTION", "\"direct\"")
-        }
         create("play") {
             dimension = "distribution"
             buildConfigField("String", "UPDATE_DISTRIBUTION", "\"play\"")
@@ -169,7 +165,6 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
     implementation(libs.sentry.android.core)
-    "directImplementation"(libs.azhon.appupdate)
     "playImplementation"(libs.play.appupdate)
     "playImplementation"(libs.play.appupdate.ktx)
     debugImplementation(libs.compose.tooling)

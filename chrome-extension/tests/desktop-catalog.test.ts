@@ -119,6 +119,24 @@ async function fixture() {
 }
 
 describe("durable account-owned desktop offline catalog", () => {
+  it("keeps older catalog entries readable and clears an invalid optional thumbnail without losing the song", async () => {
+    const env = await fixture();
+    const entry = await env.audio();
+    await env.catalog.remember(env.owner, entry);
+    expect(
+      (await env.catalog.list(env.owner)).entries[0]?.thumbnail_url,
+    ).toBeUndefined();
+    const stored = JSON.parse(await readFile(env.manifestPath, "utf8"));
+    stored.entries[0].thumbnail_url = "https://private.invalid/signed";
+    await writeFile(env.manifestPath, JSON.stringify(stored), { mode: 0o600 });
+    const reopened = new DesktopCatalog(env.catalogRoot, env.cache);
+    const page = await reopened.list(env.owner);
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]?.thumbnail_url).toBeNull();
+    expect(await readFile(page.entries[0]!.vocal_path)).toHaveLength(
+      entry.bytes,
+    );
+  });
   it.each(["missing", "blank"])(
     "durably recovers a %s catalog title from the exact validated retained audio without changing recency",
     async (kind) => {

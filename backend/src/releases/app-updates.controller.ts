@@ -16,7 +16,6 @@ import { Throttle } from '@nestjs/throttler';
 import { Public } from '../auth/auth.decorators.js';
 import { adminError } from '../admin/admin-errors.js';
 import { ReleasePolicyService } from './release-policy.service.js';
-import { ReleaseDownloadService } from './release-download.service.js';
 import { releaseId } from './release-drafts.service.js';
 import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
 import { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
@@ -25,7 +24,6 @@ import { ConfigService } from '@nestjs/config';
 export class AppUpdatesController {
   constructor(
     private readonly policies: ReleasePolicyService,
-    private readonly downloads: ReleaseDownloadService,
     private readonly budgets: RateBudgetService,
     private readonly keys: RateLimitKeys,
     private readonly config: ConfigService,
@@ -76,16 +74,16 @@ export class AppUpdatesController {
     @Body() body: unknown,
   ) {
     this.empty(body);
+    releaseId(id);
     await this.limitGrant(request, response);
-    return this.downloads.grant(id);
+    throw adminError('RESOURCE_NOT_FOUND');
   }
   @Get('releases/:id')
   @Public()
   @Header('Cache-Control', 'no-store')
-  @Header('Content-Type', 'text/html; charset=utf-8')
   landing(@Param('id') id: string) {
     releaseId(id);
-    return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Update MusicMute</title><style>body{font:18px system-ui;margin:10vh auto;padding:24px;max-width:560px;color:#14231f;background:#f3f7f5}button{font:inherit;background:#146c50;color:white;border:0;border-radius:12px;padding:14px 24px}p{line-height:1.6}</style><main><h1>Update MusicMute</h1><p>Download the signed Android update, then open the APK to install it. Your audio and account stay on your device.</p><form method="post" action="/app-updates/releases/${id}/download-redirects"><button type="submit">Download APK</button></form><p>This link works while the release is available.</p></main></html>`;
+    throw adminError('RESOURCE_NOT_FOUND');
   }
   @Post('releases/:id/download-redirects')
   @Public()
@@ -95,12 +93,12 @@ export class AppUpdatesController {
     @Req() request: Request,
     @Param('id') id: string,
     @Body() body: unknown,
-    @Res() response: Response,
+    @Res({ passthrough: true }) response: Response,
   ) {
     this.empty(body);
+    releaseId(id);
     await this.limitGrant(request, response);
-    const grant = await this.downloads.grant(id);
-    response.redirect(303, grant.url);
+    throw adminError('RESOURCE_NOT_FOUND');
   }
   @Get('policy')
   @Public()

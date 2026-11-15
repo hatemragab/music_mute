@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { sanitizeDiagnostic } from "../agent/child-process.js";
+import { sanitizeDiagnostic } from "../agent/diagnostic-redaction.js";
 import { withDiagnosticStoreLock } from "./diagnostic-store-lock.js";
 
 const UUID_V4 =

@@ -7,6 +7,7 @@ import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.LaunchedEffect
@@ -16,6 +17,7 @@ import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -35,6 +37,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
+    private val updateOwner = Any()
+    private val updateLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        (application as VocalApplication).updateInstaller.onActivityResult(updateOwner, result.resultCode)
+    }
     private val openHistory = MutableStateFlow(false)
     private val entryAction = MutableStateFlow<String?>(null)
     private val playbackSearch = MutableStateFlow<String?>(null)
@@ -48,6 +54,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        (application as VocalApplication).updateInstaller.bindLauncher(updateOwner, updateLauncher)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
         openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
         entryAction.value = intent.action?.removePrefix("com.hatem.musicmute.")?.takeIf { it in setOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY") }
@@ -63,6 +70,12 @@ class MainActivity : AppCompatActivity() {
             val app = application as VocalApplication
             val updateState by app.updateCoordinator.state.collectAsStateWithLifecycle()
             val updateInstallState by app.updateInstaller.state.collectAsStateWithLifecycle()
+            LaunchedEffect(updateState.snapshot, updateState.decision) {
+                app.updateInstaller.synchronizePolicy(updateState.snapshot?.target, updateState.decision, updateState.snapshot?.minimumBuild)
+                if (this@MainActivity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    app.updateInstaller.onForeground(updateState.snapshot?.target, updateState.decision, updateState.snapshot?.minimumBuild)
+                }
+            }
             val updateBlocked =
                 updateState.restoring ||
                     updateState.decision == UpdateDecision.REQUIRED
@@ -146,16 +159,26 @@ class MainActivity : AppCompatActivity() {
                     currentBuild = BuildConfig.VERSION_CODE,
                     installer = app.updateInstaller,
                     onUpdate = {
-                        val target = updateState.snapshot?.target ?: return@UpdateGate
                         updateScope.launch {
-                            if (updateInstallState == UpdateInstallState.PermissionNeeded)
-                                app.updateInstaller.onForeground()
-                            else app.updateInstaller.start(target)
+                            val current = app.updateCoordinator.state.value
+                            val target = current.snapshot?.target ?: return@launch
+                            app.updateInstaller.start(target, current.decision, current.snapshot?.minimumBuild)
                         }
                     },
                     onLater = { updateScope.launch { app.updateCoordinator.deferOptional() } },
                     onRetryPolicy = { app.updateCoordinator.requestCheck(UpdateTrigger.RETRY) },
-                    onCancelInstall = app.updateInstaller::cancel,
+                    onRestart = {
+                        updateScope.launch {
+                            val current = app.updateCoordinator.state.value
+                            app.updateInstaller.synchronizePolicy(current.snapshot?.target, current.decision, current.snapshot?.minimumBuild)
+                            app.updateInstaller.completeUpdate()
+                        }
+                    },
+                    onOpenStore = {
+                        val current = app.updateCoordinator.state.value
+                        app.updateInstaller.synchronizePolicy(current.snapshot?.target, current.decision, current.snapshot?.minimumBuild)
+                        current.snapshot?.target?.let(app.updateInstaller::openStore)
+                    },
                 ) {
                     AuthGate(
                         app.authSession,
@@ -213,16 +236,28 @@ class MainActivity : AppCompatActivity() {
         val app = application as VocalApplication
         app.processingPush.onForeground()
         app.realtime.setForeground(true)
+        app.processingPolicy.setForeground(true)
         app.updateCoordinator.setForeground(true)
     }
 
     override fun onResume() {
         super.onResume()
-        lifecycleScope.launch { (application as VocalApplication).updateInstaller.onForeground() }
+        val app = application as VocalApplication
+        lifecycleScope.launch {
+            val state = app.updateCoordinator.state.value
+            app.updateInstaller.onForeground(state.snapshot?.target, state.decision, state.snapshot?.minimumBuild)
+        }
+    }
+
+    override fun onDestroy() {
+        (application as VocalApplication).updateInstaller.unbindLauncher(updateOwner)
+        super.onDestroy()
     }
 
     override fun onStop() {
+        (application as VocalApplication).updateInstaller.onBackground(updateOwner)
         (application as VocalApplication).realtime.setForeground(false)
+        (application as VocalApplication).processingPolicy.setForeground(false)
         (application as VocalApplication).updateCoordinator.setForeground(false)
         super.onStop()
     }

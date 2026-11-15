@@ -8,6 +8,7 @@ import json
 import math
 import os
 import subprocess
+import sys
 import threading
 import wave
 from concurrent.futures import ThreadPoolExecutor
@@ -348,6 +349,7 @@ def _run(
             stderr=subprocess.PIPE if capture_output else subprocess.DEVNULL,
             shell=False,
             env=_subprocess_environment(),
+            creationflags=0x00000008 if sys.platform == "win32" else 0,
         )
         captured = [bytearray(), bytearray()]
         overflow = threading.Event()

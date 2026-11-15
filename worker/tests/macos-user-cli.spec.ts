@@ -5,6 +5,8 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readFile,
+  readdir,
   rm,
   symlink,
   writeFile,
@@ -386,6 +388,134 @@ describe.skipIf(process.platform !== "darwin")(
       await expect(
         lstat(join(pendingRoot, ".enrollment-state.json")),
       ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("reports only local safe pending replacement eligibility", async () => {
+      const f = await fixture(false);
+      const pendingRoot = join(f.layout.transactionRoot, "install");
+      await mkdir(pendingRoot, { recursive: true, mode: 0o700 });
+      await writeFile(
+        join(pendingRoot, "enrollment.credential"),
+        `${"p".repeat(43)}\n`,
+        { mode: 0o600 },
+      );
+      const state = {
+        schemaVersion: 1,
+        exchangeRequestId: randomUUID(),
+        reportRequestId: randomUUID(),
+        activationRequestId: randomUUID(),
+      };
+      const statePath = join(pendingRoot, ".enrollment-state.json");
+      await writeFile(statePath, JSON.stringify(state), { mode: 0o600 });
+      const read = async () => {
+        await f.run("status", ["--json", "--local"]);
+        return JSON.parse(f.output.pop()!) as {
+          pendingEnrollment: { replacement: string | null };
+        };
+      };
+      expect((await read()).pendingEnrollment).toEqual({
+        replacement: "pre-exchange",
+      });
+      const exchanged = {
+        ...state,
+        installationId: randomUUID(),
+        installationCredential: "i".repeat(43),
+      };
+      await writeFile(statePath, JSON.stringify(exchanged));
+      const eligible = await read();
+      expect(eligible.pendingEnrollment).toEqual({
+        replacement: "expired-unactivated",
+      });
+      expect(JSON.stringify(eligible)).not.toContain(
+        exchanged.installationCredential,
+      );
+      await writeFile(
+        statePath,
+        JSON.stringify({ ...exchanged, reportRevision: 1 }),
+      );
+      expect((await read()).pendingEnrollment).toEqual({ replacement: null });
+      await writeFile(statePath, JSON.stringify(exchanged));
+      f.launchAgent.status.mockResolvedValue({ loaded: true, running: true });
+      expect((await read()).pendingEnrollment).toEqual({ replacement: null });
+    });
+
+    it("archives a positively expired exchanged attempt before using the explicit new code", async () => {
+      const f = await fixture(false);
+      const pendingRoot = join(f.layout.transactionRoot, "install");
+      await mkdir(pendingRoot, { recursive: true, mode: 0o700 });
+      const state = {
+        schemaVersion: 1,
+        exchangeRequestId: randomUUID(),
+        reportRequestId: randomUUID(),
+        activationRequestId: randomUUID(),
+        installationId: randomUUID(),
+        installationCredential: "i".repeat(43),
+      };
+      await writeFile(
+        join(pendingRoot, "enrollment.credential"),
+        `${"p".repeat(43)}\n`,
+        { mode: 0o600 },
+      );
+      await writeFile(
+        join(pendingRoot, ".enrollment-state.json"),
+        JSON.stringify(state),
+        { mode: 0o600 },
+      );
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            type: "about:blank",
+            status: 410,
+            code: "WORKER_EXPIRED",
+          }),
+          {
+            status: 410,
+            headers: { "Content-Type": "application/problem+json" },
+          },
+        ),
+      );
+      const install = vi.fn(async () => installationResult());
+      try {
+        await expect(
+          runMacUserCommand(
+            "install",
+            ["--label", "Studio Mac", "--new-code", "--json"],
+            {
+              host: {
+                platform: "darwin",
+                arch: "arm64",
+                uid: process.getuid!(),
+                home: f.layout.homeRoot,
+              },
+              layout: f.layout,
+              launchAgent: f.launchAgent,
+              install,
+              readEnrollmentCode: async () => "x".repeat(43),
+              stdout: (value) => f.output.push(value),
+            },
+          ),
+        ).resolves.toBe(0);
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(String(fetch.mock.calls[0]![0])).toContain(
+          `/worker/installations/${state.installationId}/artifacts`,
+        );
+        expect(install).toHaveBeenCalledWith({
+          enrollmentCredential: "x".repeat(43),
+          label: "Studio Mac",
+        });
+        const archive = (await readdir(f.layout.transactionRoot)).find((name) =>
+          name.startsWith("expired-install-"),
+        );
+        expect(archive).toBeDefined();
+        expect(
+          await readFile(
+            join(f.layout.transactionRoot, archive!, ".enrollment-state.json"),
+            "utf8",
+          ),
+        ).toBe(JSON.stringify(state));
+      } finally {
+        fetch.mockRestore();
+      }
     });
 
     it("explains how to recover from a consumed-code conflict", async () => {

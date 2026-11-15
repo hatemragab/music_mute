@@ -15,7 +15,6 @@ import kotlinx.serialization.json.Json
 
 interface UpdatePolicyApi {
     suspend fun policy(): UpdatePolicySnapshot
-    suspend fun downloadGrant(releaseId: String): ReleaseDownloadGrant
 }
 
 class UpdateApiClient(
@@ -26,21 +25,12 @@ class UpdateApiClient(
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     override suspend fun policy(): UpdatePolicySnapshot {
+        if (distribution != "play") throw UpdateFailure(UpdateProblem.INVALID_POLICY)
         val snapshot: UpdatePolicySnapshot =
             decode(request("GET", "/app-updates/policy?platform=android&distribution=$distribution"))
         validateUpdateSnapshot(snapshot)
         if (snapshot.distribution != distribution) throw UpdateFailure(UpdateProblem.INVALID_POLICY)
         return snapshot
-    }
-
-    override suspend fun downloadGrant(releaseId: String): ReleaseDownloadGrant {
-        if (!releaseId.matches(Regex("^[a-f0-9]{24}$")))
-            throw UpdateFailure(UpdateProblem.RELEASE_UNAVAILABLE)
-        val grant: ReleaseDownloadGrant =
-            decode(request("POST", "/app-updates/releases/$releaseId/download-grants", "{}"))
-        validateDownloadGrant(grant)
-        if (grant.releaseId != releaseId) throw UpdateFailure(UpdateProblem.INVALID_POLICY)
-        return grant
     }
 
     private suspend fun request(method: String, path: String, body: String? = null): String {

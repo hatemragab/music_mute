@@ -549,12 +549,14 @@ describe("saved native processing selection", () => {
     provider = "ONLINE_MUSICMUTE",
     ready = true,
     scope: string | undefined = confirmationScope,
+    host = { platform: "darwin", arch: "arm64" },
   ) {
     const command = port.posted.findLast((item) => item.type === "HELLO")!;
     port.emit({
       ...hello(command.request_id),
       payload: {
         ...(hello(command.request_id).payload as object),
+        ...host,
         ready,
         capabilities: ["processing_selection_v1"],
         processing_provider: provider,
@@ -564,7 +566,7 @@ describe("saved native processing selection", () => {
   }
   function accepted(
     port: MockPort,
-    provider: "LOCAL_MACOS" | "ONLINE_MUSICMUTE",
+    provider: "LOCAL_MACOS" | "LOCAL_WINDOWS" | "ONLINE_MUSICMUTE",
   ) {
     const command = port.posted.findLast((item) => item.type === "START")!;
     expect(command.payload).toEqual({
@@ -608,6 +610,50 @@ describe("saved native processing selection", () => {
     selection(port);
     await flush();
     accepted(port, "ONLINE_MUSICMUTE");
+    expect(await result).toEqual({ ok: true });
+  });
+  it("routes the shared page local intent to a validated Windows x64 provider", async () => {
+    const result = begin();
+    await flush();
+    const port = ports[0]!;
+    selection(port, "LOCAL_WINDOWS", true, confirmationScope, {
+      platform: "win32",
+      arch: "x64",
+    });
+    await flush();
+    accepted(port, "LOCAL_WINDOWS");
+    expect(await result).toEqual({ ok: true });
+  });
+  it("keeps Windows manual saved Cloud available without any local model assertion", async () => {
+    const result = begin({ confirmed: true });
+    await flush();
+    const port = ports[0]!;
+    selection(port, "ONLINE_MUSICMUTE", true, confirmationScope, {
+      platform: "win32",
+      arch: "x64",
+    });
+    await flush();
+    accepted(port, "ONLINE_MUSICMUTE");
+    expect(await result).toEqual({ ok: true });
+  });
+  it("does not accept a Mac local provider claimed by a Windows host", async () => {
+    const result = begin(),
+      settled = observe(result);
+    await flush();
+    const port = ports[0]!;
+    selection(port, "LOCAL_MACOS", true, confirmationScope, {
+      platform: "win32",
+      arch: "x64",
+    });
+    await flush();
+    expect(settled).not.toHaveBeenCalled();
+    expect(port.posted.some((item) => item.type === "START")).toBe(false);
+    selection(port, "LOCAL_WINDOWS", true, confirmationScope, {
+      platform: "win32",
+      arch: "x64",
+    });
+    await flush();
+    accepted(port, "LOCAL_WINDOWS");
     expect(await result).toEqual({ ok: true });
   });
   it("requires a signed-in account before asking for cloud confirmation", async () => {

@@ -46,4 +46,27 @@ describe("qualified runtime platform adapters", () => {
       runtimePlatformAdapter({ platform: "win32", arch: "arm64" }),
     ).toThrow("no qualified runtime adapter");
   });
+
+  it("requires an explicit Windows user profile for selected GPU ordinals and user credentials", () => {
+    const adapter = runtimePlatformAdapter(
+      { platform: "win32", arch: "x64" },
+      "windows-user",
+    );
+    expect(adapter).toMatchObject({
+      id: "windows-x64-user-directml-v1",
+      serviceKind: "windows-login-session",
+      credentialProtection: "ntfs-current-user-acl",
+    });
+    expect(adapter.deviceIdIsSafe(0)).toBe(true);
+    expect(adapter.deviceIdIsSafe(3)).toBe(true);
+    for (const value of [undefined, -1, 16, 0.5, NaN])
+      expect(adapter.deviceIdIsSafe(value)).toBe(false);
+    for (const host of [
+      { platform: "win32" as const, arch: "arm64" },
+      { platform: "darwin" as const, arch: "arm64" },
+    ])
+      expect(() => runtimePlatformAdapter(host, "windows-user")).toThrow(
+        "no qualified user runtime adapter",
+      );
+  });
 });

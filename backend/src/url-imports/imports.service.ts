@@ -473,9 +473,10 @@ export class ImportsService {
               sourceKey: source._id,
               resultKey: result._id,
             },
+            undefined,
+            record.acquisitionReservedAt ? record._id : undefined,
+            record._id,
           ];
-          if (record.acquisitionReservedAt)
-            submission.push(undefined, record._id);
           reserved = await this.jobs.createFromCache(...submission);
         } catch (error) {
           const safe = safeImportError(error);

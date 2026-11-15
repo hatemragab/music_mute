@@ -362,8 +362,12 @@
 "library_search" = "ابحث عن المقاطع";
 "library_sort_newest" = "الأحدث أولاً";
 "library_sort_title" = "الترتيب حسب العنوان";
+"library_sort" = "ترتيب المقاطع";
+"library_sort_mostPlayed" = "الأكثر تشغيلًا";
+"library_show_starred" = "عرض المفضلة";
 "library_filter_all" = "الكل";
 "library_filter_favorites" = "المفضلة";
+"library_filter_mostPlayed" = "الأكثر تشغيلًا";
 "library_filter_downloaded" = "تم تنزيلها";
 "library_filter_notDownloaded" = "لم تُنزّل";
 "library_filter_removed" = "المزالة";

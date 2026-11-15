@@ -26,14 +26,12 @@ describe('release controller security metadata', () => {
   );
 
   it('rejects public APK grants at the shared service ceiling before storage access', async () => {
-    const grant = vi.fn();
     const reserve = vi.fn(async () => ({
       allowed: false,
       retryAfterSeconds: 23,
     }));
     const controller = new AppUpdatesController(
       {} as never,
-      { grant } as never,
       { reserve } as never,
       { bucket: (scope: string, id: string) => `${scope}:${id}` } as never,
       { get: (_key: string, fallback: number) => fallback } as never,
@@ -43,7 +41,7 @@ describe('release controller security metadata', () => {
       controller.download(
         { ip: '192.0.2.4' } as never,
         response as never,
-        'release-id',
+        'a'.repeat(24),
         {},
       ),
     ).rejects.toMatchObject({ status: 429 });
@@ -60,6 +58,5 @@ describe('release controller security metadata', () => {
       },
     ]);
     expect(response.setHeader).toHaveBeenCalledWith('Retry-After', 23);
-    expect(grant).not.toHaveBeenCalled();
   });
 });

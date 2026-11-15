@@ -11,7 +11,8 @@ import {
   verifyManagedMacRelease as verifyMacRelease,
 } from "../platform/macos/app-installation-binding.js";
 import { verifyWindowsRelease } from "../platform/windows/release-manifest.js";
-import { parseDirectmlIdentity } from "../platform/shared/file-benchmark.js";
+import { stableCapacityGpuIdentity } from "./capacity-gpu-identity.js";
+export { stableCapacityGpuIdentity } from "./capacity-gpu-identity.js";
 import { runtimePlatformAdapter } from "../platform/runtime-adapter.js";
 
 /** Verify installed bytes before binding capacity to this host and GPU driver. */
@@ -105,14 +106,6 @@ export async function installedCapacityIdentity(options: {
     provider: adapter.provider,
     gpuIdentity,
   };
-}
-
-/** A DXGI LUID identifies an adapter only until reboot, not its driver/hardware. */
-export function stableCapacityGpuIdentity(
-  value: unknown,
-): Record<string, unknown> {
-  const { luid: _luid, ...identity } = parseDirectmlIdentity(value);
-  return identity;
 }
 
 async function hashRegularFile(path: string): Promise<string> {

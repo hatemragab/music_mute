@@ -54,6 +54,7 @@ import {
 } from "./local-provider.js";
 import { DesktopCatalog, type DesktopCatalogEntry } from "./desktop-catalog.js";
 import type { LocalLibraryOwner } from "./sync-outbox.js";
+import { publicThumbnailUrl } from "../shared/thumbnail-url.js";
 
 export const ACCOUNT_CACHE_MAX_BYTES = 60 * 1024 ** 2;
 export interface AccountCacheResult {
@@ -66,6 +67,7 @@ export interface AccountCacheResult {
   trim_enabled: boolean;
   job_id: string;
   cache_hit: boolean;
+  thumbnail_url: string | null;
 }
 export interface AccountCacheOptions {
   signal: AbortSignal;
@@ -96,6 +98,7 @@ interface StoredAccountAudio {
   validation_version: 1 | 2;
   source?: { kind: "youtube"; video_id: string };
   source_title?: string;
+  thumbnail_url?: string | null;
 }
 
 export function accountCacheKey(scope: AccountScope, job: JobMetadata): string {
@@ -442,6 +445,7 @@ export async function cacheAccountResult(
         current,
       );
       if (cached) {
+        cached.thumbnail_url = job.thumbnail_url;
         await current();
         await makeOfflineSpace(
           config.cache_root,
@@ -551,6 +555,7 @@ export async function cacheAccountResult(
           recipe_digest: job.recipe_digest,
           validation_version: serverValidated ? 2 : 1,
           ...(title ? { source_title: title } : {}),
+          thumbnail_url: job.thumbnail_url,
           ...(videoId && job.source_url === canonicalYouTubeUrl(videoId)
             ? { source: { kind: "youtube" as const, video_id: videoId } }
             : {}),
@@ -659,6 +664,7 @@ function result(
     trim_enabled: metadata.trim_enabled,
     job_id: id,
     cache_hit: hit,
+    thumbnail_url: publicThumbnailUrl(metadata.thumbnail_url),
   };
 }
 async function remember(
@@ -686,6 +692,7 @@ async function remember(
     sha256: metadata.sha256,
     ...(metadata.source ? { video_id: metadata.source.video_id } : {}),
     ...(title ? { source_title: title } : {}),
+    thumbnail_url: job.thumbnail_url,
   };
   await options.catalog.remember(
     { uid: owner.firebase_uid, session_generation: owner.session_generation },

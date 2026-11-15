@@ -186,6 +186,78 @@ final class UIJournal: @unchecked Sendable {
   func setFailureHandler(_ callback: @escaping @Sendable () -> Void) {
     queue.async { self.failureHandler = callback }
   }
+  func recordLocalUIAction(_ action: String) {
+    #if DEBUG
+      guard LocalUIDebugSession.active,
+        [
+          "navigation.home", "navigation.library", "navigation.account",
+          "navigation.diagnostics", "navigation.setup",
+          "storage.read", "storage.saved", "playback.request", "playback.pause", "playback.stop",
+          "operation.omitted",
+        ].contains(action)
+      else { return }
+      queue.async {
+        self.sendLocalLog([
+          "timestamp": self.formatter.string(from: Date()), "timestampSource": "event",
+          "source": "macos",
+          "origin": "application", "instanceId": self.session, "level": "info",
+          "category": "native-ui",
+          "name": "native-ui.\(action)", "summary": "native-ui.\(action)",
+          "data": ["isolatedSession": true],
+        ])
+      }
+    #endif
+  }
+  #if DEBUG
+    private var localLogPending = 0
+    private var localLogDropped = 0
+    private var localLogDelivered = 0
+    private var localLogFailed = 0
+    private func forwardLocalLog(_ record: UIJournalRecord) {
+      let envelope: [String: Any] = [
+        "timestamp": record.at, "timestampSource": "event", "source": "macos",
+        "origin": "application", "instanceId": record.sessionId,
+        "level": record.event == "app_operation_error" ? "error" : "info",
+        "category": "native-ui", "name": record.event, "summary": record.event,
+        "data": [
+          "code": record.code, "command": record.command, "dropped": localLogDropped,
+          "delivered": localLogDelivered, "failed": localLogFailed,
+        ],
+      ]
+      sendLocalLog(envelope)
+    }
+    private func sendLocalLog(_ envelope: [String: Any]) {
+      let environment = ProcessInfo.processInfo.environment
+      let sessionKey = LocalUIDebugSession.current?.loggingKey()
+      let enabled = environment["MUSICMUTE_LOG_ENABLED"].map { $0 == "1" } ?? (sessionKey != nil)
+      guard enabled,
+        environment["NODE_ENV"] == "development" || LocalUIDebugSession.active,
+        let key = environment["MUSICMUTE_LOG_KEY"] ?? sessionKey, !key.isEmpty,
+        localLogPending < 2,
+        let url = URL(string: "http://127.0.0.1:19740/ingest/macos")
+      else {
+        localLogDropped += 1
+        return
+      }
+      guard let bytes = try? JSONSerialization.data(withJSONObject: envelope) else { return }
+      var request = URLRequest(url: url, timeoutInterval: 2)
+      request.httpMethod = "POST"
+      request.httpShouldHandleCookies = false
+      request.httpBody = bytes
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue(key, forHTTPHeaderField: "x-musicmute-log-key")
+      localLogPending += 1
+      URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+        guard let self else { return }
+        let accepted = (response as? HTTPURLResponse)?.statusCode == 202
+        self.queue.async {
+          self.localLogPending -= 1
+          if accepted { self.localLogDelivered += 1 } else { self.localLogFailed += 1 }
+        }
+      }.resume()
+    }
+  #endif
+
   func record(_ event: UIJournalEvent, code: String = "NONE", command: AppCommand? = nil) {
     let safeCode = Self.codes.contains(code) ? code : "UNKNOWN_ERROR"
     queue.async {
@@ -194,6 +266,9 @@ final class UIJournal: @unchecked Sendable {
         let record = UIJournalRecord(
           at: self.formatter.string(from: Date()), sessionId: self.session, event: event.rawValue,
           code: safeCode, command: command?.rawValue ?? "none", identity: self.identity)
+        #if DEBUG
+          self.forwardLocalLog(record)
+        #endif
         var bytes = try JSONEncoder().encode(record)
         bytes.append(10)
         try self.write(bytes)

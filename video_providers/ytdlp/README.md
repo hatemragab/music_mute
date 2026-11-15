@@ -1,5 +1,8 @@
 # Private yt-dlp YouTube audio adapter
 
+The [2026-10-08 thumbnail release](docs/THUMBNAILS-2026-10-08.md) records the
+optional original thumbnail URL, local checks and one live router response.
+
 This owner-requested adapter downloads native YouTube audio through DataImpulse.
 It is deployed privately; [dated deployment evidence](docs/DEPLOYMENT-2026-10-03.md)
 records qualification and activation status. NestJS and the private
@@ -118,7 +121,20 @@ The response is unchanged native `audio/webm` or `audio/mp4`, with measured exac
 `Content-Length`, no redirect and optional sanitized metadata. NestJS counts and
 hashes the transfer, probes audio/duration and uploads to private R2 through the
 existing shared-media flow. FFmpeg processing belongs to the existing worker.
-No provider URL, token, raw extractor payload, proxy IP or credential is returned.
+Optional `thumbnail_url` carries the original YouTube thumbnail already included
+in the same extraction. It must be HTTPS on exact `i.ytimg.com`, use a bounded
+`/vi/` or `/vi_webp/` image path matching the requested video ID, and contain only
+optional bounded `sqp`/`rs` thumbnail parameters. Missing or unsafe values are
+omitted. The adapter never guesses another resolution, probes or downloads the
+image, or performs an additional metadata request. The router preserves this
+validated field. If adding a thumbnail would exceed the 4096-character metadata
+header limit, only the thumbnail is omitted so existing metadata survives.
+The backend now retains this optional URL in sanitized `extra_data` and exposes
+nullable top-level `thumbnail_url` in job HTTP responses and WebSocket snapshots.
+Clients use it in Library and retain their existing placeholder when it is absent,
+unsafe or unavailable. See the [dated Library release evidence](../../docs/library-thumbnails-2026-10-08.md)
+for checks, packages and the pending backend production checkpoint.
+No audio delivery URL, token, raw extractor payload, proxy IP or credential is returned.
 
 Proxy secrets enter the isolated extractor via an anonymous stdin pipe, never
 arguments or files. Ambient credentials/proxies are removed from its environment.

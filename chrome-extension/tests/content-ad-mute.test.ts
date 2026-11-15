@@ -65,7 +65,7 @@ class ElementFixture extends EventTarget {
     return this.attributes.get(name) ?? null;
   }
   closest(selector: string): ElementFixture | null {
-    if (selector === "ytd-watch-flexy" && this.attributes.has("video-id"))
+    if (selector.split(",").some((part) => this.matches(part.trim())))
       return this;
     return this.parent?.closest(selector) ?? null;
   }
@@ -210,6 +210,10 @@ let clockMute: { ad: boolean; muted: boolean }[];
 async function flush(): Promise<void> {
   for (let index = 0; index < 20; index++) await Promise.resolve();
 }
+async function nextClock(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(250);
+  await flush();
+}
 function documentEvent(name: string, target?: ElementFixture): void {
   const event = new Event(name);
   if (target) Object.defineProperty(event, "target", { value: target });
@@ -308,15 +312,18 @@ async function contentFixture(
     paused?: boolean;
     readyState?: number;
     storageReadFails?: boolean;
+    host?: Record<string, unknown> | null;
   } = {},
 ): Promise<void> {
   vi.resetModules();
   vi.useFakeTimers();
   vi.clearAllTimers();
+  vi.stubGlobal("performance", { now: () => Date.now() });
   video = new VideoFixture();
   video.paused = options.paused ?? false;
   video.readyState = options.readyState ?? 4;
   player = new ElementFixture();
+  player.className = "html5-video-player";
   controls = new ElementFixture();
   watch = new ElementFixture();
   watch.setAttribute("video-id", "jNQXAC9IVRw");
@@ -399,6 +406,15 @@ async function contentFixture(
   });
   runtimeSend.mockReset().mockImplementation((message) => {
     sent.push(message);
+    if (message.type === "MM_STATUS")
+      return Promise.resolve({
+        hello:
+          options.host === undefined
+            ? { platform: "darwin", arch: "arm64" }
+            : options.host,
+        job: null,
+        diagnostics: [],
+      });
     if (message.type === "MM_START" && deferStarts)
       return new Promise((resolve) => heldStarts.push(resolve));
     if (message.type === "MM_CLOCK") {
@@ -451,6 +467,190 @@ async function contentFixture(
   await flush();
 }
 beforeEach(() => contentFixture());
+describe("content clock source cadence", () => {
+  const clocks = () =>
+    sent.filter(
+      (message): message is Extract<ExtensionMessage, { type: "MM_CLOCK" }> =>
+        message.type === "MM_CLOCK",
+    );
+
+  it("coalesces render and media bursts while its heartbeat samples the latest timeline", async () => {
+    await begin();
+    const before = clocks().length;
+    const record = {
+      type: "attributes",
+      attributeName: "class",
+      target: player,
+      addedNodes: [],
+    } as unknown as MutationRecord;
+    let elapsed = 0;
+    for (let frame = 1; frame <= 60; frame++) {
+      video.currentTime = 2 + frame / 60;
+      mutation([record]);
+      video.dispatchEvent(new Event("timeupdate"));
+      video.dispatchEvent(new Event("progress"));
+      await flush();
+      const next = Math.round((frame * 1000) / 60);
+      await vi.advanceTimersByTimeAsync(next - elapsed);
+      elapsed = next;
+    }
+    expect(clocks().length - before).toBeLessThanOrEqual(4);
+    expect(clocks().length - before).toBeGreaterThanOrEqual(3);
+    expect(latestClock().payload.current_time).toBeCloseTo(3, 1);
+    expect(latestClock().payload.sampled_at_ms).toBe(Date.now());
+    const frames = clocks().slice(before);
+    expect(
+      new Set(frames.map((message) => message.payload.sequence)).size,
+    ).toBe(frames.length);
+  });
+
+  it("sends control edges and requested snapshots immediately inside one heartbeat", async () => {
+    await begin();
+    let count = clocks().length;
+    const change = (event: string, apply: () => void) => {
+      apply();
+      video.dispatchEvent(new Event(event));
+      expect(clocks()).toHaveLength(++count);
+    };
+    change("pause", () => {
+      video.paused = true;
+    });
+    change("play", () => {
+      video.paused = false;
+    });
+    change("seeking", () => {
+      video.seeking = true;
+      video.currentTime = 10;
+    });
+    change("seeked", () => {
+      video.seeking = false;
+    });
+    change("ratechange", () => {
+      video.playbackRate = 1.5;
+    });
+    change("volumechange", () => {
+      video.volume = 0.4;
+    });
+    change("waiting", () => {});
+    change("canplay", () => {});
+    change("ended", () => {
+      video.ended = true;
+    });
+    const respond = vi.fn();
+    messageHandler(
+      { type: "MM_PAGE_PROBE", generation: generation() },
+      { id: extensionId },
+      respond,
+    );
+    expect(clocks()).toHaveLength(++count);
+    expect(respond).toHaveBeenCalledWith({ clock: latestClock().payload });
+    await flush();
+    switchAudio();
+    await flush();
+    const retired = clocks().length;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(clocks()).toHaveLength(retired);
+  });
+
+  it("immediately admits unannounced timeline jumps without waiting for the heartbeat", async () => {
+    await begin();
+    let count = clocks().length;
+    for (const position of [10, 3]) {
+      video.currentTime = position;
+      video.dispatchEvent(new Event("timeupdate"));
+      expect(clocks()).toHaveLength(++count);
+      expect(latestClock().payload.current_time).toBe(position);
+    }
+  });
+
+  it("keeps one clock cadence across Show original and restart cycles", async () => {
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await begin();
+      const owner = generation();
+      const before = clocks().length;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(clocks().length - before).toBe(4);
+      expect(latestClock().payload.generation).toBe(owner);
+      switchAudio();
+      await flush();
+      const stopped = clocks().length;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(clocks()).toHaveLength(stopped);
+    }
+  });
+});
+describe("Chrome retains its own controls across native visibility policy", () => {
+  it.each([null, { platform: "win32", arch: "arm64" }])(
+    "does not infer a Mac from unsupported or absent received host: %j",
+    async (host) => {
+      await contentFixture({ host });
+      expect(panelControl("musicmute-panel-brand").textContent).toBe(
+        "MusicMute · On this computer",
+      );
+      expect(panelControl("musicmute-setup-link").textContent).toBe(
+        "Open MusicMute app",
+      );
+      waveform().click();
+      await flush();
+      expect(panelControl("musicmute-panel-status").textContent).not.toMatch(
+        /Mac|Apple Silicon/,
+      );
+    },
+  );
+  it.each([
+    ["win32", "x64", "en", "Prepare this PC"],
+    ["darwin", "arm64", "en", "Prepare my Mac"],
+    ["win32", "x64", "ar", "Windows"],
+  ])(
+    "uses received %s/%s HELLO for %s failure guidance while restoring original playback",
+    async (platform, arch, locale, expected) => {
+      await contentFixture({
+        host: { platform, arch },
+        stored: {
+          "musicmute.language.v1": locale,
+          "musicmute.settings.v1": { version: 1 },
+          "musicmute.settings.v1.autoStartEnabled": false,
+        },
+      });
+      waveform().click();
+      await flush();
+      messageHandler(
+        { type: "MM_ERROR", generation: generation(), code: "SETUP_REQUIRED" },
+        { id: extensionId },
+      );
+      await flush();
+      const text = panelControl("musicmute-panel-status").textContent;
+      expect(text).toContain(expected);
+      if (platform === "win32")
+        expect(text).not.toMatch(/Mac|Apple Silicon|Prepare my Mac/);
+      expect(video.muted).toBe(false);
+      expect(panel().dataset.state).toBe("error");
+    },
+  );
+  it.each([
+    {
+      platform: "win32",
+      arch: "x64",
+      local_input_visible: false,
+      link_import_visible: false,
+    },
+    {
+      platform: "darwin",
+      arch: "arm64",
+      local_input_visible: false,
+      link_import_visible: false,
+    },
+    { platform: "win32", arch: "x64" },
+  ])("does not hide native-policy controls for $platform", async (host) => {
+    await contentFixture({ host });
+    expect(waveform().hidden).toBe(false);
+    expect(panelControl("musicmute-cloud-link").hidden).toBe(false);
+    waveform().click();
+    await flush();
+    expect(sent.some((item) => item.type === "MM_START")).toBe(true);
+    expect(panelControl("musicmute-panel-stop").disabled).toBe(false);
+  });
+});
 
 describe("saved cloud choice through the content handler", () => {
   function requestCloud(
@@ -1929,6 +2129,7 @@ describe("playback waveform through the actual content handler", () => {
           throw new Error("Extension context invalidated.");
         });
         videoEvent("timeupdate");
+        await nextClock();
       }
       await flush();
       messageHandler(
@@ -1978,7 +2179,7 @@ describe("extension invalidation through the actual content handler", () => {
       invalidateMessaging(failureMode);
       mutation();
       expect(() => video.dispatchEvent(new Event("timeupdate"))).not.toThrow();
-      await flush();
+      await nextClock();
       expect(video.paused).toBe(true);
       expect(video.muted).toBe(muted);
       expect(waveform().disabled).toBe(true);
@@ -2063,7 +2264,7 @@ describe("extension invalidation through the actual content handler", () => {
         return Promise.reject(error);
       });
       expect(() => video.dispatchEvent(new Event("timeupdate"))).not.toThrow();
-      await flush();
+      await nextClock();
       expect(video.muted).toBe(false);
       expect(waveform().disabled).toBe(false);
       expect(statusMessage()).toContain(
@@ -2091,6 +2292,55 @@ describe("movable, dismissible panel through the actual content handler", () => 
   function controlsSent(): ExtensionMessage[] {
     return sent.filter((message) => message.type !== "MM_CLOCK");
   }
+  it.each([
+    ["waiting-for-worker", "en", "waiting for worker"],
+    ["gpu-busy", "en", "GPU busy"],
+    ["recovering", "en", "Recovering local processing"],
+    ["waiting-for-worker", "ar", "في انتظار العامل في الخلفية"],
+    ["gpu-busy", "ar", "معالج الرسومات مشغول"],
+    ["recovering", "ar", "جارٍ استعادة المعالجة المحلية"],
+  ])(
+    "shows received Windows %s in %s without false percentage or playback",
+    async (stage, locale, expected) => {
+      await contentFixture({
+        host: { platform: "win32", arch: "x64" },
+        stored: {
+          "musicmute.settings.v1": { version: 1 },
+          "musicmute.settings.v1.autoStartEnabled": false,
+          "musicmute.language.v1": locale,
+        },
+      });
+      waveform().click();
+      await flush();
+      messageHandler(
+        {
+          type: "MM_JOB",
+          generation: generation(),
+          payload: {
+            job_id: "waiting-job",
+            video_id: "jNQXAC9IVRw",
+            provider: "LOCAL_WINDOWS",
+            state: "PROCESSING",
+            stage,
+            completed: 8,
+            total: 10,
+          },
+        },
+        { id: extensionId },
+      );
+      expect(panelControl("musicmute-panel-status").textContent).toContain(
+        expected,
+      );
+      expect(panelControl("musicmute-panel-status").textContent).not.toContain(
+        "80%",
+      );
+      expect(video.paused).toBe(true);
+      expect(video.muted).toBe(false);
+      panelControl("musicmute-panel-audio-toggle").click();
+      await flush();
+      expect(sent.some((message) => message.type === "MM_CANCEL")).toBe(true);
+    },
+  );
 
   it("toggles active preparation controls and preserves dismissal through progress, READY and playback", async () => {
     expect(panel().hidden).toBe(true);
@@ -2364,7 +2614,7 @@ describe("movable, dismissible panel through the actual content handler", () => 
       throw new Error("Extension context invalidated.");
     });
     video.dispatchEvent(new Event("timeupdate"));
-    await flush();
+    await nextClock();
     expect(handle.captures.size).toBe(0);
     expect(resizeObservers[0]!.disconnect).toHaveBeenCalledOnce();
     expect(handle.disabled).toBe(true);
@@ -2386,7 +2636,7 @@ describe("movable, dismissible panel through the actual content handler", () => 
     expect(panel().hidden).toBe(true);
     runtimeSend.mockRejectedValue(new Error("Extension context invalidated."));
     video.dispatchEvent(new Event("timeupdate"));
-    await flush();
+    await nextClock();
     expect(panel().hidden).toBe(false);
     expect(panelControl("musicmute-panel-status").textContent).toContain(
       "Refresh this YouTube page",
@@ -2850,7 +3100,7 @@ describe("retired playback sessions through the actual content handler", () => {
     expect(video.muted).toBe(true);
     clockReply = { ok: true, source_muted: true };
     video.dispatchEvent(new Event("timeupdate"));
-    await flush();
+    await nextClock();
     expect(video.muted).toBe(false);
     expect(latestClock().payload.user_muted).toBe(false);
   });
@@ -3039,7 +3289,7 @@ describe("retired playback sessions through the actual content handler", () => {
       await begin(muted);
       clockReply = { ok: false };
       video.dispatchEvent(new Event("timeupdate"));
-      await flush();
+      await nextClock();
       expect(video.paused).toBe(true);
       expect(video.muted).toBe(muted);
       expect(waveform().attributes.get("aria-pressed")).toBe("false");

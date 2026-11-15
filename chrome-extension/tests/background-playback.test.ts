@@ -13,6 +13,11 @@ import type {
 import { isExtensionMessage } from "../src/extension/messages";
 import { SETTINGS_KEY } from "../src/extension/settings";
 import { PLAYBACK_SESSION_KEY } from "../src/extension/playback-session";
+import {
+  encodeFrame,
+  FrameDecoder,
+  validateCommand,
+} from "../src/companion/native-protocol";
 
 const extensionId = "musicmute-test-extension";
 type MessageHandler = (
@@ -2389,7 +2394,10 @@ describe("playback ownership through the actual background handler", () => {
   });
 
   it("reloads once after a clock transport failure and reports only sanitized recovery observations", async () => {
-    await start(17, 54);
+    const snapshot = await start(17, 54);
+    const requestId = ports[0]!.posted.findLast(
+      (command) => command.type === "START",
+    )!.request_id;
     runtimeSend.mockClear();
     let clocks = 0;
     runtimeSend.mockImplementation(async (message) => {
@@ -2418,6 +2426,8 @@ describe("playback ownership through the actual background handler", () => {
         severity: "warning",
         event: "diagnostic_error",
         code: "AUDIO_CONTEXT_LOST",
+        request_id: requestId,
+        job_id: snapshot.job_id,
         metrics: { stage: "playback", generation: 54, passed: false },
       },
       {
@@ -2425,6 +2435,8 @@ describe("playback ownership through the actual background handler", () => {
         severity: "info",
         event: "diagnostic_error",
         code: "AUDIO_CONTEXT_LOST",
+        request_id: requestId,
+        job_id: snapshot.job_id,
         metrics: { stage: "playback", generation: 54, passed: true },
       },
     ]);
@@ -2532,6 +2544,324 @@ describe("playback ownership through the actual background handler", () => {
       },
     });
     expect(((await status) as ExtensionStatus).job).toBeNull();
+  });
+});
+
+describe("diagnostic session correlation", () => {
+  it("omits opaque unapproved error codes before direct debug emission and native EVENT delivery", async () => {
+    const from = { ...sender(17, "abcdefghijk"), documentId: "owner-document" };
+    await start(17, 1, "abcdefghijk", from);
+    const port = ports[0]!;
+    const { localDiagnostics } = await import("../src/extension/local-debug");
+    const emit = vi.spyOn(localDiagnostics, "emit");
+    const status = vi
+      .spyOn(localDiagnostics, "status")
+      .mockReturnValue({ ...localDiagnostics.status(), enabled: true });
+    const marker = "OPAQUE_CREDENTIAL_MARKER_1234567890";
+    try {
+      for (const [code, expected] of [
+        [marker, "UNKNOWN_ERROR"],
+        ["AUDIO_CONTEXT_LOST", "AUDIO_CONTEXT_LOST"],
+      ] as const) {
+        await request(
+          {
+            type: "MM_EVENT",
+            payload: {
+              component: "extension",
+              severity: "warning",
+              event: "diagnostic_error",
+              code,
+              metrics: { generation: 1 },
+            },
+          },
+          from,
+        );
+        expect(emit).toHaveBeenLastCalledWith(
+          "diagnostic.diagnostic_error",
+          expect.objectContaining({ code: expected }),
+          "warn",
+          expect.objectContaining({
+            requestId: expect.any(String),
+            jobId: expect.any(String),
+          }),
+        );
+        const event = port.posted.findLast(
+          (command) => command.type === "EVENT",
+        );
+        expect(event?.payload).toMatchObject({ code: expected });
+      }
+      expect(JSON.stringify(emit.mock.calls)).not.toContain(marker);
+      expect(JSON.stringify(port.posted)).not.toContain(marker);
+    } finally {
+      status.mockRestore();
+      emit.mockRestore();
+    }
+  });
+
+  it("sanitizes every native observation without changing frames or evaluating payload accessors", async () => {
+    await start(17, 1);
+    const port = ports[0]!;
+    const { localDiagnostics } = await import("../src/extension/local-debug");
+    const emit = vi.spyOn(localDiagnostics, "emit");
+    const status = vi
+      .spyOn(localDiagnostics, "status")
+      .mockReturnValue({ ...localDiagnostics.status(), enabled: true });
+    const marker = "OPAQUE_CREDENTIAL_MARKER_1234567890";
+    const requestId = crypto.randomUUID();
+    const getter = vi.fn(() => marker);
+    const frame = {
+      protocol_version: 1,
+      request_id: requestId,
+      type: "REPORT",
+      payload: {
+        code: marker,
+        nested: { error_code: "AUDIO_CONTEXT_LOST" },
+        duration_ms: 42,
+        get private_value() {
+          return getter();
+        },
+      },
+    };
+    try {
+      port.emit(frame as unknown as NativeReply);
+      expect(emit).toHaveBeenLastCalledWith(
+        "native.receive",
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            code: "UNKNOWN_ERROR",
+            nested: { error_code: "AUDIO_CONTEXT_LOST" },
+            duration_ms: 42,
+          }),
+        }),
+        "debug",
+        { phase: "extension_received", requestId },
+      );
+      expect(frame.payload.code).toBe(marker);
+      expect(getter).not.toHaveBeenCalled();
+      const invalid = {
+        ...frame,
+        protocol_version: 99,
+        payload: { error_code: marker },
+      };
+      port.emit(invalid as unknown as NativeReply);
+      expect(emit).toHaveBeenLastCalledWith(
+        "native.receive",
+        { omitted: "invalid_native_frame" },
+        "debug",
+        { phase: "extension_received" },
+      );
+      for (const code of [marker, "AUDIO_CONTEXT_LOST"]) {
+        port.emit({
+          protocol_version: 1,
+          request_id: requestId,
+          type: "ERROR",
+          payload: { error_code: code },
+        } as NativeReply);
+        expect(emit).toHaveBeenLastCalledWith(
+          "native.receive",
+          expect.objectContaining({
+            payload: { error_code: code === marker ? "UNKNOWN_ERROR" : code },
+          }),
+          "debug",
+          { phase: "extension_received", requestId },
+        );
+      }
+      const reflectiveFrame = new Proxy(
+        { ...frame, payload: {} },
+        {
+          ownKeys() {
+            throw new Error(marker);
+          },
+        },
+      );
+      expect(() =>
+        port.emit(reflectiveFrame as unknown as NativeReply),
+      ).not.toThrow();
+      expect(emit).toHaveBeenLastCalledWith(
+        "native.receive",
+        { omitted: "observation_sanitization_failed" },
+        "debug",
+        { phase: "extension_received", requestId },
+      );
+      const reflectivePayload = new Proxy(
+        {},
+        {
+          getPrototypeOf() {
+            throw new Error(marker);
+          },
+        },
+      );
+      expect(() =>
+        port.emit({
+          ...frame,
+          payload: reflectivePayload,
+        } as unknown as NativeReply),
+      ).not.toThrow();
+      expect(emit).toHaveBeenLastCalledWith(
+        "native.receive",
+        { omitted: "redaction_failed" },
+        "debug",
+        { phase: "extension_received", requestId },
+      );
+      expect(JSON.stringify(emit.mock.calls)).not.toContain(marker);
+      expect(JSON.stringify(port.posted)).not.toContain(marker);
+    } finally {
+      status.mockRestore();
+      emit.mockRestore();
+    }
+  });
+
+  it("skips disabled protocol snapshots and preserves real send/receive correlation metadata when enabled", async () => {
+    const { localDiagnostics } = await import("../src/extension/local-debug");
+    const emit = vi.spyOn(localDiagnostics, "emit");
+    const status = vi
+      .spyOn(localDiagnostics, "status")
+      .mockReturnValue({ ...localDiagnostics.status(), enabled: false });
+    try {
+      await start(17, 1);
+      const port = ports[0]!;
+      const reflection = vi.fn(() => {
+        throw new Error("SHOULD_NOT_PROJECT_DISABLED");
+      });
+      const reply = new Proxy(
+        {
+          protocol_version: 1,
+          request_id: crypto.randomUUID(),
+          type: "REPORT",
+          payload: {},
+        },
+        { ownKeys: reflection },
+      );
+      expect(() => port.emit(reply as unknown as NativeReply)).not.toThrow();
+      expect(reflection).not.toHaveBeenCalled();
+      expect(
+        emit.mock.calls.some(
+          ([name]) =>
+            name === "native.send" ||
+            name === "native.receive" ||
+            name === "extension.message",
+        ),
+      ).toBe(false);
+      status.mockReturnValue({ ...localDiagnostics.status(), enabled: true });
+      await request(
+        { type: "MM_STOP", generation: 1 },
+        sender(17, "abcdefghijk"),
+      );
+      const command = port.posted.findLast((item) => item.type === "CANCEL")!;
+      expect(emit).toHaveBeenCalledWith(
+        "native.send",
+        expect.objectContaining({ request_id: command.request_id }),
+        "debug",
+        { phase: "extension_send_attempt", requestId: command.request_id },
+      );
+      expect(emit).toHaveBeenCalledWith(
+        "native.receive",
+        expect.objectContaining({ request_id: command.request_id }),
+        "debug",
+        { phase: "extension_received", requestId: command.request_id },
+      );
+    } finally {
+      status.mockRestore();
+      emit.mockRestore();
+    }
+  });
+
+  it("retains the admitted request and job through relayed playback diagnostics and Stop", async () => {
+    const from = { ...sender(17, "abcdefghijk"), documentId: "owner-document" };
+    const snapshot = await start(17, 1, "abcdefghijk", from);
+    const port = ports[0]!;
+    const startCommand = port.posted.findLast(
+      (command) => command.type === "START",
+    )!;
+    for (const event of [
+      "playback_seek",
+      "playback_started",
+      "playback_stopped",
+      "playback_drift",
+    ]) {
+      await request(
+        {
+          type: "MM_EVENT",
+          payload: {
+            component: "extension",
+            severity: "info",
+            event,
+            request_id: crypto.randomUUID(),
+            job_id: crypto.randomUUID(),
+            metrics: { generation: 1 },
+          },
+        },
+        event === "playback_drift" ? offscreenSender : from,
+      );
+      const diagnostic = port.posted.findLast(
+        (command) => command.type === "EVENT",
+      )!;
+      expect(diagnostic.payload).toMatchObject({
+        event,
+        request_id: startCommand.request_id,
+        job_id: snapshot.job_id,
+      });
+      const [decoded] = new FrameDecoder().push(encodeFrame(diagnostic));
+      expect(validateCommand(decoded).payload).toMatchObject({
+        request_id: startCommand.request_id,
+        job_id: snapshot.job_id,
+      });
+      expect(diagnostic.request_id).not.toBe(startCommand.request_id);
+    }
+    await request({ type: "MM_STOP", generation: 1 }, from);
+    const stopped = port.posted.findLast(
+      (command) =>
+        command.type === "EVENT" &&
+        command.payload.event === "playback_stopped",
+    );
+    expect(stopped?.payload).toMatchObject({
+      code: "SESSION_STOPPED",
+      request_id: startCommand.request_id,
+      job_id: snapshot.job_id,
+    });
+  });
+
+  it("leaves stale, unscoped and unrelated sender diagnostics uncorrelated despite forged IDs", async () => {
+    const from = { ...sender(17, "abcdefghijk"), documentId: "owner-document" };
+    await start(17, 1, "abcdefghijk", from);
+    const port = ports[0]!;
+    for (const [diagnosticSender, observedGeneration] of [
+      [from, 0],
+      [from, undefined],
+      [{ ...from, documentId: "retired-document" }, 1],
+      [{ ...from, tab: { id: 18 } }, 1],
+      [{ ...from, url: "https://www.youtube.com/watch?v=lmnopqrstuv" }, 1],
+      [
+        {
+          id: extensionId,
+          url: `chrome-extension://${extensionId}/popup.html`,
+        },
+        1,
+      ],
+      [offscreenSender, 0],
+    ] as const) {
+      await request(
+        {
+          type: "MM_EVENT",
+          payload: {
+            component: "extension",
+            severity: "info",
+            event: "playback_seek",
+            request_id: crypto.randomUUID(),
+            job_id: crypto.randomUUID(),
+            ...(observedGeneration === undefined
+              ? {}
+              : { metrics: { generation: observedGeneration } }),
+          },
+        },
+        diagnosticSender as chrome.runtime.MessageSender,
+      );
+      const diagnostic = port.posted.findLast(
+        (command) => command.type === "EVENT",
+      )!;
+      expect(diagnostic.payload).not.toHaveProperty("request_id");
+      expect(diagnostic.payload).not.toHaveProperty("job_id");
+    }
   });
 });
 

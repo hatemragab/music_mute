@@ -7,6 +7,7 @@ import Foundation
     -> URLImportView
   func urlImport(id: String) async throws -> URLImportView
   func processingPolicy() async throws -> ProcessingPolicyResponse
+  func watchProcessingPolicy() -> AsyncThrowingStream<Data, Error>?
   func processingUsage() async throws -> ProcessingUsage
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
@@ -38,6 +39,7 @@ extension JobsAPI {
   }
   func urlImport(id: String) async throws -> URLImportView { throw JobsFailure.serviceUnavailable }
   func processingPolicy() async throws -> ProcessingPolicyResponse { throw JobsFailure.notFound }
+  func watchProcessingPolicy() -> AsyncThrowingStream<Data, Error>? { realtime?.watch("policy") }
   func processingUsage() async throws -> ProcessingUsage { throw JobsFailure.notFound }
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
@@ -140,7 +142,25 @@ extension JobsAPI {
     return try result.validated()
   }
   func processingPolicy() async throws -> ProcessingPolicyResponse {
-    try await send("GET", "/processing-policy?schema_version=2")
+    try Task.checkCancellation()
+    try checkCooldown()
+    if tokenSource?.tokenSession != nil {
+      return try await send("GET", "/processing-policy?schema_version=2")
+    }
+    let (data, response) = try await transport.perform(
+      method: "GET", path: "/processing-policy?schema_version=2",
+      body: nil, bearer: nil, headers: [:])
+    try Task.checkCancellation()
+    switch response.statusCode {
+    case 200...299:
+      do { return try decoder.decode(ProcessingPolicyResponse.self, from: data) } catch {
+        throw JobsFailure.malformedResponse
+      }
+    case 300...399: throw JobsFailure.redirectRejected
+    case 404: throw JobsFailure.notFound
+    case 429: throw rateLimited(response)
+    default: throw JobsFailure.serviceUnavailable
+    }
   }
   func processingUsage() async throws -> ProcessingUsage {
     try await send("GET", "/processing-usage")
@@ -282,6 +302,7 @@ extension JobsAPI {
     try checkCooldown()
     guard let tokenSource else { throw AuthFailure.sessionExpired }
     let capturedSession = tokenSource.tokenSession
+    let loggingTraceID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
     var headers: [String: String] = [:]
     if installation {
       guard let id = installationId(), let uuid = UUID(uuidString: id) else {
@@ -297,7 +318,8 @@ extension JobsAPI {
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       try checkCooldown()
       let (data, response) = try await transport.perform(
-        method: method, path: path, body: body, bearer: token, headers: headers)
+        method: method, path: path, body: body, bearer: token, headers: headers,
+        userID: capturedSession?.uid, traceID: loggingTraceID)
       try Task.checkCancellation()
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       if response.statusCode == 401 && attempt == 0 { continue }
@@ -350,13 +372,15 @@ extension JobsAPI {
     try checkCooldown()
     guard let tokenSource else { throw AuthFailure.sessionExpired }
     let capturedSession = tokenSource.tokenSession
+    let loggingTraceID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
     for attempt in 0...1 {
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       let token = try await tokenSource.idToken(forceRefresh: attempt == 1)
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       try checkCooldown()
       let (data, response) = try await transport.perform(
-        method: method, path: path, body: nil, bearer: token, headers: [:])
+        method: method, path: path, body: nil, bearer: token, headers: [:],
+        userID: capturedSession?.uid, traceID: loggingTraceID)
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       if response.statusCode == 401 && attempt == 0 { continue }
       if response.statusCode == 204 { return }

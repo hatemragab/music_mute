@@ -19,10 +19,27 @@ const EXTENSIONS: Record<string, string> = {
   "video/webm": ".webm",
 };
 
+/** Shared fixed attempt filename rule; unknown MIME types keep the original
+ * bounded decoder input filename instead of selecting an executable path. */
+export function attemptInputExtension(contentType: string): string {
+  if (typeof contentType !== "string")
+    throw new TypeError("Input content type is invalid");
+  const key = contentType.toLowerCase();
+  return Object.hasOwn(EXTENSIONS, key) ? EXTENSIONS[key]! : ".bin";
+}
+
 export interface AttemptWorkspace {
   root: string;
   input: string;
   output: string;
+}
+
+/** Internal lifecycle port; implementations remain responsible for their own
+ * filesystem and live-process authority before retiring an attempt. */
+export interface RuntimeWorkspace {
+  initialize(): Promise<void>;
+  create(attemptId: string, contentType: string): Promise<AttemptWorkspace>;
+  cleanup(workspace: AttemptWorkspace): Promise<void>;
 }
 
 export class WorkspaceManager {
@@ -60,7 +77,7 @@ export class WorkspaceManager {
     if (!UUID_V4.test(attemptId)) throw new TypeError("Attempt ID is invalid");
     const root = this.childPath(attemptId);
     await mkdir(root, { recursive: false, mode: 0o700 });
-    const extension = EXTENSIONS[contentType.toLowerCase()] ?? ".bin";
+    const extension = attemptInputExtension(contentType);
     return {
       root,
       input: join(root, `input${extension}`),

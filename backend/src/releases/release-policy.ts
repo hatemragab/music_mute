@@ -56,8 +56,7 @@ export function validDistribution(
   distribution: unknown,
 ): platform is Platform {
   return (
-    (platform === 'android' &&
-      (distribution === 'direct' || distribution === 'play')) ||
+    (platform === 'android' && distribution === 'play') ||
     (platform === 'ios' && distribution === 'app_store')
   );
 }
@@ -75,7 +74,7 @@ export function decideUpdate(
       (!validBuild(target.buildNumber) ||
         (distribution === 'play' && target.source !== 'google_play') ||
         (distribution === 'app_store' && target.source !== 'app_store') ||
-        (distribution === 'direct' && target.source === 'app_store'))) ||
+        target.artifact !== null)) ||
     (minimumBuild !== null && (!target || target.buildNumber < minimumBuild))
   )
     throw adminError('INVALID_REQUEST');
@@ -99,8 +98,7 @@ export function validateReleaseDraft(
     );
   if (
     !(
-      (d.platform === 'android' &&
-        ['direct_apk', 'google_play'].includes(d.source)) ||
+      (d.platform === 'android' && d.source === 'google_play') ||
       (d.platform === 'ios' && d.source === 'app_store')
     ) ||
     !plain(d.versionName, 64) ||
@@ -109,10 +107,6 @@ export function validateReleaseDraft(
     !validBuild(d.buildNumber)
   )
     throw adminError('INVALID_REQUEST');
-  if (d.source === 'direct_apk') {
-    if (d.storeUrl !== null) throw adminError('INVALID_REQUEST');
-    return;
-  }
   if (typeof d.storeUrl !== 'string' || d.storeUrl.length > 2048)
     throw adminError('INVALID_REQUEST');
   let url: URL;
@@ -132,6 +126,8 @@ export function validateReleaseDraft(
   if (d.source === 'google_play') {
     if (
       !identities.androidPackageId ||
+      d.storeUrl !==
+        `https://play.google.com/store/apps/details?id=${identities.androidPackageId}` ||
       url.hostname !== 'play.google.com' ||
       url.pathname !== '/store/apps/details' ||
       url.searchParams.get('id') !== identities.androidPackageId ||

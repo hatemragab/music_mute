@@ -202,6 +202,26 @@ class RuntimePipeline:
         self._separator_key: tuple[Provider, Path, int] | None = None
         self._model_cache_root: Path | None = None
 
+    @property
+    def model_loaded(self) -> bool:
+        return self._separator is not None and self._separator_key is not None
+
+    def detach_job(self) -> None:
+        """Retain the graph while positively clearing the separator's job state."""
+        self._startup_progress = None
+        if self._separator is not None:
+            detach = getattr(self._separator, "detach_job", None)
+            if not callable(detach):
+                raise SeparatorError("Kim job state could not be detached")
+            detach()
+
+    def invalidate(self) -> None:
+        """Drop model references after uncertain processing; never reload in-place."""
+        self._startup_progress = None
+        self._separator = None
+        self._separator_key = None
+        self._model_cache_root = None
+
     def preload(
         self,
         model_cache_root: Path,
@@ -236,6 +256,7 @@ class RuntimePipeline:
     ) -> dict[str, Any]:
         progress = progress or (lambda _stage: None)
         timings: dict[str, float] = {}
+        cold_start = not self.model_loaded
         try:
             model = self._timed(
                 timings,
@@ -390,6 +411,17 @@ class RuntimePipeline:
             input_samples = max(1, round(source_info.duration_seconds * SAMPLE_RATE))
 
             progress("output-ready")
+            first_inference = getattr(separator, "first_inference_seconds", None)
+            startup_timings = (
+                {"modelLoadSeconds": timings["modelLoad"],
+                 "firstInferenceSeconds": first_inference}
+                if request.provider == "directml"
+                and cold_start
+                and isinstance(first_inference, (int, float))
+                and not isinstance(first_inference, bool)
+                and math.isfinite(first_inference) and 0 <= first_inference <= 3600
+                else None
+            )
             return {
                 "attemptId": request.attempt_id,
                 "outputPath": str(output.resolve(strict=True)),
@@ -418,6 +450,7 @@ class RuntimePipeline:
                     output_info.duration_seconds - output_samples / SAMPLE_RATE,
                 ),
                 "stageTimings": timings,
+                **({"startupTimings": startup_timings} if startup_timings is not None else {}),
                 "separationTimings": getattr(separator, "last_separation_timings", {}),
                 "editMap": _chunk_edit_map(retained),
             }
@@ -442,6 +475,12 @@ class RuntimePipeline:
                 raise ProcessingFailure(
                     "RUNTIME_CONFIG_CHANGED", "A warm child cannot change model cache"
                 )
+            if self._model_resolver is not None:
+                model = self._model_resolver(cache_root)
+                if model != self._separator_key[1]:
+                    raise ProcessingFailure(
+                        "RUNTIME_CONFIG_CHANGED", "A warm child cannot change model identity"
+                    )
             return self._separator_key[1]
         model = (self._model_resolver or verified_cached_model)(cache_root)
         self._model_cache_root = cache_root

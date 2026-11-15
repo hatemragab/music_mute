@@ -362,8 +362,12 @@
 "library_search" = "Search tracks";
 "library_sort_newest" = "Newest first";
 "library_sort_title" = "Sort by title";
+"library_sort" = "Sort tracks";
+"library_sort_mostPlayed" = "Most played";
+"library_show_starred" = "Show starred";
 "library_filter_all" = "All";
 "library_filter_favorites" = "Starred";
+"library_filter_mostPlayed" = "Most played";
 "library_filter_downloaded" = "Downloaded";
 "library_filter_notDownloaded" = "Not downloaded";
 "library_filter_removed" = "Removed";

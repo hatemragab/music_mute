@@ -7,7 +7,12 @@ import {
   parseYouTubeVideoId,
   type LocalAudioArtifact,
 } from "../shared/protocol.js";
-import { DesktopApiError, type AccountScope } from "./account-api.js";
+import {
+  DesktopApiError,
+  CloudReplyValidationError,
+  type CloudReplyValidationReason,
+  type AccountScope,
+} from "./account-api.js";
 import {
   AccountRealtimeClient,
   type AccountResource,
@@ -15,6 +20,7 @@ import {
   type AccountTransport,
 } from "./account-realtime.js";
 import { validateUploadGrant } from "./local-sync-client.js";
+import { publicThumbnailUrl } from "../shared/thumbnail-url.js";
 
 export const FULL_TIMELINE_PROFILE_ID = "kim-vocal-2-full-timeline-v1" as const;
 /** Qualified backend recipe revision 6: Kim Vocal2, no trimming/denoise, MP3 160 kbps. */
@@ -44,6 +50,9 @@ const STATUSES = [
   "failed",
   "cancelled",
 ] as const;
+function invalidReply(reason: CloudReplyValidationReason): never {
+  throw new CloudReplyValidationError(reason);
+}
 export interface InputDeclaration {
   extension: string;
   content_type: string;
@@ -51,6 +60,12 @@ export interface InputDeclaration {
   duration_seconds: number;
   sha256: string;
 }
+/** History may predate retained original declarations; absence is never identity proof. */
+export type JobInputMetadata = Omit<
+  InputDeclaration,
+  "content_type" | "sha256"
+> &
+  Partial<Pick<InputDeclaration, "content_type" | "sha256">>;
 export interface YouTubeDeclaration {
   video_id: string;
   duration_seconds: number;
@@ -64,10 +79,11 @@ export interface JobMetadata {
   source_kind: "url" | "file" | null;
   source_title: string | null;
   display_name: string | null;
+  thumbnail_url: string | null;
   recipe_digest: string | null;
   local_profile_id: typeof FULL_TIMELINE_PROFILE_ID | null;
   trim_enabled: boolean;
-  input: InputDeclaration;
+  input: JobInputMetadata;
   output:
     | (Omit<InputDeclaration, "extension" | "duration_seconds"> & {
         extension: "mp3";
@@ -178,7 +194,7 @@ export class CloudProcessingProvider {
               (item) => item.status === "submitted" || item.status === "failed",
               (item) => {
                 if (item.import_id !== imported.import_id)
-                  throw new DesktopApiError("CLOUD_REPLY_INVALID");
+                  invalidReply("import_identity");
                 this.jobId = item.job_id ?? this.jobId;
                 this.progress({
                   phase: "importing",
@@ -189,7 +205,7 @@ export class CloudProcessingProvider {
             );
       if (ready.status === "failed")
         throw new DesktopApiError(ready.error_code ?? "IMPORT_FAILED");
-      if (!ready.job_id) throw new DesktopApiError("CLOUD_REPLY_INVALID");
+      if (!ready.job_id) invalidReply("import_result");
       this.jobId = ready.job_id;
       const job = await this.waitReady(ready.job_id);
       if (job.source_url !== url || !fullTimeline(job))
@@ -203,7 +219,7 @@ export class CloudProcessingProvider {
     request: CloudFileRequest,
     upload: CloudUpload,
   ): Promise<CloudResult> {
-    const input = parseInput(request.input);
+    const input = parseInputDeclaration(request.input);
     if (
       !desktopUuid(request.request_id) ||
       !["audio_file", "video_file"].includes(request.source) ||
@@ -233,7 +249,7 @@ export class CloudProcessingProvider {
         value.request_id !== request.request_id ||
         !STATUSES.includes(value.status as JobMetadata["status"])
       )
-        throw new DesktopApiError("CLOUD_REPLY_INVALID");
+        invalidReply("create_receipt");
       this.jobId = value.id;
       if (value.status === "awaiting_upload") {
         // Only declarations are consumed here. The caller owns safe file opening and transfer.
@@ -321,7 +337,7 @@ export class CloudProcessingProvider {
             (item) => item.status === "submitted" || item.status === "failed",
             (item) => {
               if (item.import_id !== imported.import_id)
-                throw new DesktopApiError("CLOUD_REPLY_INVALID");
+                invalidReply("import_identity");
               this.progress({
                 phase: "importing",
                 status: item.status,
@@ -332,7 +348,7 @@ export class CloudProcessingProvider {
     if (ready.status === "failed")
       throw new DesktopApiError(ready.error_code ?? "IMPORT_FAILED");
     if (!ready.job_id || ready.error_code !== null)
-      throw new DesktopApiError("CLOUD_REPLY_INVALID");
+      invalidReply("import_result");
     const job = await this.waitReady(ready.job_id);
     this.current();
     if (!fullTimeline(job)) throw new DesktopApiError("TIMELINE_INCOMPATIBLE");
@@ -344,7 +360,7 @@ export class CloudProcessingProvider {
     declaration: InputDeclaration,
     knownJobId?: string,
   ): Promise<JobMetadata | null> {
-    const input = parseInput(declaration);
+    const input = parseInputDeclaration(declaration);
     this.current();
     if (knownJobId !== undefined) {
       if (!ID.test(knownJobId)) throw new DesktopApiError("INVALID_JOB_ID");
@@ -353,8 +369,7 @@ export class CloudProcessingProvider {
           await this.realtime.read("job", { id: knownJobId }, this.signal),
         );
         this.current();
-        if (job.id !== knownJobId)
-          throw new DesktopApiError("CLOUD_REPLY_INVALID");
+        if (job.id !== knownJobId) invalidReply("job_identity");
         if (reusableFile(job, input)) return job;
       } catch (error) {
         this.current();
@@ -384,22 +399,22 @@ export class CloudProcessingProvider {
       if (
         !desktopRecord(value) ||
         !Array.isArray(value.items) ||
-        value.items.length > 50 ||
-        !(
-          value.next_cursor === null ||
-          (typeof value.next_cursor === "string" &&
-            /^[A-Za-z0-9_-]{1,512}$/.test(value.next_cursor))
-        )
+        value.items.length > 50
       )
-        throw new DesktopApiError("CLOUD_REPLY_INVALID");
+        invalidReply("history_page");
+      if (!(
+        value.next_cursor === null ||
+        (typeof value.next_cursor === "string" &&
+          /^[A-Za-z0-9_-]{1,512}$/.test(value.next_cursor))
+      ))
+        invalidReply("history_cursor");
       for (const item of value.items) {
         const job = parseJobMetadata(item);
         if (job.status === "ready" && job.can_download_output && matches(job))
           return job;
       }
       if (value.next_cursor === null) return null;
-      if (seen.has(value.next_cursor))
-        throw new DesktopApiError("CLOUD_REPLY_INVALID");
+      if (seen.has(value.next_cursor)) invalidReply("history_cursor");
       seen.add(value.next_cursor);
       cursor = value.next_cursor;
     }
@@ -414,7 +429,7 @@ export class CloudProcessingProvider {
       expectedSource &&
       ("video_id" in expectedSource
         ? validateYouTubeDeclaration(expectedSource)
-        : parseInput(expectedSource));
+        : parseInputDeclaration(expectedSource));
     this.current();
     const job = parseJobMetadata(
       await this.realtime.read("job", { id: jobId }, this.signal),
@@ -430,6 +445,10 @@ export class CloudProcessingProvider {
     )
       throw new DesktopApiError("SOURCE_IDENTITY_MISMATCH");
     return this.finish(job);
+  }
+  /** Main-process presentation can distinguish a known job cancellation from an import still acquiring. */
+  currentJobId(): string | null {
+    return this.jobId ?? null;
   }
   async cancel(signal?: AbortSignal): Promise<void> {
     try {
@@ -492,7 +511,7 @@ export class CloudProcessingProvider {
       parseJobMetadata,
       (item) => ["ready", "failed", "cancelled"].includes(item.status),
       (item) => {
-        if (item.id !== jobId) throw new DesktopApiError("CLOUD_REPLY_INVALID");
+        if (item.id !== jobId) invalidReply("job_identity");
         this.progress({
           phase: "processing",
           status: item.status,
@@ -500,7 +519,7 @@ export class CloudProcessingProvider {
         });
       },
     );
-    if (job.id !== jobId) throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    if (job.id !== jobId) invalidReply("job_identity");
     if (job.status === "failed")
       throw new DesktopApiError(job.error?.code ?? "CLOUD_PROCESSING_FAILED");
     if (job.status === "cancelled") throw new DesktopApiError("CANCELLED");
@@ -552,7 +571,7 @@ export class CloudProcessingProvider {
               done(
                 error instanceof DesktopApiError
                   ? error
-                  : new DesktopApiError("CLOUD_REPLY_INVALID"),
+                  : new CloudReplyValidationError("snapshot_parser"),
               );
             }
           },
@@ -630,32 +649,34 @@ function reusableFile(job: JobMetadata, input: InputDeclaration): boolean {
 
 /** Narrow safe account projection; private keys, error prose and arbitrary URLs are discarded. */
 export function parseJobMetadata(value: unknown): JobMetadata {
+  if (!desktopRecord(value)) invalidReply("job_record");
+  if (typeof value.id !== "string" || !ID.test(value.id))
+    invalidReply("job_id");
+  if (!desktopUuid(value.request_id)) invalidReply("job_request_id");
+  if (!STATUSES.includes(value.status as JobMetadata["status"]))
+    invalidReply("job_status");
+  if (typeof value.trim_enabled !== "boolean") invalidReply("job_trim");
   if (
-    !desktopRecord(value) ||
-    typeof value.id !== "string" ||
-    !ID.test(value.id) ||
-    !desktopUuid(value.request_id) ||
-    !STATUSES.includes(value.status as JobMetadata["status"]) ||
-    typeof value.trim_enabled !== "boolean" ||
     typeof value.can_download_input !== "boolean" ||
     typeof value.can_download_output !== "boolean"
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
-  const input = parseInput(value.input);
+    invalidReply("job_capabilities");
+  const input = parseJobInput(value.input);
   let output: JobMetadata["output"] = null;
   if (value.output != null) {
+    if (!desktopRecord(value.output)) invalidReply("output_record");
     if (
-      !desktopRecord(value.output) ||
       value.output.extension !== "mp3" ||
-      value.output.content_type !== "audio/mpeg" ||
-      !validBytes(value.output.bytes) ||
-      !validHash(value.output.sha256) ||
-      !(
-        value.output.duration_seconds === null ||
-        validDuration(value.output.duration_seconds)
-      )
+      value.output.content_type !== "audio/mpeg"
     )
-      throw new DesktopApiError("CLOUD_REPLY_INVALID");
+      invalidReply("output_format");
+    if (!validBytes(value.output.bytes)) invalidReply("output_bytes");
+    if (!validHash(value.output.sha256)) invalidReply("output_hash");
+    if (!(
+      value.output.duration_seconds === null ||
+      validDuration(value.output.duration_seconds)
+    ))
+      invalidReply("output_duration");
     output = {
       extension: "mp3",
       content_type: "audio/mpeg",
@@ -669,33 +690,36 @@ export function parseJobMetadata(value: unknown): JobMetadata {
     (typeof value.source_url !== "string" ||
       strictYouTubeUrl(value.source_url) !== value.source_url)
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    invalidReply("source_reference");
   if (
     value.recipe_digest != null &&
     (typeof value.recipe_digest !== "string" ||
       !/^[a-f0-9]{64}$/.test(value.recipe_digest))
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    invalidReply("recipe_digest");
   if (
     value.processing_origin != null &&
     value.processing_origin !== "local_device" &&
     value.processing_origin !== "cloud"
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    invalidReply("processing_origin");
   if (
     value.local_profile_id != null &&
     value.local_profile_id !== FULL_TIMELINE_PROFILE_ID
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    invalidReply("local_profile");
   if (
     value.source_kind != null &&
     value.source_kind !== "file" &&
     value.source_kind !== "url"
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
-  const title = (item: unknown): string | null => {
+    invalidReply("source_kind");
+  const title = (
+    item: unknown,
+    reason: "source_title" | "display_name",
+  ): string | null => {
     if (item == null) return null;
-    if (!safeTitle(item)) throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    if (!safeTitle(item)) invalidReply(reason);
     return item;
   };
   let error: JobMetadata["error"] = null;
@@ -705,7 +729,7 @@ export function parseJobMetadata(value: unknown): JobMetadata {
       typeof value.error.code !== "string" ||
       !/^[A-Z][A-Z0-9_]{1,63}$/.test(value.error.code)
     )
-      throw new DesktopApiError("CLOUD_REPLY_INVALID");
+      invalidReply("error_metadata");
     error = { code: value.error.code };
   }
   return {
@@ -716,8 +740,9 @@ export function parseJobMetadata(value: unknown): JobMetadata {
       value.processing_origin === "local_device" ? "local_device" : "cloud",
     source_url: (value.source_url as string | null) ?? null,
     source_kind: (value.source_kind as JobMetadata["source_kind"]) ?? null,
-    source_title: title(value.source_title),
-    display_name: title(value.display_name),
+    source_title: title(value.source_title, "source_title"),
+    display_name: title(value.display_name, "display_name"),
+    thumbnail_url: publicThumbnailUrl(value.thumbnail_url),
     recipe_digest: (value.recipe_digest as string | null) ?? null,
     local_profile_id:
       value.local_profile_id === FULL_TIMELINE_PROFILE_ID
@@ -771,23 +796,38 @@ export function parseDownloadGrant(value: unknown): DownloadGrant {
     throw new DesktopApiError("DOWNLOAD_GRANT_INVALID");
   return { url: value.url, expires_at: value.expires_at };
 }
-function parseInput(value: unknown): InputDeclaration {
+function parseJobInput(value: unknown): JobInputMetadata {
+  if (!desktopRecord(value)) invalidReply("input_record");
   if (
-    !desktopRecord(value) ||
     typeof value.extension !== "string" ||
-    TYPES[value.extension] !== value.content_type ||
-    !validBytes(value.bytes) ||
-    !validDuration(value.duration_seconds) ||
-    !validHash(value.sha256)
+    !Object.hasOwn(TYPES, value.extension)
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    invalidReply("input_extension");
+  if (
+    value.content_type !== undefined &&
+    TYPES[value.extension] !== value.content_type
+  )
+    invalidReply("input_content_type");
+  if (!validBytes(value.bytes)) invalidReply("input_bytes");
+  if (!validDuration(value.duration_seconds)) invalidReply("input_duration");
+  if (value.sha256 !== undefined && !validHash(value.sha256))
+    invalidReply("input_hash");
   return {
     extension: value.extension,
-    content_type: value.content_type as string,
     bytes: value.bytes,
     duration_seconds: value.duration_seconds,
-    sha256: value.sha256,
+    ...(value.content_type === undefined
+      ? {}
+      : { content_type: value.content_type as string }),
+    ...(value.sha256 === undefined ? {} : { sha256: value.sha256 as string }),
   };
+}
+/** Source transfers and file identity comparisons require the complete declaration. */
+export function parseInputDeclaration(value: unknown): InputDeclaration {
+  const input = parseJobInput(value);
+  if (input.content_type === undefined) invalidReply("input_content_type");
+  if (input.sha256 === undefined) invalidReply("input_hash");
+  return { ...input, content_type: input.content_type, sha256: input.sha256 };
 }
 function validBytes(value: unknown): value is number {
   return (
@@ -818,7 +858,7 @@ function safeTitle(value: unknown): value is string {
     typeof value === "string" &&
     [...value].length >= 1 &&
     [...value].length <= 200 &&
-    !/[\p{Cc}\p{Cf}]/u.test(value)
+    !/\p{Cc}/u.test(value)
   );
 }
 function strictYouTubeUrl(value: string): string {
@@ -849,7 +889,7 @@ function parseImport(value: unknown): {
       (typeof value.job_id === "string" && ID.test(value.job_id))
     )
   )
-    throw new DesktopApiError("CLOUD_REPLY_INVALID");
+    invalidReply("import_metadata");
   let code: string | null = null;
   if (value.error != null) {
     if (
@@ -857,7 +897,7 @@ function parseImport(value: unknown): {
       typeof value.error.code !== "string" ||
       !/^[A-Z][A-Z0-9_]{1,63}$/.test(value.error.code)
     )
-      throw new DesktopApiError("CLOUD_REPLY_INVALID");
+      invalidReply("import_metadata");
     code = value.error.code;
   }
   return {

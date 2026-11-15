@@ -48,10 +48,10 @@ describe('release draft writes', () => {
         service as ReleaseDraftsService & {
           proposal(input: Record<string, unknown>): Promise<unknown>;
         }
-      ).proposal({ platform: 'android', source: 'direct_apk' }),
+      ).proposal({ platform: 'android', source: 'google_play' }),
     ).resolves.toEqual({
       platform: 'android',
-      source: 'direct_apk',
+      source: 'google_play',
       current: { versionName: '1.2.0', buildNumber: 12 },
       suggested: { versionName: '1.2.1', buildNumber: 13 },
     });
@@ -81,10 +81,11 @@ describe('release draft writes', () => {
       await expect(
         service.create(actor, {
           platform: 'android',
-          source: 'direct_apk',
+          source: 'google_play',
           ...candidate,
           changelogEn: 'New release',
-          storeUrl: null,
+          storeUrl:
+            'https://play.google.com/store/apps/details?id=com.example.fixture',
           operationId: '07a5d459-24e7-4db3-9469-7f398210e007',
           reason: 'Ship new release',
         }),
@@ -102,18 +103,19 @@ describe('release draft writes', () => {
     await expect(
       service.create(actor, {
         platform: 'android',
-        source: 'direct_apk',
+        source: 'google_play',
         versionName: '1.1.0',
         buildNumber: 11,
         changelogEn: 'Older release',
-        storeUrl: null,
+        storeUrl:
+          'https://play.google.com/store/apps/details?id=com.example.fixture',
         operationId: '07a5d459-24e7-4db3-9469-7f398210e007',
         reason: 'Attempt older release',
       }),
     ).rejects.toThrow();
     expect(models.findOne).toHaveBeenCalledWith({
       platform: 'android',
-      source: 'direct_apk',
+      source: 'google_play',
     });
   });
   it('does not let an edited draft move its version or build backwards', async () => {
@@ -124,11 +126,12 @@ describe('release draft writes', () => {
         revision: 1,
         artifactState: null,
         platform: 'android',
-        source: 'direct_apk',
+        source: 'google_play',
         versionName: '1.2.0',
         buildNumber: 12,
         changelogEn: 'Current notes',
-        storeUrl: null,
+        storeUrl:
+          'https://play.google.com/store/apps/details?id=com.example.fixture',
       },
       { versionName: '1.1.0', buildNumber: 11 },
     );
@@ -177,6 +180,27 @@ describe('release draft writes', () => {
       ).rejects.toThrow();
       expect(save).not.toHaveBeenCalled();
     }
+  });
+  it('does not edit historical direct drafts or offer proposals for their channel', async () => {
+    const { service, save } = setup({
+      state: 'draft',
+      revision: 1,
+      source: 'direct_apk',
+    });
+    await expect(
+      service.edit(actor, 'a'.repeat(24), {
+        expectedRevision: 1,
+        operationId: '07a5d459-24e7-4db3-9469-7f398210e007',
+        reason: 'Retired row',
+        changelogEn: 'Changed notes',
+        storeUrl:
+          'https://play.google.com/store/apps/details?id=com.example.fixture',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_REQUEST' } });
+    expect(save).not.toHaveBeenCalled();
+    await expect(
+      service.proposal({ platform: 'android', source: 'direct_apk' }),
+    ).rejects.toMatchObject({ response: { code: 'INVALID_REQUEST' } });
   });
   it('rejects untrusted store identity before reserving an operation', async () => {
     const { service, ops } = setup();

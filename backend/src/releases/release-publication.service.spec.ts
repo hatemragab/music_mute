@@ -9,7 +9,7 @@ const empty = {
     minimumBuild: null,
     directReleaseId: null,
     storeReleaseId: null,
-    source: 'direct_apk',
+    source: 'google_play',
   },
   ios: { minimumBuild: null, storeReleaseId: null },
 };
@@ -17,7 +17,7 @@ describe('complete update selection validation', () => {
   it('retains an activated Play target while Android minimum remains forced', () => {
     const current = defaultPolicy();
     current.platforms.android.releaseSelection = {
-      source: 'direct_apk',
+      source: 'google_play',
       directReleaseId: 'a'.repeat(24),
       storeReleaseId: 'b'.repeat(24),
     };
@@ -27,7 +27,7 @@ describe('complete update selection validation', () => {
       android: {
         ...empty.android,
         minimumBuild: 10,
-        directReleaseId: 'a'.repeat(24),
+        directReleaseId: null,
       },
     });
     expect(() => validatePolicyTransition(current, next, false)).toThrow();
@@ -56,6 +56,11 @@ describe('complete update selection validation', () => {
       { ...empty, android: { ...empty.android, minimumBuild: 0 } },
       { ...empty, ios: { ...empty.ios, storeReleaseId: 'bad' } },
       { ...empty, android: { ...empty.android, source: 'app_store' } },
+      { ...empty, android: { ...empty.android, source: 'direct_apk' } },
+      {
+        ...empty,
+        android: { ...empty.android, directReleaseId: 'a'.repeat(24) },
+      },
     ]) {
       expect(() => validateSelection(body)).toThrow();
     }

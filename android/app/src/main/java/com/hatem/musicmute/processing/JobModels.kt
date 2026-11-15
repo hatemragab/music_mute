@@ -130,6 +130,7 @@ data class Job(
     val processingProgress: ProcessingProgress? = null,
     val trimEnabled: Boolean = true,
     val comparisonRanges: List<List<Long>>? = null,
+    @Serializable(with = ThumbnailUrlSerializer::class) val thumbnailUrl: String? = null,
 ) {
     val knownStatus: JobStatus? get() = JobStatus.entries.find { it.wireValue == status }
 }

@@ -14,6 +14,40 @@ describe('owned installation HTTP boundaries', () => {
     await f?.app.close();
   });
   const token = 'Bearer fixture-owner-token';
+  it('takes location from headers and rejects forged body fields', async () => {
+    const { installation_id: installationId, ...metadata } = wireDeviceReport;
+    const path = `/users/me/devices/${installationId}`;
+    await request(f.app.getHttpServer())
+      .put(path)
+      .set('Authorization', token)
+      .set('CF-IPCountry', 'EG')
+      .set('CF-IPCity', 'Cairo')
+      .send(metadata)
+      .expect(200);
+    expect(f.devices.sync).toHaveBeenLastCalledWith(
+      f.ownerId.toString(),
+      100,
+      deviceReport,
+      expect.objectContaining({
+        country: 'EG',
+        city: 'Cairo',
+        source: 'cloudflare',
+      }),
+    );
+    f.devices.sync.mockClear();
+    for (const extra of [
+      { country: 'US' },
+      { location: { country: 'US' } },
+      { city: 'Forged' },
+    ]) {
+      await request(f.app.getHttpServer())
+        .put(path)
+        .set('Authorization', token)
+        .send({ ...metadata, ...extra })
+        .expect(400);
+    }
+    expect(f.devices.sync).not.toHaveBeenCalled();
+  });
   it('scopes reports and lists to the verified user and hides internal IDs', async () => {
     const { installation_id: installationId, ...metadata } = wireDeviceReport;
     const path = `/users/me/devices/${installationId}`;
@@ -28,6 +62,7 @@ describe('owned installation HTTP boundaries', () => {
       f.ownerId.toString(),
       100,
       deviceReport,
+      expect.objectContaining({ country: null, source: 'cloudflare' }),
     );
     const own = await request(f.app.getHttpServer())
       .get('/users/me/devices?limit=1')

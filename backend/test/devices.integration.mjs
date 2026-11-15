@@ -25,6 +25,8 @@ test(
         await import('../dist/devices/device-installation-owners.service.js');
       const { DevicesService } =
         await import('../dist/devices/devices.service.js');
+      const { parseCloudflareLocation } =
+        await import('../dist/devices/cloudflare-location.js');
       const model = connection.model(Device.name, DeviceSchema);
       const ownershipModel = connection.model(
         DeviceInstallationOwner.name,
@@ -124,6 +126,62 @@ test(
         ).lastSeenAt.getTime(),
         seen,
       );
+      const egypt = parseCloudflareLocation({
+        'cf-ipcountry': 'EG',
+        'cf-ipcity': 'Cairo',
+      });
+      const located = await service.sync(
+        owner,
+        102,
+        { ...report, metadataRevision: 3 },
+        egypt,
+      );
+      assert.equal(located.location.country, 'EG');
+      assert.equal(located.location.city, 'Cairo');
+      const observedAt = located.location.observedAt.getTime();
+      const unchanged = await service.sync(
+        owner,
+        102,
+        { ...report, metadataRevision: 3 },
+        parseCloudflareLocation({ 'cf-ipcountry': 'EG', 'cf-ipcity': 'Cairo' }),
+      );
+      assert.equal(unchanged.location.observedAt.getTime(), observedAt);
+      const updateDevice = model.updateOne.bind(model);
+      let locationWrites = 0;
+      model.updateOne = (...args) => {
+        locationWrites++;
+        return updateDevice(...args);
+      };
+      await service.observeLocation(owner, report.installationId, egypt);
+      assert.equal(locationWrites, 0);
+      await service.observeLocation(
+        other,
+        report.installationId,
+        parseCloudflareLocation({ 'cf-ipcountry': 'US' }),
+      );
+      assert.equal(locationWrites, 0);
+      await service.observeLocation(
+        owner,
+        report.installationId,
+        parseCloudflareLocation({ 'cf-ipcountry': 'US' }),
+      );
+      assert.equal(locationWrites, 1);
+      assert.equal(
+        (await service.findOwned(owner, report.installationId)).location
+          .country,
+        'US',
+      );
+      await service.observeLocation(
+        owner,
+        report.installationId,
+        parseCloudflareLocation({}),
+      );
+      assert.equal(
+        (await service.findOwned(owner, report.installationId)).location
+          .country,
+        null,
+      );
+      model.updateOne = updateDevice;
       await model.updateOne(
         { _id: rollback._id },
         { $set: { lastSeenAt: new Date(Date.now() - 600000) } },
@@ -134,6 +192,17 @@ test(
         ).lastSeenAt.getTime() >
           Date.now() - 5000,
       );
+      await model.updateOne(
+        { _id: rollback._id },
+        { $set: { lastSeenAt: new Date(Date.now() - 600000) } },
+      );
+      await service.observeLocation(owner, report.installationId, egypt);
+      const refreshedLocation = await service.findOwned(
+        owner,
+        report.installationId,
+      );
+      assert.ok(refreshedLocation.location.observedAt.getTime() >= observedAt);
+      assert.equal(refreshedLocation.location.country, 'EG');
       for (let revision = 4; revision <= 25; revision++)
         await service.sync(owner, 102, {
           ...report,
@@ -247,6 +316,30 @@ test(
           (device) => device.installationId === webReport.installationId,
         ),
         true,
+      );
+      const windowsReport = {
+        ...report,
+        installationId: 'f7432963-4e77-4a4d-b34d-93d12af65565',
+        platform: 'windows',
+        osVersion: '10.0.19045',
+      };
+      const windowsDevice = await service.sync(owner, 105, windowsReport);
+      assert.equal(windowsDevice.platform, 'windows');
+      assert.equal(
+        (await service.findOwned(owner, windowsReport.installationId)).platform,
+        'windows',
+      );
+      assert.equal(
+        await service.findOwned(other, windowsReport.installationId),
+        null,
+      );
+      await assert.rejects(
+        service.sync(owner, 105, {
+          ...windowsReport,
+          platform: 'web',
+          metadataRevision: 2,
+        }),
+        (error) => error.status === 409,
       );
     } finally {
       await connection?.close();

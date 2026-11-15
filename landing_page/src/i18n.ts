@@ -33,7 +33,11 @@ export interface Translation {
     lead: string;
     accent: string;
     body: string;
-    secondaryAction: string;
+    platformsLabel: string;
+    webActionDescription: string;
+    chromeActionDescription: string;
+    chromeRequirement: string;
+    pendingReleases: string;
     rightsNote: string;
     previewLabel: string;
     sourceTrack: string;
@@ -97,8 +101,10 @@ export interface Translation {
     title: string;
     body: string;
     web: ContentItem & { status: string; action: string };
+    chrome: ContentItem & { status: string; action: string };
     mobile: ContentItem & { status: string };
     desktop: ContentItem & { status: string };
+    windows: ContentItem & { status: string };
     releaseNote: string;
   };
   faqSection: {
@@ -143,7 +149,13 @@ const en: Translation = {
     lead: "Remove the music.",
     accent: "Keep the voice.",
     body: "Import a compatible audio file you have permission to process, or use a supported public link. MusicMute creates a voice-only track you can play, save, and share.",
-    secondaryAction: "See how it works",
+    platformsLabel: "Available MusicMute platforms",
+    webActionDescription: "Import, process, and manage your library",
+    chromeActionDescription: "Voice-only playback on supported YouTube videos",
+    chromeRequirement:
+      "Chrome requires the separate MusicMute Local companion installed and prepared on a supported Apple silicon Mac.",
+    pendingReleases:
+      "Mac public download and mobile store links will appear after release verification.",
     rightsNote: "Only process audio you own or have permission to use.",
     previewLabel: "A clearer voice track",
     sourceTrack: "Original mix",
@@ -254,13 +266,19 @@ const en: Translation = {
   },
   appsSection: {
     eyebrow: "Choose your screen",
-    title: "MusicMute starts on the web.",
-    body: "Use the browser app today. Verified public links for mobile and desktop releases will appear here when those releases are ready.",
+    title: "Use MusicMute on the web or in Chrome.",
+    body: "Open the web app, or add the Chrome extension for supported YouTube videos. The extension requires the separate MusicMute Local companion to be installed and prepared on a supported Apple silicon Mac.",
     web: {
       status: "Available now",
       title: "Web",
       body: "Import audio or supported links, follow processing, and manage your library in a modern browser.",
       action: "Open MusicMute",
+    },
+    chrome: {
+      status: "Available now",
+      title: "Chrome extension",
+      body: "Use voice-only playback controls on supported YouTube videos. The extension requires the separate MusicMute Local companion to be installed and prepared on a supported Apple silicon Mac.",
+      action: "Add to Chrome",
     },
     mobile: {
       status: "Release link pending",
@@ -268,12 +286,17 @@ const en: Translation = {
       body: "Native mobile clients are being prepared and validated independently before public store links are shown.",
     },
     desktop: {
-      status: "Release in preparation",
-      title: "macOS + Chrome",
-      body: "The local Mac and Chrome experience is not yet presented as a public download or store release.",
+      status: "Public release pending",
+      title: "MusicMute Local for Mac",
+      body: "This companion app installs and prepares the processing tools required by the Chrome extension. Its public download link will appear after the Mac release is independently verified.",
+    },
+    windows: {
+      status: "Public release pending",
+      title: "MusicMute Local for Windows",
+      body: "Planned for Windows 10 22H2 (build 19045) and Windows 11, x64 only. Local processing requires a compatible GPU that passes preparation. The same Chrome extension will use this companion after its Windows release is independently verified.",
     },
     releaseNote:
-      "No store badge or download link is shown until the exact public release is verified.",
+      "The Chrome extension currently requires the separate Mac companion to be installed and prepared. Mac, Windows and mobile download links appear only after each public release is independently verified.",
   },
   faqSection: {
     eyebrow: "Good to know",
@@ -300,9 +323,9 @@ const en: Translation = {
           "No. The browser journey needs an internet connection, and the tab should remain available while a local file is prepared and uploaded.",
       },
       {
-        question: "Is every platform downloadable now?",
+        question: "Which platforms are available now?",
         answer:
-          "The web app is the current verified destination. Mobile, macOS, and Chrome links will be added only after each public release is independently verified.",
+          "The web app and Chrome extension are available now. The Chrome extension does not work on its own; it requires the MusicMute Local companion to be installed and prepared on a supported Apple silicon Mac. Public Mac and mobile download links are still pending.",
       },
       {
         question: "Can I process any recording?",
@@ -348,7 +371,13 @@ const ar: Translation = {
     lead: "أزل الموسيقى.",
     accent: "واحتفظ بالصوت.",
     body: "استورد ملفاً صوتياً متوافقاً لديك إذن بمعالجته، أو استخدم رابطاً عاماً مدعوماً. ينشئ ميوزك ميوت مقطعاً صوتياً فقط يمكنك تشغيله وحفظه ومشاركته.",
-    secondaryAction: "تعرّف على الطريقة",
+    platformsLabel: "منصات ميوزك ميوت المتاحة",
+    webActionDescription: "استورد الصوت وعالجه وأدر مكتبتك",
+    chromeActionDescription: "تشغيل الصوت فقط في فيديوهات YouTube المدعومة",
+    chromeRequirement:
+      "تتطلب إضافة Chrome تثبيت تطبيق MusicMute Local المصاحب وتجهيزه على جهاز Mac مدعوم بمعالج Apple silicon.",
+    pendingReleases:
+      "ستظهر روابط تنزيل Mac العامة ومتاجر الهاتف بعد التحقق من الإصدارات.",
     rightsNote: "عالج فقط الصوت الذي تملكه أو لديك إذن باستخدامه.",
     previewLabel: "مقطع صوت أوضح",
     sourceTrack: "المقطع الأصلي",
@@ -457,13 +486,19 @@ const ar: Translation = {
   },
   appsSection: {
     eyebrow: "اختر شاشتك",
-    title: "يبدأ ميوزك ميوت على الويب.",
-    body: "استخدم تطبيق المتصفح اليوم. ستظهر هنا روابط الإصدارات الموثقة للهاتف وسطح المكتب عندما تصبح جاهزة.",
+    title: "استخدم ميوزك ميوت على الويب أو في Chrome.",
+    body: "افتح تطبيق الويب، أو ثبّت إضافة Chrome لفيديوهات YouTube المدعومة. تتطلب الإضافة تثبيت تطبيق MusicMute Local المصاحب وتجهيزه على جهاز Mac مدعوم بمعالج Apple silicon.",
     web: {
       status: "متاح الآن",
       title: "الويب",
       body: "استورد الصوت أو الروابط المدعومة، وتابع المعالجة وأدر مكتبتك في متصفح حديث.",
       action: "افتح ميوزك ميوت",
+    },
+    chrome: {
+      status: "متاحة الآن",
+      title: "إضافة Chrome",
+      body: "استخدم عناصر تشغيل الصوت فقط مع فيديوهات YouTube المدعومة. تتطلب الإضافة تثبيت تطبيق MusicMute Local المصاحب وتجهيزه على جهاز Mac مدعوم بمعالج Apple silicon.",
+      action: "إضافة إلى Chrome",
     },
     mobile: {
       status: "رابط الإصدار قيد الانتظار",
@@ -471,12 +506,17 @@ const ar: Translation = {
       body: "يجري تجهيز تطبيقات الهاتف الأصلية والتحقق من كل إصدار قبل عرض روابط المتاجر العامة.",
     },
     desktop: {
-      status: "الإصدار قيد التجهيز",
-      title: "macOS و Chrome",
-      body: "تجربة Mac المحلية وChrome غير معروضة حالياً كتنزيل عام أو إصدار متجر.",
+      status: "الإصدار العام قيد الانتظار",
+      title: "MusicMute Local لأجهزة Mac",
+      body: "يثبّت هذا التطبيق المصاحب أدوات المعالجة التي تحتاجها إضافة Chrome ويجهّزها. سيظهر رابط التنزيل العام بعد التحقق المستقل من إصدار Mac.",
+    },
+    windows: {
+      status: "الإصدار العام قيد الانتظار",
+      title: "MusicMute Local لأجهزة Windows",
+      body: "مخطط لأجهزة Windows 10 22H2 (الإصدار 19045) وWindows 11، بمعمارية x64 فقط. تتطلب المعالجة المحلية معالج رسومات متوافقًا يجتاز التجهيز. ستستخدم إضافة Chrome نفسها هذا التطبيق المصاحب بعد التحقق المستقل من إصدار Windows.",
     },
     releaseNote:
-      "لا نعرض شارة متجر أو رابط تنزيل حتى يتم التحقق من الإصدار العام نفسه.",
+      "تتطلب إضافة Chrome حاليًا تثبيت تطبيق Mac المصاحب وتجهيزه. ولن تظهر روابط تنزيل Mac وWindows والهاتف إلا بعد التحقق المستقل من كل إصدار عام.",
   },
   faqSection: {
     eyebrow: "معلومات مهمة",
@@ -503,9 +543,9 @@ const ar: Translation = {
           "لا. تحتاج تجربة المتصفح إلى اتصال بالإنترنت، ويجب إبقاء علامة التبويب متاحة أثناء تجهيز الملف المحلي ورفعه.",
       },
       {
-        question: "هل يمكن تنزيل كل المنصات الآن؟",
+        question: "ما المنصات المتاحة الآن؟",
         answer:
-          "تطبيق الويب هو الوجهة الموثقة حالياً. ستُضاف روابط الهاتف وmacOS وChrome بعد التحقق المستقل من كل إصدار عام.",
+          "يتوفر الآن تطبيق الويب وإضافة Chrome. لا تعمل إضافة Chrome بمفردها؛ إذ تتطلب تثبيت تطبيق MusicMute Local المصاحب وتجهيزه على جهاز Mac مدعوم بمعالج Apple silicon. ولا تزال روابط التنزيل العامة لتطبيق Mac والهاتف قيد الانتظار.",
       },
       {
         question: "هل يمكنني معالجة أي تسجيل؟",

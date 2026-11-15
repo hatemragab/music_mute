@@ -13,7 +13,7 @@ import {
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
-import { sanitizeDiagnostic } from "../../agent/child-process.js";
+import { sanitizeDiagnostic } from "../../agent/diagnostic-redaction.js";
 import {
   clearDiagnosticHistory,
   sanitizeDiagnosticEvent,

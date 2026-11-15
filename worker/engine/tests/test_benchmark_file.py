@@ -40,6 +40,7 @@ class FakePipeline:
         self.instances.append(self)
 
     def preload(self, model_cache, provider, directml_device_id, progress=None) -> None:
+        self.directml_device_id = directml_device_id
         self.preload_count += 1
         self.separator = self.factory(provider, model_cache / "model.onnx", directml_device_id)
         if progress:
@@ -189,7 +190,10 @@ class BenchmarkFileTests(unittest.TestCase):
     def test_directml_repeated_runs_use_service_identity_without_mps_calls(self) -> None:
         self._assert_repeated_runs("directml")
 
-    def _assert_repeated_runs(self, provider: str) -> None:
+    def test_per_user_directml_receipt_binds_exact_selected_gpu_and_current_sid(self) -> None:
+        self._assert_repeated_runs("directml", consumer=True)
+
+    def _assert_repeated_runs(self, provider: str, consumer: bool = False) -> None:
         FakePipeline.instances.clear()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -225,12 +229,22 @@ class BenchmarkFileTests(unittest.TestCase):
                 save_audio_dir=root / "saved",
                 progress=events.append,
             )
+            identity = {"source": "DXGI EnumAdapters1/GetDesc1", "deviceIndex": 3,
+                        "name": "Intel Iris Xe", "vendorId": 32902, "deviceId": 1234,
+                        "subsystemId": 5678, "revision": 1, "driverVersion": "32.0.1.1",
+                        "luid": "0000000000000042", "dedicatedVideoMemoryBytes": 0,
+                        "sharedSystemMemoryLimitBytes": 8_000_000_000}
+            if consumer:
+                arguments.runtime_profile = "windows-user"
+                arguments.expected_user_sid = "S-1-5-21-111-222-333-1001"
+                arguments.directml_device_id = 3
             boundaries = []
             arguments.before_measurement = lambda: boundaries.append(("ready", FakePipeline.instances[0].process_count))
             arguments.after_measurement = lambda seconds: boundaries.append(("measured", FakePipeline.instances[0].process_count, seconds))
             with (
                 patch("musicmute_engine.qualification.platform.system", return_value="Windows" if provider == "directml" else "Darwin"),
-                patch("musicmute_engine.qualification.service_identity", return_value="S-1-5-19" if provider == "directml" else "tester"),
+                patch("musicmute_engine.qualification.service_identity", return_value=arguments.expected_user_sid if consumer else "S-1-5-19" if provider == "directml" else "tester"),
+                patch("musicmute_engine.windows_gpu.adapter_identity", return_value=identity),
                 patch("musicmute_engine.qualification.collect_diagnostics", return_value={"status": "ok"}),
                 patch("musicmute_engine.qualification.RuntimePipeline", FakePipeline),
                 patch("musicmute_engine.qualification.KimSeparator", return_value=FakeSeparator()),
@@ -242,6 +256,13 @@ class BenchmarkFileTests(unittest.TestCase):
             pipeline = FakePipeline.instances[0]
             self.assertEqual(len(FakePipeline.instances), 1)
             self.assertEqual(pipeline.preload_count, 1)
+            if consumer:
+                self.assertEqual(pipeline.directml_device_id, 3)
+                self.assertEqual(result["serviceIdentity"], arguments.expected_user_sid)
+                self.assertEqual(result["gpuId"], "dxgi-0000000000000042")
+                self.assertEqual(result["gpuIdentity"], identity)
+                self.assertEqual(result["gpuOnlyPolicy"], "onnxruntime-disable-cpu-fallback-v1")
+                self.assertEqual(result["resourceObservations"]["inferenceSlots"], 1)
             self.assertEqual(pipeline.process_count, 5)
             self.assertEqual(boundaries[0], ("ready", 2))
             self.assertEqual(boundaries[1][:2], ("measured", 5))
@@ -301,6 +322,10 @@ class BenchmarkFileTests(unittest.TestCase):
                 report = build_report(raw, arguments, "e" * 64)
             self.assertEqual(report["provider"], "directml")
             self.assertFalse(report["fallbackDisabled"])
+            raw["gpuOnlyPolicy"] = "onnxruntime-disable-cpu-fallback-v1"
+            with patch("musicmute_engine.windows_gpu.adapter_identity", return_value=identity):
+                strict_report = build_report(raw, arguments, "e" * 64)
+            self.assertTrue(strict_report["fallbackDisabled"])
             self.assertTrue(report["providerDispatch"]["proven"])
             self.assertEqual(report["gpuIdentity"], identity)
             self.assertIn("unavailable", report["memoryScope"])

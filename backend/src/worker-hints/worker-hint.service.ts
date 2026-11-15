@@ -10,6 +10,10 @@ import { isIP } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocket, WebSocketServer } from 'ws';
+import {
+  observeWebSocket,
+  observeRedisClient,
+} from '../observability/local-service-diagnostics.js';
 import { ConfigService } from '@nestjs/config';
 import { SECURITY_REDIS } from '../rate-limits/security-redis.provider.js';
 import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
@@ -83,6 +87,7 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     if (typeof this.redis.duplicate !== 'function') return;
     const subscriber = this.redis.duplicate();
     this.subscriber = subscriber;
+    observeRedisClient(subscriber, 'worker-hint-subscriber');
     subscriber.on('error', () => undefined);
     await subscriber.subscribe(CHANNEL).catch(() => undefined);
     subscriber.on('message', (channel, message) => {
@@ -300,6 +305,7 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
       expiry,
     };
     this.sockets.set(machineId, client);
+    observeWebSocket(socket, { streamId: connectionId }, 'worker-hints');
     socket.on('pong', () => {
       client.alive = true;
     });

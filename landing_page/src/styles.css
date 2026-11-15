@@ -161,8 +161,7 @@ button {
   color: var(--text);
 }
 
-.header-actions,
-.hero-actions {
+.header-actions {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -227,25 +226,6 @@ button {
   transform: scaleX(-1);
 }
 
-.button-small {
-  min-height: 44px;
-  padding-inline: 17px;
-  border-radius: 12px;
-  font-size: 0.92rem;
-}
-
-.button-secondary {
-  background: rgb(255 255 255 / 4%);
-  color: var(--text);
-  border-color: var(--border);
-  box-shadow: none;
-}
-
-.button-secondary:hover {
-  background: var(--surface-raised);
-  box-shadow: none;
-}
-
 .hero {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
@@ -301,8 +281,82 @@ button {
   line-height: 1.7;
 }
 
-.hero-actions {
-  margin-top: 34px;
+.hero-direct-actions {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hero-direct-action {
+  min-width: 0;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid rgb(255 129 74 / 36%);
+  border-radius: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  background: rgb(255 129 74 / 7%);
+  text-align: start;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.hero-direct-action:hover {
+  transform: translateY(-2px);
+  border-color: rgb(255 129 74 / 62%);
+  background: rgb(255 129 74 / 11%);
+}
+
+.hero-direct-action-copy,
+.hero-direct-action-copy strong,
+.hero-direct-action-copy > span:last-child {
+  display: block;
+}
+
+.hero-direct-action-copy {
+  min-width: 0;
+}
+
+.hero-direct-action-copy strong {
+  margin-top: 9px;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.hero-direct-action-copy > span:last-child {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.hero-direct-action > svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--coral);
+}
+
+[dir="rtl"] .hero-direct-action > svg {
+  transform: scaleX(-1);
+}
+
+.hero-availability-notes {
+  margin-top: 12px;
+  display: grid;
+  gap: 5px;
+}
+
+.hero-availability-notes p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .rights-note {
@@ -1168,12 +1222,14 @@ html[lang="ar"] .audio-comparison__player-label {
 
 .apps-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
 .app-card {
   min-height: 310px;
+  display: flex;
+  flex-direction: column;
   padding: 28px;
   border: 1px solid var(--border);
   border-radius: 22px;
@@ -1217,7 +1273,8 @@ html[lang="ar"] .audio-comparison__player-label {
 }
 
 .card-action {
-  margin-top: 26px;
+  margin-top: auto;
+  padding-top: 26px;
 }
 
 .release-note {
@@ -1462,8 +1519,7 @@ html[lang="ar"] .audio-comparison__player-label {
     min-height: 76px;
   }
 
-  .brand > span:last-child,
-  .button-small {
+  .brand > span:last-child {
     display: none;
   }
 
@@ -1491,9 +1547,8 @@ html[lang="ar"] .audio-comparison__player-label {
     width: 100%;
   }
 
-  .hero-actions {
-    align-items: stretch;
-    flex-direction: column;
+  .hero-direct-actions {
+    grid-template-columns: 1fr;
   }
 
   .result-window {

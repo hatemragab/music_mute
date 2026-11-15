@@ -1,5 +1,60 @@
 import SwiftUI
 
+#if DEBUG
+  private struct ArtworkFixturePhaseKey: EnvironmentKey {
+    static let defaultValue: AsyncImagePhase? = nil
+  }
+  extension EnvironmentValues {
+    var artworkFixturePhase: AsyncImagePhase? {
+      get { self[ArtworkFixturePhaseKey.self] }
+      set { self[ArtworkFixturePhaseKey.self] = newValue }
+    }
+  }
+#endif
+
+/// One clipped image surface for Library and playback, with each surface's existing fallback.
+struct JobArtwork<Placeholder: View>: View {
+  let url: URL?
+  let cornerRadius: CGFloat
+  @ViewBuilder let placeholder: () -> Placeholder
+  #if DEBUG
+    @Environment(\.artworkFixturePhase) private var fixturePhase
+  #endif
+
+  var body: some View {
+    GeometryReader { geometry in
+      if let safeURL = JobThumbnailURL.validated(url?.absoluteString) {
+        #if DEBUG
+          if let fixturePhase {
+            artwork(fixturePhase, size: geometry.size)
+          } else {
+            AsyncImage(url: safeURL) { artwork($0, size: geometry.size) }.id(safeURL)
+          }
+        #else
+          AsyncImage(url: safeURL) { artwork($0, size: geometry.size) }.id(safeURL)
+        #endif
+      } else {
+        artwork(.empty, size: geometry.size)
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .stroke(.primary.opacity(0.08), lineWidth: 0.5)
+    }
+    .accessibilityHidden(true)
+  }
+
+  private func artwork(_ phase: AsyncImagePhase, size: CGSize) -> some View {
+    ZStack {
+      placeholder().frame(width: size.width, height: size.height)
+      if let image = phase.image {
+        image.resizable().scaledToFill().frame(width: size.width, height: size.height)
+      }
+    }.clipped()
+  }
+}
+
 private struct PlayerExport: Identifiable {
   let id = UUID()
   let url: URL
@@ -13,9 +68,13 @@ struct MiniPlayerView: View {
   var body: some View {
     if let job = model.currentPlaybackJob {
       HStack(spacing: 12) {
-        Image(systemName: "waveform").foregroundStyle(VocalStyle.teal)
-          .frame(width: 44, height: 44)
-          .background(VocalStyle.teal.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+        JobArtwork(url: job.thumbnailURL, cornerRadius: 12) {
+          Image(systemName: "waveform").foregroundStyle(VocalStyle.teal)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(VocalStyle.teal.opacity(0.14))
+        }
+        .frame(width: 44, height: 44)
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
         Button(action: onOpen) {
           VStack(alignment: .leading, spacing: 2) {
             Text(job.preferredName).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -32,6 +91,7 @@ struct MiniPlayerView: View {
           Image(systemName: player.playing ? "pause.fill" : "play.fill")
             .frame(width: 44, height: 44)
         }.accessibilityLabel(Text(player.playing ? "pause" : "play"))
+          .accessibilityIdentifier("miniPlayerTogglePlayback")
         Button(action: model.playNext) {
           Image(systemName: "forward.end.fill").frame(width: 44, height: 44)
         }.accessibilityLabel(Text("player_next"))
@@ -72,17 +132,16 @@ struct PlayerView: View {
           }
         }
         if let job = model.currentPlaybackJob {
-          RoundedRectangle(cornerRadius: 30)
-            .fill(
-              RadialGradient(
-                colors: [VocalStyle.teal.opacity(0.45), VocalStyle.card(.dark)],
-                center: .topLeading, startRadius: 10, endRadius: 260)
-            )
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
+          JobArtwork(url: job.thumbnailURL, cornerRadius: 24) {
+            RadialGradient(
+              colors: [VocalStyle.teal.opacity(0.45), VocalStyle.card(.dark)],
+              center: .topLeading, startRadius: 10, endRadius: 260
+            ).overlay {
               Image(systemName: "waveform").font(.system(size: 94)).foregroundStyle(VocalStyle.teal)
             }
-            .shadow(color: .black.opacity(0.35), radius: 30, y: 18)
+          }
+          .aspectRatio(1, contentMode: .fit)
+          .shadow(color: .black.opacity(0.35), radius: 30, y: 18)
           Text(job.preferredName).font(.title2.bold()).multilineTextAlignment(.center)
           HStack(spacing: 12) {
             Button {
@@ -179,7 +238,10 @@ struct PlayerView: View {
                   model.play(queued, queue: model.playbackQueue)
                 } label: {
                   HStack {
-                    Image(systemName: queued.id == job.id ? "speaker.wave.2.fill" : "music.note")
+                    JobArtwork(url: queued.thumbnailURL, cornerRadius: 10) {
+                      Image(systemName: queued.id == job.id ? "speaker.wave.2.fill" : "music.note")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }.frame(width: 36, height: 36)
                     Text(queued.preferredName).lineLimit(1)
                     Spacer()
                   }.frame(minHeight: 44)
@@ -205,6 +267,7 @@ struct PlayerView: View {
         }
       }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
     }
+    .accessibilityIdentifier("playerScroll")
     .background(VocalStyle.background(.dark).ignoresSafeArea())
     .preferredColorScheme(.dark)
     .sheet(item: $export) { item in

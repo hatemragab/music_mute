@@ -133,9 +133,9 @@ export function WorkerRegistrationSection({
             className="mt-3 text-sm text-muted-foreground"
           >
             When this person signs in with Google in MusicMute Local, an open
-            and connected Mac app automatically registers and starts its worker.
-            Turning this off prevents new registrations. Manage machines already
-            registered from Workers.
+            and connected app can register a prepared Mac or Windows per-user
+            worker. Turning this off prevents new registrations. Manage machines
+            already registered from Workers.
           </p>
           <p
             id="worker-registration-access"
@@ -145,7 +145,7 @@ export function WorkerRegistrationSection({
               ? "Registration is unavailable while this account is not active. The saved permission is shown above; existing machines are unaffected."
               : !canManage
                 ? "Your role can view this permission but cannot change it."
-                : "Approval can be saved before Google sign-in. The Mac must use a Google session for first registration."}
+                : "Approval can be saved before Google sign-in. The Mac or Windows app must use a recent Google session for first registration."}
           </p>
           {can("workers.read") ? (
             <Button asChild variant="link" className="mt-2 px-0">
@@ -178,7 +178,7 @@ export function WorkerRegistrationSection({
         }
         description={
           change?.workerRegistrationAllowed
-            ? "An approved Google session can automatically register each new Mac while MusicMute Local is open and connected. Existing machine controls remain authoritative."
+            ? "An approved Google session can register prepared Mac and Windows per-user workers while MusicMute Local is open and connected. The Windows worker runs only while that Windows user is logged in. Existing machine controls remain authoritative."
             : "This blocks new machine registrations only. Existing machines keep running; pause, drain or revoke them from Workers."
         }
         confirmLabel="Save registration permission"

@@ -12,18 +12,56 @@ test("presents the honest primary journey and stable downloads anchor", async ({
   await expect(
     page.getByRole("heading", { name: "Remove the music. Keep the voice." }),
   ).toBeVisible();
-  const appLinks = page.getByRole("link", { name: /open web app/i });
-  await expect(appLinks.first()).toHaveAttribute(
+  const hero = page.locator(".hero");
+  const platformNavigation = hero.getByRole("navigation", {
+    name: "Available MusicMute platforms",
+  });
+  const heroActions = platformNavigation.locator(".hero-direct-action");
+  const heroWebLink = heroActions.nth(0);
+  const heroChromeLink = heroActions.nth(1);
+  await expect(
+    page.locator(".site-header").getByRole("link", { name: /open web app/i }),
+  ).toHaveCount(0);
+  await expect(heroActions).toHaveCount(2);
+  await expect(heroWebLink).toContainText("Open web app");
+  await expect(heroWebLink).toHaveAttribute(
     "href",
     "https://app.music-mute.com/",
   );
-  await expect(appLinks.first()).toHaveAttribute("target", "_blank");
-  await expect(appLinks.first()).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(heroWebLink).toHaveAttribute("target", "_blank");
+  await expect(heroWebLink).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(heroChromeLink).toContainText("Add to Chrome");
+  await expect(heroChromeLink).toHaveAttribute(
+    "href",
+    "https://chromewebstore.google.com/detail/musicmute-local/acmgefmmndomcpdlgnafkjbgobinllep",
+  );
+  await expect(heroChromeLink).toHaveAttribute("target", "_blank");
+  await expect(heroChromeLink).toHaveAttribute("rel", "noopener noreferrer");
+  const webActionBox = await heroWebLink.boundingBox();
+  const chromeActionBox = await heroChromeLink.boundingBox();
+  expect(webActionBox).not.toBeNull();
+  expect(chromeActionBox).not.toBeNull();
+  expect(Math.abs(webActionBox!.y - chromeActionBox!.y)).toBeLessThanOrEqual(1);
+  await expect(hero.locator(".hero-availability-notes p")).toHaveText([
+    "Chrome requires the separate MusicMute Local companion installed and prepared on a supported Apple silicon Mac.",
+    "Mac public download and mobile store links will appear after release verification.",
+  ]);
 
   await page.getByRole("link", { name: "Apps" }).click();
-  await expect(page.locator("#downloads")).toBeInViewport();
+  const downloads = page.locator("#downloads");
+  await expect(downloads).toBeInViewport();
+  await expect(downloads.locator(".app-card")).toHaveCount(5);
   await expect(page.getByText("Release link pending")).toBeVisible();
-  await expect(page.getByText("Release in preparation")).toBeVisible();
+  await expect(page.getByText("Public release pending").first()).toBeVisible();
+  const chromeLink = downloads.getByRole("link", { name: "Add to Chrome" });
+  const chromeCard = chromeLink.locator("xpath=ancestor::article");
+  await expect(chromeCard.getByText("Available now")).toBeVisible();
+  await expect(chromeLink).toHaveAttribute(
+    "href",
+    "https://chromewebstore.google.com/detail/musicmute-local/acmgefmmndomcpdlgnafkjbgobinllep",
+  );
+  await expect(chromeLink).toHaveAttribute("target", "_blank");
+  await expect(chromeLink).toHaveAttribute("rel", "noopener noreferrer");
 
   await expect(
     page.getByRole("img", {
@@ -182,6 +220,25 @@ test("switches to an addressable persisted Arabic RTL experience", async ({
   await expect(
     page.getByRole("heading", { name: "أزل الموسيقى. واحتفظ بالصوت." }),
   ).toBeVisible();
+  const arabicHero = page.locator(".hero");
+  const arabicActions = arabicHero
+    .getByRole("navigation", { name: "منصات ميوزك ميوت المتاحة" })
+    .locator(".hero-direct-action");
+  await expect(arabicActions).toHaveCount(2);
+  await expect(arabicActions.nth(0)).toContainText("افتح تطبيق الويب");
+  await expect(arabicActions.nth(0)).toHaveAttribute(
+    "href",
+    "https://app.music-mute.com/",
+  );
+  await expect(arabicActions.nth(1)).toContainText("إضافة إلى Chrome");
+  await expect(arabicActions.nth(1)).toHaveAttribute(
+    "href",
+    "https://chromewebstore.google.com/detail/musicmute-local/acmgefmmndomcpdlgnafkjbgobinllep",
+  );
+  for (const action of [arabicActions.nth(0), arabicActions.nth(1)]) {
+    await expect(action).toHaveAttribute("target", "_blank");
+    await expect(action).toHaveAttribute("rel", "noopener noreferrer");
+  }
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -199,6 +256,12 @@ test("switches to an addressable persisted Arabic RTL experience", async ({
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+  const overflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
 });
 
 test.describe("stable language URLs", () => {
@@ -276,6 +339,15 @@ test("fits a phone viewport and provides keyboard bypass navigation", async ({
   await page.goto("/");
 
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  const directActions = page.locator(".hero-direct-action");
+  await expect(directActions).toHaveCount(2);
+  const firstActionBox = await directActions.nth(0).boundingBox();
+  const secondActionBox = await directActions.nth(1).boundingBox();
+  expect(firstActionBox).not.toBeNull();
+  expect(secondActionBox).not.toBeNull();
+  expect(secondActionBox!.y).toBeGreaterThanOrEqual(
+    firstActionBox!.y + firstActionBox!.height,
+  );
   const overflow = await page.evaluate(
     () =>
       document.documentElement.scrollWidth -

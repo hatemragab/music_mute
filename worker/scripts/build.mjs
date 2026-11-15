@@ -1,4 +1,4 @@
-import { lstat, rm } from "node:fs/promises";
+import { lstat, rm, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -24,4 +24,17 @@ const result = spawnSync(
   },
 );
 if (result.error) throw result.error;
+if (result.status === 0 && process.argv.includes("--local-debug")) {
+  const module = resolve(output, "src/observability/local-debug.js");
+  const text = await readFile(module, "utf8");
+  if (!text.includes("const LOCAL_DEBUG_BUILD = false;"))
+    throw new Error("LOCAL_DEBUG_GATE_MISSING");
+  await writeFile(
+    module,
+    text.replace(
+      "const LOCAL_DEBUG_BUILD = false;",
+      "const LOCAL_DEBUG_BUILD = true;",
+    ),
+  );
+}
 process.exit(result.status ?? 1);

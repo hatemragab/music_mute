@@ -1,6 +1,6 @@
 {
   "name": "musicmute-local-extension",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "engines": {
@@ -36,7 +36,8 @@
     "verify": "npm run typecheck && npm run lint && npm test && npm run build && npm run format:check",
     "smoke:youtube": "node scripts/live-smoke.mjs",
     "package:chrome": "node scripts/package-chrome.mjs",
-    "test:store": "node scripts/e2e.mjs --store"
+    "test:store": "node scripts/e2e.mjs --store",
+    "build:debug": "node scripts/build.mjs --local-debug"
   },
   "devDependencies": {
     "@types/chrome": "0.3.4",

@@ -4,7 +4,6 @@ import {
   ExternalLink,
   Info,
   ListMusic,
-  Music2,
   Pause,
   Play,
   Repeat,
@@ -30,6 +29,7 @@ import {
   type RepeatMode,
 } from "./playback";
 import { usePlayer } from "./PlayerProvider";
+import { TrackArtwork } from "./TrackArtwork";
 
 function formatClock(seconds: number) {
   const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
@@ -266,9 +266,11 @@ export function MiniPlayer() {
       >
         <span style={{ width: `${progress}%` }} />
       </button>
-      <div className="mini-cover" aria-hidden="true">
-        <Music2 />
-      </div>
+      <TrackArtwork
+        url={p.current.thumbnailUrl}
+        trackId={p.current.id}
+        variant="mini"
+      />
       <div className="mini-meta">
         <Link to="/player" dir="auto">
           {title}
@@ -352,9 +354,11 @@ export function PlayerPage() {
         <div className="empty-state">{t("noTrack")}</div>
       ) : (
         <>
-          <div className="player-art">
-            <Music2 aria-hidden="true" />
-          </div>
+          <TrackArtwork
+            url={p.current.thumbnailUrl}
+            trackId={p.current.id}
+            variant="player"
+          />
           <h2 className="player-title" dir="auto">
             {title}
           </h2>
@@ -451,12 +455,18 @@ export function PlayerPage() {
                     <button
                       className="queue-track"
                       type="button"
+                      aria-label={label}
                       aria-current={current ? "true" : undefined}
                       onClick={() => void p.play(job, p.queue)}
                     >
                       <span className="queue-index">
                         {number(position + 1)}
                       </span>
+                      <TrackArtwork
+                        url={job.thumbnailUrl}
+                        trackId={job.id}
+                        variant="queue"
+                      />
                       <span className="queue-name" dir="auto">
                         {label}
                       </span>

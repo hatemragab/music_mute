@@ -69,6 +69,22 @@ const schema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
     .default('development'),
+  MUSICMUTE_LOG_ENABLED: Joi.string()
+    .valid('0', '1', 'false', 'true')
+    .default('0'),
+  MUSICMUTE_LOG_PAYLOADS: Joi.string()
+    .valid('0', '1', 'false', 'true')
+    .default('0'),
+  MUSICMUTE_LOG_CONSOLE: Joi.string()
+    .valid('0', '1', 'false', 'true')
+    .default('0'),
+  MUSICMUTE_LOG_ENDPOINT: Joi.string()
+    .uri({ scheme: ['http'] })
+    .default('http://127.0.0.1:19740/ingest/backend'),
+  MUSICMUTE_LOG_KEY: Joi.string().max(256).allow('').default(''),
+  MUSICMUTE_LOG_CAPTURE_ID: Joi.string()
+    .pattern(/^[A-Za-z0-9_.-]{1,128}$/)
+    .optional(),
   HOST: Joi.string().hostname().default('127.0.0.1'),
   PORT: Joi.number().integer().min(1).max(65535).default(3000),
   MONGODB_URI: Joi.string()

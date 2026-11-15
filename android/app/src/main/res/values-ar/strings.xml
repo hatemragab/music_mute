@@ -282,17 +282,11 @@
     <string name="update_now">التحديث الآن</string>
     <string name="update_later">لاحقًا</string>
     <string name="update_check_again">التحقق مجددًا</string>
-    <string name="update_downloading">جارٍ التنزيل… %1$d%%</string>
-    <string name="update_verifying">جارٍ التحقق من التحديث الموقّع…</string>
-    <string name="update_permission_needed">اسمح لـ MusicMute بتثبيت هذا التحديث ثم ارجع إلى التطبيق.</string>
-    <string name="update_installer_waiting">أكمل تثبيت Android للمتابعة.</string>
+    <string name="update_downloading">جارٍ التنزيل من Google Play… %1$d%%</string>
     <string name="update_store_opened">أكمل التحديث في Google Play ثم ارجع إلى MusicMute.</string>
     <string name="update_error_offline">أنت غير متصل بالإنترنت. اتصل ثم حاول مجددًا.</string>
     <string name="update_error_rate_limited">تم إجراء محاولات كثيرة للتحقق. انتظر قليلًا ثم حاول مجددًا.</string>
     <string name="update_error_release_unavailable">هذا التحديث غير متاح بعد. حاول مرة أخرى قريبًا.</string>
-    <string name="update_error_storage">وفّر مساحة تخزين على الجهاز، ثم حاول التحديث مجددًا.</string>
-    <string name="update_error_invalid_apk">تعذر التحقق من ملف التحديث المنزّل، لذلك لم يتم فتحه.</string>
-    <string name="update_error_installer_unavailable">تعذر على Android فتح مثبّت التحديث.</string>
     <string name="update_error_install_cancelled">لم يتم تثبيت التحديث. حدّث التطبيق للمتابعة.</string>
     <string name="update_error_play_unavailable">هذا التحديث غير متاح حاليًا في Google Play.</string>
     <string name="update_error_service">خدمة التحديث غير متاحة مؤقتًا. حاول مجددًا.</string>
@@ -385,4 +379,10 @@
     <string name="trim_silence">قص فترات الصمت</string>
     <string name="save_original">حفظ الصوت الأصلي</string>
     <string name="original_unavailable">المقارنة بالصوت الأصلي غير متاحة لهذا المقطع. حاول مرة أخرى.</string>
+    <string name="update_checking_play">جارٍ التحقق من Google Play…</string>
+    <string name="update_play_flow">تابع التحديث في Google Play.</string>
+    <string name="update_downloaded">نزّل Google Play التحديث. أعد التشغيل لتثبيته.</string>
+    <string name="update_installing_play">جارٍ تثبيت التحديث بواسطة Google Play…</string>
+    <string name="update_restart">إعادة التشغيل للتحديث</string>
+    <string name="update_open_play">فتح Google Play</string>
 </resources>

@@ -130,6 +130,47 @@ function policy(revision = 3) {
 }
 
 describe('worker control plane', () => {
+  it.each([undefined, 'windows-user'] as const)(
+    'preserves optional Windows profile %s in authorized projections without machine credential fields',
+    async (installationProfile) => {
+      const f = fixture();
+      const runtimeIdentity = {
+        workerVersion: '0.1.3',
+        protocolVersion: 1,
+        manifestDigest: 'a'.repeat(64),
+        modelDigest: 'b'.repeat(64),
+        providerRuntimeVersion: 'onnxruntime-directml 1.24.4',
+        ...(installationProfile ? { installationProfile } : {}),
+      };
+      f.machines.find.mockReturnValue(
+        query([
+          currentMachine({
+            approvedCapabilities: [
+              {
+                platform: 'windows-amd64',
+                provider: 'directml',
+                gpuId: 'dxgi-fixture',
+                recipeIds: ['kim-vocals-v2'],
+                maxSlots: 1,
+              },
+            ],
+            runtimeIdentity,
+            credentialSha256: 'private-credential-hash',
+            registeredByUserId: 'registered-owner',
+          }),
+        ]),
+      );
+      f.attempts.find.mockReturnValue(query([]));
+      const page = await f.service.listMachines(actor, {
+        platform: 'windows-amd64',
+        limit: 10,
+      });
+      expect(page.items[0].runtime).toEqual(runtimeIdentity);
+      expect(JSON.stringify(page)).not.toContain('private-credential-hash');
+      expect(page.items[0]).not.toHaveProperty('credentialSha256');
+      expect(page.items[0].capabilities[0].maxSlots).toBe(1);
+    },
+  );
   it('pages the filtered fleet and includes bounded work and error summaries', async () => {
     const f = fixture();
     const secondMachineId = '136601c1-acb9-4768-91e5-059b1ec89a8e';

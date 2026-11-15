@@ -9,6 +9,7 @@ export function realtimeResourcePath(
   const params = fromWireCase(wireParams) as Record<string, string>;
   const { id, releaseId, uploadId, ...query } = params;
   const paths: Record<string, string> = {
+    "admin.user_devices": `/admin/users/${encodeURIComponent(id ?? "")}/devices`,
     "admin.jobs": "/admin/jobs",
     "admin.job": `/admin/jobs/${encodeURIComponent(id ?? "")}`,
     "admin.overview": "/admin/overview",

@@ -40,7 +40,6 @@ describe('CapRover dashboard package', () => {
         'backend/config/worker-installation-catalog.json',
         'backend/package.json',
         'backend/pnpm-lock.yaml',
-        'backend/scripts/install-apk-verifier.sh',
         'backend/src/main.ts',
       ]),
     );
@@ -53,20 +52,17 @@ describe('CapRover dashboard package', () => {
     ).toEqual([]);
   });
 
-  it('keeps the APK verifier installer in the Docker allowlist', () => {
+  it('excludes retired APK tools and allows the frozen dependency lockfile', () => {
     const rules = readFileSync(join(backendRoot, '..', '.dockerignore'), 'utf8')
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'));
-    const backendExclusion = rules.indexOf('backend/*');
-    const scriptsDirectory = rules.indexOf('!backend/scripts/');
-    const scriptsContents = rules.indexOf('backend/scripts/*');
-    const installer = rules.indexOf('!backend/scripts/install-apk-verifier.sh');
-
-    expect(backendExclusion).toBeGreaterThanOrEqual(0);
-    expect(scriptsDirectory).toBeGreaterThan(backendExclusion);
-    expect(scriptsContents).toBeGreaterThan(scriptsDirectory);
-    expect(installer).toBeGreaterThan(scriptsContents);
+    expect(rules).toContain('!backend/pnpm-lock.yaml');
+    expect(rules.some((line) => line.includes('apk-verifier'))).toBe(false);
+    archivePath = createArchive();
+    expect(
+      execFileSync('tar', ['-tf', archivePath], { encoding: 'utf8' }),
+    ).not.toContain('install-apk-verifier');
   });
 
   it('keeps the worker installation catalog in the Docker allowlist', () => {

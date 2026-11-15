@@ -7,6 +7,7 @@ export const REALTIME_RESOURCES = [
   'usage',
   'policy',
   'admin.jobs',
+  'admin.user_devices',
   'admin.job',
   'admin.overview',
   'admin.health',

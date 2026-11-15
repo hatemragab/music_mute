@@ -6,6 +6,10 @@ import { ConfigService } from '@nestjs/config';
 import type { ObjectIdentity } from '../../jobs/job.types.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import { WorkerInstallationArtifactsService } from './worker-installation-artifacts.service.js';
+import {
+  QUALIFIED_MODEL_BYTES,
+  QUALIFIED_MODEL_DIGEST,
+} from '../../jobs/worker-recipes.js';
 
 const installationId = '32410a14-e85a-4a1d-bb99-61fa54b07eaa';
 const principal: WorkerPrincipal = {
@@ -30,6 +34,264 @@ afterEach(async () => {
 });
 
 describe('worker installation artifact grants', () => {
+  it('grants only approved Store qualification data when no runtime archive exists', async () => {
+    const base = catalog(),
+      model = {
+        ...base.model,
+        filename: 'Kim_Vocal_2.onnx',
+        bytes: QUALIFIED_MODEL_BYTES,
+        sha256: QUALIFIED_MODEL_DIGEST,
+      },
+      f = await fixture({ ...base, releases: {}, model });
+    const data = await f.service.createStoreQualificationDataGrants(
+      principal,
+      installationId,
+    );
+    expect(Object.keys(data).sort()).toEqual([
+      'fixture',
+      'installationProfile',
+      'model',
+      'platform',
+      'purpose',
+      'schemaVersion',
+    ]);
+    expect(data).toMatchObject({
+      schemaVersion: 1,
+      purpose: 'store-qualification-data',
+      platform: 'windows-amd64',
+      installationProfile: 'windows-user',
+      model,
+      fixture: { filename: base.fixture.filename, contentType: 'audio/wav' },
+    });
+    expect(f.transfers.createDownloadGrant).toHaveBeenCalledExactlyOnceWith(
+      expectedObjects('windows-amd64')[1],
+    );
+    await expect(
+      f.service.createDownloadGrants(
+        principal,
+        installationId,
+        'windows-amd64',
+        'windows-user',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.transfers.createDownloadGrant).toHaveBeenCalledTimes(1);
+  });
+  it('rejects foreign credentials, missing fixtures and changed Store model/fixture identity before any grant', async () => {
+    const base = catalog(),
+      model = {
+        ...base.model,
+        filename: 'Kim_Vocal_2.onnx',
+        bytes: QUALIFIED_MODEL_BYTES,
+        sha256: QUALIFIED_MODEL_DIGEST,
+      };
+    const valid = await fixture({ ...base, releases: {}, model });
+    for (const actor of [
+      machinePrincipal,
+      { ...principal, subjectId: 'foreign-installation' },
+    ])
+      await expect(
+        valid.service.createStoreQualificationDataGrants(actor, installationId),
+      ).rejects.toMatchObject({ response: { code: 'WORKER_NOT_FOUND' } });
+    expect(valid.transfers.createDownloadGrant).not.toHaveBeenCalled();
+    for (const changed of [
+      { model: { ...model, sha256: digest } },
+      { model: { ...model, bytes: 202 } },
+      { model: { ...model, filename: 'foreign.onnx' } },
+      { fixture: null },
+      { fixture: { ...base.fixture, bytes: 43 } },
+      { fixture: { ...base.fixture, bytes: 64 * 1024 ** 2 + 1 } },
+      { fixture: { ...base.fixture, filename: 'runtime.exe' } },
+    ]) {
+      const f = await fixture({ ...base, releases: {}, model, ...changed });
+      await expect(
+        f.service.createStoreQualificationDataGrants(principal, installationId),
+      ).rejects.toMatchObject({
+        response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+      });
+      expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+    }
+  });
+  it('preserves dependency failures for Store data without constructing an executable or fallback grant', async () => {
+    const base = catalog(),
+      f = await fixture({
+        ...base,
+        releases: {},
+        model: {
+          ...base.model,
+          filename: 'Kim_Vocal_2.onnx',
+          bytes: QUALIFIED_MODEL_BYTES,
+          sha256: QUALIFIED_MODEL_DIGEST,
+        },
+      });
+    f.transfers.createDownloadGrant.mockRejectedValueOnce(
+      new Error('unavailable fixture'),
+    );
+    await expect(
+      f.service.createStoreQualificationDataGrants(principal, installationId),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.transfers.createDownloadGrant).toHaveBeenCalledTimes(1);
+    const missing = await fixture(undefined);
+    await expect(
+      missing.service.createStoreQualificationDataGrants(
+        principal,
+        installationId,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(missing.transfers.createDownloadGrant).not.toHaveBeenCalled();
+  });
+  it('refuses revoked, deleted, mismatched-platform and unsigned consumer selections before granting artifacts', async () => {
+    const base = catalog();
+    const unsigned = {
+      ...base,
+      releases: {
+        ...base.releases,
+        'windows-amd64-user': base.releases['windows-amd64'],
+      },
+    };
+    const f = await fixture(unsigned);
+    await expect(
+      f.service.createDownloadGrants(
+        principal,
+        installationId,
+        'windows-amd64',
+        'windows-user',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+    for (const machine of [
+      null,
+      { status: 'revoked' },
+      { deletedAt: new Date() },
+    ]) {
+      const f = await fixture(base, machine);
+      await expect(
+        f.service.createUpdateGrant(
+          machinePrincipal,
+          'windows-amd64',
+          false,
+          'windows-user',
+        ),
+      ).rejects.toMatchObject({ response: { code: 'WORKER_NOT_FOUND' } });
+      expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+    }
+    const wrongPlatform = await fixture(base, {
+      runtimeIdentity: { installationProfile: 'windows-user' },
+      approvedCapabilities: [{ platform: 'darwin-arm64' }],
+    });
+    await expect(
+      wrongPlatform.service.createUpdateGrant(
+        machinePrincipal,
+        'windows-amd64',
+        true,
+        'windows-user',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_INVALID_REQUEST' } });
+    expect(wrongPlatform.transfers.createDownloadGrant).not.toHaveBeenCalled();
+  });
+
+  it('selects and signs the consumer target without altering legacy service artifacts', async () => {
+    const base = catalog();
+    const consumer = {
+      ...base.releases['windows-amd64'],
+      filename: 'musicmute-worker-windows-amd64-user.zip',
+      key: 'worker-installation-artifacts/releases/windows-amd64-user/0.1.1.zip',
+      sequence: 7,
+      publishedAt: '2026-09-21T00:00:00.000Z',
+      expiresAt: '2026-09-23T00:00:00.000Z',
+      keyId: 'release-2026',
+      signature: 's'.repeat(86),
+    };
+    const f = await fixture(
+      {
+        ...base,
+        releases: { ...base.releases, 'windows-amd64-user': consumer },
+      },
+      {
+        runtimeIdentity: { installationProfile: 'windows-user' },
+        approvedCapabilities: [{ platform: 'windows-amd64' }],
+      },
+    );
+    const installation = await f.service.createDownloadGrants(
+      principal,
+      installationId,
+      'windows-amd64',
+      'windows-user',
+    );
+    expect(installation).toMatchObject({
+      installationProfile: 'windows-user',
+      release: {
+        filename: consumer.filename,
+        signed: {
+          metadata: {
+            platform: 'windows-amd64',
+            installationProfile: 'windows-user',
+          },
+        },
+      },
+    });
+    const legacy = await f.service.createDownloadGrants(
+      principal,
+      installationId,
+      'windows-amd64',
+    );
+    expect(legacy.release.filename).toBe(
+      base.releases['windows-amd64'].filename,
+    );
+    expect(legacy).not.toHaveProperty('installationProfile');
+    const update = await f.service.createUpdateGrant(
+      machinePrincipal,
+      'windows-amd64',
+      false,
+      'windows-user',
+    );
+    expect(update.signed).toEqual(installation.release.signed);
+    await expect(
+      f.service.createUpdateGrant(machinePrincipal, 'windows-amd64', false),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_INVALID_REQUEST' } });
+  });
+
+  it('refuses a legacy machine opt-in, non-Windows consumer platform, or missing consumer catalog target', async () => {
+    const f = await fixture(catalog(), {
+      runtimeIdentity: {},
+      approvedCapabilities: [{ platform: 'windows-amd64' }],
+    });
+    await expect(
+      f.service.createUpdateGrant(
+        machinePrincipal,
+        'windows-amd64',
+        false,
+        'windows-user',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_INVALID_REQUEST' } });
+    await expect(
+      f.service.createDownloadGrants(
+        principal,
+        installationId,
+        'darwin-arm64',
+        'windows-user',
+      ),
+    ).rejects.toMatchObject({ response: { code: 'WORKER_INVALID_REQUEST' } });
+    await expect(
+      f.service.createDownloadGrants(
+        principal,
+        installationId,
+        'windows-amd64',
+        'windows-user',
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
+    });
+    expect(f.transfers.createDownloadGrant).not.toHaveBeenCalled();
+  });
+
   it('returns machine-authenticated signed update metadata and one release grant', async () => {
     const base = catalog();
     const value = {
@@ -301,7 +563,10 @@ describe('worker installation artifact grants', () => {
   });
 });
 
-async function fixture(value: object | string | undefined) {
+async function fixture(
+  value: object | string | undefined,
+  machine?: object | null,
+) {
   const root = await mkdtemp(join(tmpdir(), 'musicmute-artifact-catalog-'));
   roots.push(root);
   const path = join(root, 'catalog.json');
@@ -322,6 +587,13 @@ async function fixture(value: object | string | undefined) {
       value === undefined ? {} : { WORKER_INSTALLATION_CATALOG_PATH: path },
     ),
     transfers as never,
+    machine === undefined
+      ? undefined
+      : ({
+          findById: () => ({
+            maxTimeMS: () => ({ lean: async () => machine }),
+          }),
+        } as never),
   );
   return { service, transfers };
 }

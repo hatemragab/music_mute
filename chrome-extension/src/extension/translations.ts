@@ -1,5 +1,76 @@
 // English source keys keep both catalogs and interpolation in one typed contract.
 export const arabic = {
+  "MusicMute · On this computer": "MusicMute · على هذا الكمبيوتر",
+  "processing on this computer": "تتم المعالجة على هذا الكمبيوتر",
+  "The video is paused while MusicMute starts on this computer. You can cancel anytime.":
+    "تم إيقاف الفيديو مؤقتًا أثناء بدء MusicMute على هذا الكمبيوتر. يمكنك الإلغاء في أي وقت.",
+  "Preparing vocals on this computer. You can cancel from the video controls.":
+    "جارٍ تجهيز الصوت على هذا الكمبيوتر. يمكنك الإلغاء من عناصر التحكم في الفيديو.",
+  "Processing stays on this computer using your installed tools. The app window can be closed.":
+    "تتم المعالجة على هذا الكمبيوتر باستخدام الأدوات المثبّتة. يمكن إغلاق نافذة التطبيق.",
+  "MusicMute Local · Updated October 10, 2026":
+    "MusicMute Local · تم التحديث في 10 أكتوبر 2026",
+  "Signing into the MusicMute app": "تسجيل الدخول إلى تطبيق MusicMute",
+  "The extension stores playback preferences and a bounded local diagnostic history in Chrome. The required MusicMute desktop app acquires audio online and stores reusable results in a local cache. The extension follows the processing choice saved in the app: local separation or MusicMute cloud. Playback uses a temporary, protected connection to the app on this computer.":
+    "تحفظ الإضافة تفضيلات التشغيل وسجل تشخيصات محليًا محدودًا في Chrome. يجلب تطبيق MusicMute المطلوب للكمبيوتر الصوت عبر الإنترنت ويحفظ النتائج القابلة لإعادة الاستخدام في ذاكرة محلية مؤقتة. تتبع الإضافة خيار المعالجة المحفوظ في التطبيق: الفصل المحلي أو سحابة MusicMute. يستخدم التشغيل اتصالًا مؤقتًا محميًا بالتطبيق على هذا الكمبيوتر.",
+  "When MusicMute cloud is selected in the app, manually starting a video sends its canonical YouTube watch URL to MusicMute using the saved choice, without a per-video Chrome confirmation. MusicMute services acquire the audio or reuse a shared result; this computer does not acquire and upload original audio for this cloud request. Cloud processing requires the app's signed-in account and uses its processing allowance. Vocals are downloaded to this computer for synchronized playback. Automatic preparation never submits new cloud processing. Account credentials remain in the desktop app and are not sent to Chrome.":
+    "عند اختيار سحابة MusicMute في التطبيق، يرسل بدء الفيديو يدويًا رابط المشاهدة الأساسي على YouTube إلى MusicMute وفق الخيار المحفوظ، دون تأكيد لكل فيديو في Chrome. تجلب خدمات MusicMute الصوت أو تستخدم نتيجة مشتركة؛ ولا يجلب هذا الكمبيوتر الصوت الأصلي ويرفعه لهذا الطلب السحابي. تتطلب المعالجة السحابية الحساب المسجّل في التطبيق وتستخدم حصته. يُنزّل الصوت دون موسيقى إلى هذا الكمبيوتر للتشغيل المتزامن. لا يرسل التجهيز التلقائي معالجة سحابية جديدة. تبقى بيانات الحساب في تطبيق الكمبيوتر ولا تُرسل إلى Chrome.",
+  "Local YouTube requests may send the canonical video URL to MusicMute to look up reusable originals and vocals, even while signed out. The desktop app uses a guest capability stored in macOS Keychain or current-user DPAPI-protected storage on Windows for this service; no MusicMute account is required. A shared hit can download existing vocals instead of acquiring YouTube audio or running separation.":
+    "قد ترسل طلبات YouTube المحلية رابط الفيديو الأساسي إلى MusicMute للبحث عن الصوت الأصلي والصوت دون موسيقى القابلين لإعادة الاستخدام، حتى دون تسجيل الدخول. يستخدم تطبيق الكمبيوتر صلاحية ضيف محفوظة في سلسلة مفاتيح macOS أو تخزين محمي بتقنية DPAPI للمستخدم الحالي على Windows لهذه الخدمة؛ ولا يلزم حساب MusicMute. عند وجود نتيجة مشتركة، يمكن تنزيل الصوت دون موسيقى الموجود بدلًا من جلب صوت YouTube أو إجراء الفصل.",
+  "When local preparation creates a new YouTube result, video metadata may be sent before playback to reserve shared saving. After vocals start playing, the desktop app may upload the original audio, vocals and associated video metadata in the background, even while signed out. Pending uploads can resume when the app or helper starts again. Accepted results can be reused by other MusicMute users. Transfers use temporary access grants to private R2 storage; the bucket is not public.":
+    "عندما يُنشئ التجهيز المحلي نتيجة YouTube جديدة، قد تُرسل بيانات الفيديو قبل التشغيل لحجز الحفظ المشترك. بعد بدء تشغيل الصوت دون موسيقى، قد يرفع تطبيق الكمبيوتر الصوت الأصلي والصوت دون موسيقى وبيانات الفيديو المرتبطة في الخلفية، حتى دون تسجيل الدخول. يمكن استئناف عمليات الرفع المعلّقة عند تشغيل التطبيق أو المساعد مجددًا. يستطيع مستخدمو MusicMute الآخرون إعادة استخدام النتائج المقبولة. تستخدم عمليات النقل صلاحيات وصول مؤقتة إلى تخزين R2 خاص؛ وحاوية التخزين ليست عامة.",
+  "A MusicMute account is optional for local playback and shared YouTube reuse. Signing into the MusicMute app can add YouTube shared references to your Library. Personal audio/video files processed in the desktop app use the account-private saving path; they are not contributed to the shared YouTube catalog. Account saving uses MusicMute services and private cloud storage, subject to your account's access and storage limits.":
+    "حساب MusicMute اختياري للتشغيل المحلي وإعادة استخدام نتائج YouTube المشتركة. يمكن لتسجيل الدخول إلى تطبيق الكمبيوتر إضافة مراجع نتائج YouTube المشتركة إلى مكتبتك. تستخدم ملفات الصوت والفيديو الشخصية المعالَجة في تطبيق الكمبيوتر مسار حفظ خاصًا بالحساب؛ ولا تُضاف إلى كتالوج YouTube المشترك. يستخدم حفظ الحساب خدمات MusicMute وتخزينًا سحابيًا خاصًا ضمن صلاحيات حسابك وحدود التخزين.",
+  "Use “Stop playback and clear local cache” in the extension's local tools to clear its managed reusable results. Pending background saves and account Library items are managed separately by the desktop app. Removing the extension removes its Chrome settings, but does not uninstall the desktop app or delete its files, cloud Library or accepted shared YouTube results.":
+    "استخدم «إيقاف التشغيل ومسح الذاكرة المحلية المؤقتة» في أدوات الإضافة المحلية لمسح النتائج القابلة لإعادة الاستخدام التي تديرها. يدير تطبيق الكمبيوتر عمليات الحفظ المعلّقة في الخلفية وعناصر مكتبة الحساب بشكل منفصل. تؤدي إزالة الإضافة إلى إزالة إعداداتها في Chrome، دون إزالة تطبيق الكمبيوتر أو حذف ملفاته أو مكتبته السحابية أو نتائج YouTube المشتركة المقبولة.",
+  "View MusicMute Downloads": "عرض تنزيلات MusicMute",
+  "On this computer": "على هذا الكمبيوتر",
+  "Private on this computer": "خاص على هذا الكمبيوتر",
+  "Local processing uses installed tools and requires a supported GPU.":
+    "تستخدم المعالجة المحلية الأدوات المثبّتة وتتطلب معالج رسومات مدعومًا.",
+  "MusicMute runs locally on native x64 Windows using a qualified GPU.":
+    "يعمل MusicMute محليًا على Windows بمعمارية x64 الأصلية باستخدام معالج رسومات اجتاز التأهيل.",
+  "If the app doesn't open, install MusicMute for your supported computer first, then open it to complete setup. Return here and use Check again.":
+    "إذا لم يفتح التطبيق، ثبّت MusicMute لجهازك المدعوم أولًا ثم افتحه لإكمال الإعداد. عد إلى هنا واختر التحقق مجددًا.",
+  "Companion not connected": "المساعد غير متصل",
+  "Finish local setup": "إكمال الإعداد المحلي",
+  "Open MusicMute and select Worker to update or move the paired worker into the app. Local separation can share this computer's GPU once the worker supports coordination. Saved vocals remain available.":
+    "افتح MusicMute واختر العامل لتحديث العامل المقترن أو نقله إلى التطبيق. يمكن للفصل المحلي مشاركة معالج الرسومات في هذا الكمبيوتر عندما يدعم العامل التنسيق. تظل الأصوات المحفوظة متاحة.",
+  "MusicMute could not confirm that the GPU is available for local separation. Open Worker diagnostics in the MusicMute app and check the failed operation before trying again. Saved vocals remain available.":
+    "تعذّر على MusicMute تأكيد توفر معالج الرسومات للفصل المحلي. افتح تشخيصات العامل في تطبيق MusicMute وراجع العملية التي فشلت قبل المحاولة مجددًا. تظل الأصوات المحفوظة متاحة.",
+  "MusicMute could not find a required local file. Open the MusicMute extension and select Check again. The results will help you check or repair setup in the MusicMute app.":
+    "تعذّر على MusicMute العثور على ملف محلي مطلوب. افتح إضافة MusicMute واختر التحقق مجددًا. تساعدك النتائج على فحص الإعداد أو إصلاحه في تطبيق MusicMute.",
+  "MusicMute could not save the downloaded audio on this computer. Check free disk space and the MusicMute app diagnostics before trying again.":
+    "تعذّر على MusicMute حفظ الصوت الذي تم تنزيله على هذا الكمبيوتر. تحقق من المساحة الحرة وتشخيصات تطبيق MusicMute قبل المحاولة مجددًا.",
+  "MusicMute could not start local processing. Open the MusicMute extension and select Check again. If a check fails, open the MusicMute app to repair setup.":
+    "تعذّر على MusicMute بدء المعالجة المحلية. افتح إضافة MusicMute واختر التحقق مجددًا. إذا فشل أحد الفحوص، افتح تطبيق MusicMute لإصلاح الإعداد.",
+  "Open the MusicMute app and sign in to the account you want to use for cloud processing, then click the waveform again. You can select local processing in the app.":
+    "افتح تطبيق MusicMute وسجّل الدخول إلى الحساب الذي تريد استخدامه للمعالجة السحابية، ثم انقر على الموجة مجددًا. يمكنك اختيار المعالجة المحلية في التطبيق.",
+  "Open the MusicMute extension and select Check again. If the YouTube tools check fails, open the MusicMute app and use Setup to repair the tools or install an app update.":
+    "افتح إضافة MusicMute واختر التحقق مجددًا. إذا فشل فحص أدوات YouTube، افتح تطبيق MusicMute واستخدم الإعداد لإصلاح الأدوات أو تثبيت تحديث للتطبيق.",
+  "Open the MusicMute extension and select Check again. If a check fails or setup is missing, open the MusicMute app and use Prepare this PC. Local processing requires supported native x64 Windows and a qualified GPU.":
+    "افتح إضافة MusicMute واختر التحقق مجددًا. إذا فشل فحص أو لم يكتمل الإعداد، افتح تطبيق MusicMute واختر تجهيز هذا الكمبيوتر. تتطلب المعالجة المحلية نظام Windows مدعومًا بمعمارية x64 الأصلية ومعالج رسومات اجتاز التأهيل.",
+  "Open the MusicMute extension and select Check again. Open MusicMute and use Setup to check or repair local processing. A supported installation and qualified GPU are required.":
+    "افتح إضافة MusicMute واختر التحقق مجددًا. افتح MusicMute واستخدم الإعداد لفحص المعالجة المحلية أو إصلاحها. يلزم تثبيت مدعوم ومعالج رسومات اجتاز التأهيل.",
+  "Open the MusicMute extension and select Check again. If the helper cannot connect, open the MusicMute app to complete setup or repair the Chrome connection. Install MusicMute first if it is missing.":
+    "افتح إضافة MusicMute واختر التحقق مجددًا. إذا تعذّر اتصال المساعد، افتح تطبيق MusicMute لإكمال الإعداد أو إصلاح اتصال Chrome. ثبّت MusicMute أولًا إذا لم يكن موجودًا.",
+  "Use MusicMute cloud to review and confirm cloud processing in the MusicMute app. ":
+    "استخدم سحابة MusicMute لمراجعة المعالجة السحابية وتأكيدها في تطبيق MusicMute. ",
+  "On this PC": "على هذا الكمبيوتر",
+  "MusicMute · On this PC": "MusicMute · على هذا الكمبيوتر",
+  "Open Windows app": "افتح تطبيق Windows",
+  "Preparing vocals on this PC. You can cancel from the video controls.":
+    "جارٍ تجهيز الصوت على هذا الكمبيوتر. يمكنك الإلغاء من عناصر التحكم في الفيديو.",
+  "Processing stays on this PC using your installed tools. The app window can be closed.":
+    "تتم المعالجة على هذا الكمبيوتر باستخدام الأدوات المثبّتة. يمكن إغلاق نافذة التطبيق.",
+  "Private on your PC": "خاص على هذا الكمبيوتر",
+  "processing on this PC": "تتم المعالجة على هذا الكمبيوتر",
+  "The video is paused while MusicMute starts on this PC. You can cancel anytime.":
+    "تم إيقاف الفيديو مؤقتًا أثناء بدء MusicMute على هذا الكمبيوتر. يمكنك الإلغاء في أي وقت.",
+  "Local processing requires a supported Mac or Windows x64 PC.":
+    "تتطلب المعالجة المحلية جهاز Mac مدعومًا أو كمبيوتر Windows بمعمارية x64.",
+  "Install MusicMute if it is missing, then open it once and prepare local processing. After setup, Chrome starts the helper even when the app window is closed.":
+    "ثبّت MusicMute إذا لم يكن موجودًا، ثم افتحه مرة واحدة لتجهيز المعالجة المحلية. بعد الإعداد يبدأ Chrome البرنامج المساعد حتى عند إغلاق نافذة التطبيق.",
   "Original sound": "الصوت الأصلي",
   "MusicMute: show controls": "MusicMute: إظهار عناصر التحكم",
   "MusicMute: hide controls": "MusicMute: إخفاء عناصر التحكم",
@@ -125,6 +196,8 @@ export const arabic = {
   "Private on your Mac": "خاص على جهاز Mac",
   "Companion unavailable": "المساعد غير متاح",
   "Job: {0}": "المهمة: {0}",
+  "GPU busy": "معالج الرسومات مشغول",
+  "Recovering local processing": "جارٍ استعادة المعالجة المحلية",
   "No active job": "لا توجد مهمة نشطة",
   "Last error: {0}": "آخر خطأ: {0}",
   "No saved errors": "لا توجد أخطاء محفوظة",

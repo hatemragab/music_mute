@@ -137,7 +137,6 @@ describe('Public account, privacy, and support resources', () => {
       'MongoDB',
       'Cloudflare R2',
       'Sentry',
-      'IP address',
       'audio-only stream',
       'voice-only results',
       'permanent shared storage',
@@ -231,31 +230,15 @@ describe('Public account, privacy, and support resources', () => {
     }
   });
 
-  it('discloses retained IP-derived device location without claiming GPS access or accuracy', async () => {
+  it('omits country, IP address, and IP-derived location disclosures', async () => {
     const response = await request(app.getHttpServer())
       .get('/privacy')
       .expect(200);
-    for (const disclosure of [
-      'Cloudflare estimates location from the IP address used for a network request',
-      'country, continent, region and region code, city, postal code, metro code, timezone, and estimated latitude and longitude',
-      'When an authenticated request identifies an account installation',
-      "retains the latest available observation in that account's device record",
-      'IP-derived estimates, not GPS measurements',
-      'may be inaccurate and do not guarantee your exact location',
-      'does not request GPS access or device/browser location permission',
-      'new link-import controls are shown in the Android, iOS, and Mac apps',
-      'does not stop accepted imports or processing work',
-      "associated with the account's device list for account and device management",
-      'supplies the IP-derived location described above',
-      'retained with its account-linked device record and removed during permanent account cleanup',
-      'Hiding a device from account history does not by itself erase',
-    ]) {
-      expect(response.text).toContain(disclosure);
-    }
-    expect(response.text).not.toContain(
-      'These network requests do not give MusicMute GPS or precise-geolocation access',
+    expect(response.text).not.toMatch(
+      /\b(?:country|countries|IP|IP-derived)\b/i,
     );
-    expect(response.text).not.toContain('or precise geolocation');
+    expect(response.text).not.toContain('Saved device location');
+    expect(response.text).not.toContain('saved location');
     expect(response.headers['cache-control']).toBe('no-store, no-transform');
     expect(response.text).not.toContain('<script');
     expect(response.text).not.toContain('<form');

@@ -12,6 +12,19 @@ recovery records are preserved when upgrading.
 See [the shared site policy](../docs/url-imports/supported-sites.md).
 Source metadata on existing server jobs remains readable.
 
+The dashboard's link-import visibility policy controls only the new link form.
+File and Photos imports, existing link progress/retries, downloads, and queued or
+running work remain available. Missing `link_import_visible` defaults to hidden.
+Every open/foreground checks `/processing-policy?schema_version=2`, using the
+account token while signed in and a public guest read before sign-in. Global,
+country and selected-user hiding resolve through the same visible boolean;
+the shared owner WebSocket applies later `policy` snapshots without a refresh control.
+Guest and per-owner payloads are stored separately under
+Application Support/Vocal/ProcessingPolicy, excluded from backups, and used
+only for the matching identity during offline reopen. A fresh offline installation
+or uncached owner has file controls only. Session, request, and revision fences
+prevent stale checkout responses from replacing a newer snapshot.
+
 URL audio is acquired by a private SaaS adapter, returned to NestJS for validation
 and R2 upload, then processed by the existing worker. iOS never receives SaaS
 credentials or provider delivery URLs. The shared catalog enables multiple sites;
@@ -22,7 +35,7 @@ installations require a rebuild to receive new catalog entries. See
 Open `MusicMute.xcodeproj` in Xcode 26.0.1 or newer. Regenerate with XcodeGen after
 changing `project.yml`. Only Firebase and Sentry remain as Swift package roots.
 
-The current R2 release candidate is **0.1.2 (3)**. Local simulator tests and an
+The current R2 release candidate is **0.1.3 (4)**. Local simulator tests and an
 unsigned Release archive are separate from distribution. A MusicMute Apple team,
 matching provisioning profile with the app's capabilities, and an explicit
 distribution channel are required before exporting or publishing an IPA. See
@@ -241,3 +254,73 @@ requests `status=ready`, retains loaded pages, and bounds live subscriptions to
 the newest page plus nine tail pages. See
 [release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
 and distribution status.
+
+Library uses the job's nullable `thumbnail_url` when it contains an original public
+YouTube HTTPS thumbnail. The same optional field survives HTTP, realtime snapshots
+and saved Library history. Older jobs, local files, missing or rejected URLs and
+image download failures keep the existing waveform placeholder. The client never
+constructs a thumbnail URL or requests additional video metadata.
+
+Library's **Show starred** checkbox combines with search and every Library tab.
+The **Most played** tab shows played tracks ranked by local play count; the sort
+menu also offers Most played for the other tabs. Stars, removed-track preferences,
+and play counts stay in account-scoped device preferences and never reach the API
+or database. A successful playback start counts once, and each actual repeat counts
+again. Pause/resume, seeking, source comparison and failed starts do not add plays.
+Playback queues use the displayed track order when a track is selected. Historical
+plays before this update are unknown and start at zero.
+
+## Private local diagnostics
+
+The shared API transport, raw WebSocket, file transfers, installation/processing
+stores and app lifecycle emit structured diagnostics to the repository's
+[Vector/Logdy collector](../tools/local-logging/README.md). They require a Debug
+build plus explicit opt-in. Release builds compile out the collector, its key
+loading, payload snapshots and exception observer.
+
+Build a simulator Debug app using the existing exact simulator target, start the
+root collector, then from the repository root run:
+
+```sh
+xcodebuild -quiet -project ios/MusicMute.xcodeproj -scheme MusicMute -configuration Debug \
+  -destination 'platform=iOS Simulator,id=3CC14436-EC3C-4419-A079-C84951E5FA07' \
+  -derivedDataPath .runtime/local-logging/ios-build build CODE_SIGNING_ALLOWED=NO
+python3 ios/scripts/run-local-logging.py \
+  --app .runtime/local-logging/ios-build/Build/Products/Debug-iphonesimulator/MusicMute.app \
+  --fixture
+```
+
+The helper reads the private `keys.ios` value from
+`.runtime/local-logging/keys.json` without printing it, boots/installs/launches only
+`3CC14436-EC3C-4419-A079-C84951E5FA07` (iPhone 17 Pro, iOS 26.0), and never closes
+an existing process. Close an already running app manually before relaunch so it
+inherits settings. `--fixture` uses the isolated processing UI and a safe
+credential-redaction canary, success/error/abort requests through a dedicated in-memory URLProtocol session (no external API), and a fresh event after three seconds of native inactivity; omit it for ordinary local development.
+
+For Xcode launches configure `MUSICMUTE_LOG_ENABLED=1`,
+`MUSICMUTE_LOG_KEY=<private keys.ios>`, and optionally
+`MUSICMUTE_LOG_PAYLOADS=1`, `MUSICMUTE_LOG_CONSOLE=1`. The only accepted destination
+is `http://127.0.0.1:19740/ingest/ios` (optional
+`MUSICMUTE_LOG_ENDPOINT`). Disable collection by removing `MUSICMUTE_LOG_ENABLED`;
+payload and console controls are independent opt-ins. Helper launches default to
+payloads on, console off and respect explicit payload/console environment values.
+
+One random process identity scopes local task/subscription identifiers. HTTP
+requests carry debug-only UUID request IDs; returned valid server IDs are retained.
+UIDs are captured before awaits and job retries retain their operation trace ID.
+Realtime records distinguish client reception, application processing and client
+transport send completion; these are separate observations, never delivery claims.
+Binary transfers record metadata without reading/buffering their contents or signed
+URLs. Storage events report existing accesses only; no diagnostic reads are added.
+
+The bounded sender keeps at most 128 pending events plus one active request,
+limits records to 32 KiB and JSON snapshots to 16 KiB, and prefers warnings/errors
+under pressure. Failed sends are counted and discarded; there is no unbounded
+retry/offline spool. `LocalDiagnostics.status()` and each event's `collector`
+field expose pending/sent/failed/dropped counters. Redaction precedes network,
+queue and console output. Unsupported data, non-JSON/binary snapshots, large
+strings/arrays/depth, arbitrary error messages and stacks have explicit omissions.
+Objective-C exceptions are observed best-effort and forwarded to the prior handler;
+Swift fatal errors/OS termination cannot guarantee collector delivery. Use native
+crash diagnostics for those cases. Root Logdy/MCP retention and privacy apply;
+MCP responses are supplied to the selected AI host/model.

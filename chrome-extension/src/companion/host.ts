@@ -1,3 +1,4 @@
+import { setLocalLogContextProvider } from "./local-debug.js";
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -109,7 +110,11 @@ let jobAccountScope: ReturnType<NativeAccountState["current"]>;
 let residentLookup: AbortController | undefined;
 let manualCheck: AbortController | undefined;
 let closing = false;
-const commandContext = new AsyncLocalStorage<{ command?: string }>();
+const commandContext = new AsyncLocalStorage<{
+  command?: string;
+  requestId?: string;
+}>();
+setLocalLogContextProvider(() => ({ ...commandContext.getStore() }));
 let errorContextEnabled = false;
 let backgroundPublicationEnabled = false;
 let playbackIdentity: CommunityPlaybackIdentity | undefined;
@@ -550,7 +555,10 @@ async function handle(value: unknown): Promise<void> {
   try {
     const command = validateCommand(value);
     const context = commandContext.getStore();
-    if (context) context.command = command.type;
+    if (context) {
+      context.command = command.type;
+      context.requestId = command.request_id;
+    }
     currentId = command.request_id;
     if (command.type === "EVENT") {
       diagnostics.record(command.payload);

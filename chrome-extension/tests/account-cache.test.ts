@@ -455,6 +455,47 @@ describe("resident full-timeline owner YouTube reuse", () => {
   });
 });
 describe("private owner account audio cache", () => {
+  it("retains the original nullable thumbnail through download, cache reuse and offline catalog reopen", async () => {
+    const env = await fixture();
+    const thumbnail =
+      "https://i.ytimg.com/vi/bZxrIoCPsOc/hqdefault.jpg?sqp=fixture_123&rs=signature-123";
+    env.job.thumbnail_url = thumbnail;
+    const catalogRoot = join(env.root, "catalog");
+    const catalog = new DesktopCatalog(catalogRoot, env.config.cache_root);
+    const first = await cacheAccountResult(
+      env.config,
+      env.scope,
+      env.job,
+      env.grant,
+      { ...env.options, catalog },
+    );
+    expect(first.thumbnail_url).toBe(thumbnail);
+    const saved = JSON.parse(
+      await readFile(
+        join(env.config.cache_root, "vocals", first.cache_key, "result.json"),
+        "utf8",
+      ),
+    );
+    expect(saved.thumbnail_url).toBe(thumbnail);
+    const reopened = new DesktopCatalog(catalogRoot, env.config.cache_root);
+    const owner = {
+      uid: env.scope.firebase_uid,
+      session_generation: env.scope.session_generation,
+    };
+    expect((await reopened.list(owner)).entries[0]?.thumbnail_url).toBe(
+      thumbnail,
+    );
+    const second = await cacheAccountResult(
+      env.config,
+      env.scope,
+      env.job,
+      env.grant,
+      { ...env.options, catalog: reopened },
+    );
+    expect(second.cache_hit).toBe(true);
+    expect(second.thumbnail_url).toBe(thumbnail);
+    expect(env.fetcher).toHaveBeenCalledOnce();
+  });
   it("streams a capability with no bearer, verifies real MP3, publishes private metadata and records the catalog", async () => {
     const env = await fixture();
     const catalog = new DesktopCatalog(

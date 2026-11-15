@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.filled.Star
@@ -51,6 +52,7 @@ data class LibraryActions(
     val home: () -> Unit, val refresh: () -> Unit, val openPlayer: () -> Unit,
     val togglePlayback: () -> Unit, val next: () -> Unit,
     val rename: (LibraryKey, String, () -> Unit) -> Unit,
+    val starredOnly: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -99,9 +101,9 @@ fun LibraryScreen(
             }
             if (state.entries.isEmpty() && !state.loadFailed && state.problem == null) item {
                 CreativeCard {
-                    val narrowed = state.query.isNotBlank() || state.filter != LibraryFilter.ALL
+                    val narrowed = state.query.isNotBlank() || state.filter != LibraryFilter.ALL || state.starredOnly
                     Text(stringResource(if (narrowed) R.string.creative_library_no_results else R.string.creative_library_empty))
-                    TextButton(if (narrowed) ({ actions.query(""); actions.filter(LibraryFilter.ALL) }) else actions.home) {
+                    TextButton(if (narrowed) ({ actions.query(""); actions.filter(LibraryFilter.ALL); actions.starredOnly(false) }) else actions.home) {
                         Text(stringResource(if (narrowed) R.string.creative_library_reset else R.string.creative_library_home))
                     }
                 }
@@ -177,6 +179,7 @@ private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
     val sortLabel = stringResource(R.string.creative_library_sort)
     val controlShape = RoundedCornerShape(12.dp)
     val controlTextStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp)
+    val effectiveSort = if (state.filter == LibraryFilter.MOST_PLAYED) LibrarySort.MOST_PLAYED else state.sort
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = CreativeTokens.TouchTarget),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         BasicTextField(
@@ -203,25 +206,33 @@ private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
             },
         )
         Box(Modifier.fillMaxHeight()) {
-            OutlinedButton(onClick = { sortMenu = true }, modifier = Modifier.fillMaxHeight().widthIn(min = 100.dp)
+            OutlinedButton(onClick = { sortMenu = true }, enabled = state.filter != LibraryFilter.MOST_PLAYED,
+                modifier = Modifier.fillMaxHeight().widthIn(min = 100.dp)
                 .semantics { contentDescription = sortLabel }, shape = controlShape,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                 contentPadding = PaddingValues(horizontal = 11.dp, vertical = 7.dp)) {
-                Text(stringResource(if (state.sort == LibrarySort.NEWEST) R.string.creative_library_newest_short else R.string.creative_library_sort_title),
+                Text(stringResource(effectiveSort.label(short = true)),
                     style = controlTextStyle)
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp))
             }
             DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                 LibrarySort.entries.forEach { sort ->
-                    DropdownMenuItem(text = { Text(stringResource(if (sort == LibrarySort.NEWEST) R.string.creative_library_newest else R.string.creative_library_sort_title)) },
+                    DropdownMenuItem(text = { Text(stringResource(sort.label())) },
                         onClick = { actions.sort(sort); sortMenu = false },
                         trailingIcon = { if (state.sort == sort) Icon(Icons.Outlined.Check, null) })
                 }
             }
         }
+    }
+    Row(Modifier.toggleable(value = state.starredOnly, role = Role.Checkbox, onValueChange = actions.starredOnly)
+        .heightIn(min = CreativeTokens.TouchTarget).padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = state.starredOnly, onCheckedChange = null)
+        Icon(Icons.Filled.Star, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+        Text(stringResource(R.string.creative_library_show_starred), style = MaterialTheme.typography.bodyMedium)
     }
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -244,9 +255,10 @@ private fun LibraryToolbar(state: LibraryUiState, actions: LibraryActions) {
 fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onMore: () -> Unit) {
     Surface(
         Modifier.fillMaxWidth().padding(bottom = 4.dp),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shadowElevation = 3.dp,
     ) {
         Column(Modifier.combinedClickable(
             onClick = onPlay, onClickLabel = stringResource(R.string.creative_library_play),
@@ -257,7 +269,7 @@ fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onMore: () -> Unit
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                LibraryMusicIcon(entry.offlineStatus)
+                LibraryMusicIcon(entry.offlineStatus, entry.thumbnailUrl)
                 Column(
                     Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -325,16 +337,18 @@ fun LibraryAudioCard(entry: LibraryEntry, onPlay: () -> Unit, onMore: () -> Unit
 }
 
 @Composable
-private fun LibraryMusicIcon(status: OfflineStatus) {
-    Box(Modifier.size(44.dp)) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(13.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = MaterialTheme.colorScheme.primary,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.MusicNote, null, Modifier.size(22.dp))
+private fun LibraryMusicIcon(status: OfflineStatus, thumbnailUrl: String?) {
+    Box(Modifier.size(52.dp)) {
+        LibraryThumbnail(thumbnailUrl, Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.primary,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.MusicNote, null, Modifier.size(22.dp))
+                }
             }
         }
         LibraryAvailabilityBadge(status, Modifier.align(Alignment.BottomEnd))
@@ -383,8 +397,15 @@ fun AudioBars(modifier: Modifier = Modifier) {
 
 internal fun LibraryFilter.label(): Int = when (this) {
     LibraryFilter.ALL -> R.string.creative_library_all; LibraryFilter.STARRED -> R.string.creative_library_starred
+    LibraryFilter.MOST_PLAYED -> R.string.creative_library_most_played
     LibraryFilter.DOWNLOADED -> R.string.creative_library_downloaded; LibraryFilter.NOT_DOWNLOADED -> R.string.creative_library_not_downloaded
     LibraryFilter.REMOVED -> R.string.creative_library_removed
+}
+
+internal fun LibrarySort.label(short: Boolean = false): Int = when (this) {
+    LibrarySort.NEWEST -> if (short) R.string.creative_library_newest_short else R.string.creative_library_newest
+    LibrarySort.TITLE -> R.string.creative_library_sort_title
+    LibrarySort.MOST_PLAYED -> R.string.creative_library_most_played
 }
 
 internal fun libraryProblemLabel(problem: LibraryProblem?): Int = when (problem) {

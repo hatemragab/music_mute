@@ -50,6 +50,8 @@ private final class ArtifactDownloadOperation: NSObject, URLSessionDownloadDeleg
   @unchecked Sendable
 {
   private let destination: URL
+  private let traceID = UUID().uuidString.lowercased()
+  private let started = ProcessInfo.processInfo.systemUptime
   private let progress: @Sendable (Int64, Int64?) -> Void
   private let lock = NSLock()
   private var continuation: CheckedContinuation<Void, Error>?
@@ -193,10 +195,28 @@ private final class ArtifactDownloadOperation: NSObject, URLSessionDownloadDeleg
     finished = true
     let continuation = self.continuation
     let session = self.session
+    let status = (task?.response as? HTTPURLResponse)?.statusCode
+    let receivedBytes = task?.countOfBytesReceived ?? 0
     self.continuation = nil
     self.session = nil
     task = nil
     lock.unlock()
+    var details: [String: Any] = [
+      "operation": "artifact.download",
+      "durationMs": (ProcessInfo.processInfo.systemUptime - started) * 1000, "bytes": receivedBytes,
+      "body": ["omitted": "binary_stream"],
+    ]
+    if let status { details["status"] = status }
+    switch result {
+    case .success: details["result"] = "completed"
+    case .failure(let error):
+      details["result"] = error is CancellationError ? "aborted" : "failed"
+      details["error"] = LocalDiagnostics.error(error)
+    }
+    LocalDiagnostics.emit(
+      "transfer.download_completed", category: "transfer",
+      level: details["result"] as? String == "completed" ? "info" : "warn", data: details,
+      traceID: traceID)
     switch result {
     case .success: session?.finishTasksAndInvalidate()
     case .failure: session?.invalidateAndCancel()

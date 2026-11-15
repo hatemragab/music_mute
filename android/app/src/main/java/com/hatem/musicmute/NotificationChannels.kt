@@ -6,7 +6,6 @@ import android.content.Context
 
 // Separate IDs avoid reusing library channels already saved with badges enabled.
 internal const val PLAYBACK_NOTIFICATION_CHANNEL = "audio-playback"
-internal const val APP_UPDATE_NOTIFICATION_CHANNEL = "app-update-downloads"
 
 internal fun createPlaybackNotificationChannel(context: Context): NotificationChannel =
     createNonBadgingNotificationChannel(
@@ -14,14 +13,6 @@ internal fun createPlaybackNotificationChannel(context: Context): NotificationCh
         PLAYBACK_NOTIFICATION_CHANNEL,
         context.getString(androidx.media3.session.R.string.default_notification_channel_name),
         "default_channel_id",
-    )
-
-internal fun createAppUpdateNotificationChannel(context: Context): NotificationChannel =
-    createNonBadgingNotificationChannel(
-        context,
-        APP_UPDATE_NOTIFICATION_CHANNEL,
-        context.getString(R.string.update_available_title),
-        "appUpdate",
     )
 
 internal fun createNonBadgingNotificationChannel(

@@ -36,4 +36,26 @@ describe("landing page language selection", () => {
     expect(english.every((value) => value.trim().length > 0)).toBe(true);
     expect(arabic.every((value) => value.trim().length > 0)).toBe(true);
   });
+
+  test("keeps direct platform actions and release boundaries explicit", () => {
+    expect(messages.en.hero).toMatchObject({
+      platformsLabel: "Available MusicMute platforms",
+      webActionDescription: "Import, process, and manage your library",
+      chromeActionDescription:
+        "Voice-only playback on supported YouTube videos",
+      chromeRequirement: expect.stringContaining(
+        "MusicMute Local companion installed and prepared",
+      ),
+      pendingReleases: expect.stringContaining(
+        "Mac public download and mobile store links",
+      ),
+    });
+    expect(messages.ar.hero).toMatchObject({
+      platformsLabel: "منصات ميوزك ميوت المتاحة",
+      webActionDescription: "استورد الصوت وعالجه وأدر مكتبتك",
+      chromeActionDescription: "تشغيل الصوت فقط في فيديوهات YouTube المدعومة",
+      chromeRequirement: expect.stringContaining("MusicMute Local"),
+      pendingReleases: expect.stringContaining("Mac"),
+    });
+  });
 });

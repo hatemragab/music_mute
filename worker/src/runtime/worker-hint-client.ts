@@ -1,3 +1,4 @@
+import { localDiagnostics } from "../observability/local-debug.js";
 import { Buffer } from "node:buffer";
 
 const HINT_TYPES = new Set([
@@ -75,6 +76,7 @@ export class WorkerHintClient {
         this.options.socket ??
         ((url, protocols) => new WebSocket(url, protocols))
       )(socketUrl, ["musicmute.worker-hint.v1", `ticket.${ticket}`]);
+      localDiagnostics.observeSocket(socket);
       this.socket = socket;
       let finished = false;
       let openedAt: number | null = null;

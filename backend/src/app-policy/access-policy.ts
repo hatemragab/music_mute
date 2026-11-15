@@ -62,12 +62,14 @@ export function validatePolicy(value: unknown): asserts value is AppPolicy {
   )
     fail();
   const platforms = object(policy.platforms);
-  exact(
-    platforms,
-    'macos' in platforms ? ['android', 'ios', 'macos'] : ['android', 'ios'],
-  );
-  if ('macos' in platforms) {
-    const desktop = object(platforms.macos);
+  exact(platforms, [
+    'android',
+    'ios',
+    ...['macos', 'windows'].filter((name) => name in platforms),
+  ]);
+  for (const name of ['macos', 'windows']) {
+    if (!(name in platforms)) continue;
+    const desktop = object(platforms[name]);
     exact(desktop, ['minimumBuild']);
     if (
       desktop.minimumBuild !== null &&
@@ -125,8 +127,9 @@ export function evaluateProcessingAccess(
   if (!device) return { allowed: false, reason: 'DEVICE_SYNC_REQUIRED' };
   // Browser clients receive current code at page load; native release minimums do not apply.
   if (device.platform === 'web') return { allowed: true };
-  if (device.platform === 'macos') {
-    const minimumBuild = policy.platforms.macos?.minimumBuild ?? null;
+  if (device.platform === 'macos' || device.platform === 'windows') {
+    const minimumBuild =
+      policy.platforms[device.platform]?.minimumBuild ?? null;
     if (minimumBuild !== null && device.buildNumber < minimumBuild)
       return { allowed: false, reason: 'APP_UPDATE_REQUIRED' };
     return { allowed: true };

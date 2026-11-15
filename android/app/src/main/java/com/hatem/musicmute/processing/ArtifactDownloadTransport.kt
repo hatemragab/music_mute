@@ -1,5 +1,6 @@
 package com.hatem.musicmute.processing
 
+import com.hatem.musicmute.diagnostics.LocalDiagnostics
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -31,7 +32,13 @@ class UrlConnectionArtifactDownloader(
                 val connection = AtomicReference<HttpURLConnection?>()
                 val output = AtomicReference<FileOutputStream?>()
                 val gate = Any()
+                val traceId = java.util.UUID.randomUUID().toString()
                 val future = executor.submit {
+                    val started = System.nanoTime()
+                    var result = "failed"
+                    var status: Int? = null
+                    var received = 0L
+                    var failure: Map<String, Any> = emptyMap()
                     try {
                         val client = openConnection(uri)
                         connection.set(client)
@@ -43,9 +50,9 @@ class UrlConnectionArtifactDownloader(
                         client.useCaches = false
                         client.setRequestProperty("Cookie", "")
                         client.setRequestProperty("Accept", "audio/mpeg, application/octet-stream")
-                        if (client.responseCode != 200) throw ArtifactHttpException(client.responseCode)
+                        status = client.responseCode
+                        if (status != 200) throw ArtifactHttpException(status)
                         val expected = client.contentLengthLong.takeIf { it >= 0 }
-                        var received = 0L
                         progress(received, expected)
                         client.inputStream.use { input ->
                             val sink = synchronized(gate) {
@@ -73,14 +80,18 @@ class UrlConnectionArtifactDownloader(
                             }
                         }
                         client.disconnect()
+                        result = "completed"
                         if (continuation.isActive) continuation.resume(Unit)
                     } catch (error: Exception) {
+                        failure = LocalDiagnostics.error(error)
                         if (continuation.isActive) continuation.resumeWithException(
                             if (error is ArtifactHttpException || error is ArtifactException) error
                             else ArtifactException(ArtifactProblem.TRANSFER))
                     } finally {
                         connection.get()?.disconnect()
                         runCatching { output.get()?.close() }
+                        if (result == "failed" && !continuation.isActive) result = "aborted_or_failed"
+                        LocalDiagnostics.emit("transfer.download_completed", "transfer", if (result == "completed") "info" else "warn", mapOf("operation" to "artifact.download", "bytes" to received, "status" to status, "result" to result, "durationMs" to (System.nanoTime() - started) / 1_000_000.0, "body" to mapOf("omitted" to "binary_stream"), "error" to failure), traceId = traceId)
                     }
                 }
                 continuation.invokeOnCancellation {

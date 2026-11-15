@@ -1,5 +1,7 @@
 import { LocalMediaSyncsService } from '../local-media-syncs/local-media-syncs.service.js';
 import { UsersService } from '../users/users.service.js';
+import { AppPolicyService } from '../app-policy/app-policy.service.js';
+import { presentPolicy } from '../app-policy/app-policy.presenter.js';
 import { AdminNotificationsService } from '../admin-notifications/admin-notifications.service.js';
 import { Injectable, ValidationPipe } from '@nestjs/common';
 import { QueueProjectionService } from './queue-projection.service.js';
@@ -10,6 +12,8 @@ import { AdminHealthService } from '../admin-observability/admin-health.service.
 import { AdminOverviewService } from '../admin-observability/admin-overview.service.js';
 import { AccountPolicyService } from '../admin-settings/account-policy.service.js';
 import { AdminAccountRecoveryService } from '../admin-users/admin-account-recovery.service.js';
+import { AdminUserDevicesService } from '../admin-users/admin-user-devices.service.js';
+import { ListDevicesDto } from '../devices/dto/list-devices.dto.js';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminPermission } from '../admin/admin.types.js';
 import { authError } from '../auth/auth.errors.js';
@@ -32,6 +36,7 @@ import type {
 const permissions: Partial<Record<RealtimeResource, AdminPermission>> = {
   'admin.jobs': 'jobs.read',
   'admin.job': 'jobs.read',
+  'admin.user_devices': 'users.read',
   'admin.overview': 'overview.read',
   'admin.health': 'health.read',
   'admin.alerts': 'health.read',
@@ -70,6 +75,8 @@ export class RealtimeResourcesService {
     private readonly notifications: AdminNotificationsService,
     private readonly localMediaSyncs: LocalMediaSyncsService,
     private readonly users: UsersService,
+    private readonly appPolicies: AppPolicyService,
+    private readonly adminUserDevices: AdminUserDevicesService,
   ) {}
 
   async read(
@@ -113,10 +120,20 @@ export class RealtimeResourcesService {
       case 'usage':
         this.empty(params);
         return this.usage.readUsage(new Types.ObjectId(owner));
-      case 'policy':
+      case 'policy': {
         if (Object.keys(params).some((key) => key !== 'schemaVersion'))
           throw authError('INVALID_INPUT');
-        return this.policies.publicPolicy(params.schemaVersion);
+        const [policy, appPolicy] = await Promise.all([
+          this.policies.publicPolicy(
+            params.schemaVersion,
+            undefined,
+            principal.visitorCountry ?? null,
+            owner,
+          ),
+          this.appPolicies.current(),
+        ]);
+        return { ...policy, appPolicy: presentPolicy(appPolicy) };
+      }
       case 'admin.jobs': {
         const page = await this.adminJobs.list(actor, params);
         return { ...page, items: await this.queues.enrich(page.items) };
@@ -129,6 +146,17 @@ export class RealtimeResourcesService {
         )[0];
       case 'admin.overview':
         return this.overview.read(actor, params);
+      case 'admin.user_devices': {
+        const { id, ...query } = params;
+        if (!id) throw authError('INVALID_INPUT');
+        return this.adminUserDevices.list(
+          id,
+          await this.validation.transform(query, {
+            type: 'query',
+            metatype: ListDevicesDto,
+          }),
+        );
+      }
       case 'admin.health':
         this.empty(params);
         return this.health.read();

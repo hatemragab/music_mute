@@ -473,3 +473,91 @@ backend/dashboard production dependency audits report no vulnerabilities.
 Prepared-Mac installation and the real deletion/reapproval/registration cycle are
 separate acceptance boundaries recorded in
 [the Mac integration ledger](../../chrome-extension/docs/macos-worker-integration.md).
+
+## 2026-10-09 — Desktop app-policy live projection source check
+
+The existing owner `policy` snapshot adds optional `app_policy` through the
+existing public AppPolicy presenter. The shared feed observes `app_policies` and
+invalidates only policy. Independent revisions allow desktop gates to change with
+unchanged processing policy. Existing mobile/legacy clients ignore the additive
+field; no new resource, HTTP polling, ticket or scheduler was added.
+
+Backend realtime fixtures passed **51 tests / 5 files**, strict TypeScript/full
+lint/Nest build. The compiled realtime integration passed with owned loopback
+Mongo replica-set/Redis and two independent feed/transport instances: Windows gate
+insertion/clear reached both current sockets without processing-policy revision
+changes. The local queue baseline was 6 sockets, 2 feeds, 202 queued fixtures,
+8 timed queue writes and p95 1081 ms; not production capacity, cluster/deployment
+or real Firebase proof. Windows account/usage/realtime/fleet/update fixtures passed
+**269 tests / 27 files** plus strict checks/build, including lower app revision,
+identical processing revision, delayed app-open and old-owner stream fences.
+See [W32 source evidence](../windows-desktop/evidence/W32-dashboard-windows-source.md).
+No deployment/live policy, real Windows/native execution, enrollment/publication
+or production permission was changed.
+
+## 2026-10-09 — Administrator user device history
+
+User detail now includes a responsive Devices section with platform/model,
+app/build, OS, country/city, recorded activity and signed-out/unknown session
+state. Expand a device for all stored location fields and their observation
+time, installation ID, metadata revision, first seen, last recorded
+authentication, user-history visibility and up to 20 version transitions.
+Missing fields remain unavailable; a recorded location is not a confirmed home
+country and last seen is not online presence. Hidden user-history records are
+labeled and remain available to authorized administrators.
+
+`GET /admin/users/{id}/devices` is a read-only, no-store `users.read` route,
+sharing a bounded domain read with `admin.user_devices`. Both select only the
+requested existing user and use an exclusive descending device-record cursor,
+with limits 1–50/default 20. Device/installation-owner changes invalidate full
+snapshots through the existing shared feed. Existing user/admin authorization
+fences, reconnect recovery and stale-connection presentation remain in place.
+No new data collection, migration, polling or device mutation is introduced.
+
+Local validation passed backend `pnpm run verify` (1,718 unit and 230 HTTP/route
+contract tests, formatting, lint, types, secret/transfer checks and Nest build),
+dashboard formatting/lint/types/build and 217 unit tests, plus three focused
+installed-Chrome feature tests. Three existing Chrome regressions also passed:
+opening every dashboard area, support account restriction/media actions and all
+dashboard routes at 360/768/1440px. The native Node integration command
+`node --test test/realtime.integration.mjs test/admin-user-devices.integration.mjs`
+passed two fixtures using owned loopback Mongo replica-set/Redis: scoped,
+paginated read-only device history, hidden/null metadata and sign-out behavior;
+two independent feeds delivered location/session changes and closed sockets on
+administrator access revocation. Browser fixtures covered expanded fields,
+unknown browser metadata, 360px layout, pagination and socket updates with zero
+device HTTP GETs. Screenshot review used synthetic data. Local tests do not
+establish deployed API/dashboard support, production records, real Firebase or
+native-device execution. No deployment or production data change was performed.
+
+### Owner-requested CapRover deployment, 2026-10-09 (Cairo)
+
+The owner subsequently requested API/dashboard deployment through CapRover CLI.
+The verified root-shaped packages were deployed to `musicmute`, API first:
+
+- API: `img-captain-api:136` → **`img-captain-api:137`**; 372 source/build-input
+  files, 2,568,704 bytes; archive SHA-256
+  `0470b820a6304f650def498e2e00e9a21c32757e1f5354d5a207ae5147725f81`.
+- Dashboard: `img-captain-dashboard:36` → **`img-captain-dashboard:38`**; 151
+  source/build-input files, 1,399,808 bytes; archive SHA-256
+  `f66533684d5abd1324c5392f5c75c27115e7aa3cc0f8f4210baeb2ab66fd64c6`.
+
+Both CLI builds/deployments completed successfully. Independent archive audits
+confirmed exact packaged-source bytes and excluded dotenv, credential, test,
+dependency and generated-output paths. Dashboard build and 19 deployment tests
+also passed. CapRover final read-back confirmed the active image/version, one
+instance each and no build in progress; all configuration fields other than
+deployment history/version/build-state were identical to the private
+before-snapshot, including environment values and API WebSocket support.
+
+Post-deployment HTTPS checks returned 200 for API `/health/live` and
+`/health/ready`, dashboard `/healthz` and root. The new administrator devices
+route returned 401 `UNAUTHENTICATED`/no-store without credentials, and a synthetic
+unauthenticated realtime upgrade returned 401. The public user-detail asset
+`user-detail-page-BVHAcKaQ.js` returned 200 and contained the new device resource,
+expanded details, authentication timestamp and version-history UI. Its SHA-256
+was `01a2bf5e7122b32fa42a1f7fa8a83e8d24898b049f98850237eeb0cbd9c00410`.
+Dashboard CSP and HSTS remained present. These establish deployment, public
+bundle/readiness and authentication-boundary proof; actual signed-in production
+device snapshots/UI remain the owner's acceptance test. No account data,
+production permissions, environment values or provider services were changed.

@@ -7,6 +7,7 @@ enum PlaybackRepeatMode: String, CaseIterable {
 
 @MainActor final class ProcessingModel: ObservableObject {
   @Published private(set) var photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
+  @Published private(set) var linkImportVisible = false
   @Published private(set) var preparing = false
   @Published private(set) var busy = false
   @Published private(set) var pendingInputName: String?
@@ -23,10 +24,12 @@ enum PlaybackRepeatMode: String, CaseIterable {
   let urlImports: URLImportsModel
   let usageRepository: ProcessingUsageRepository
   private let api: JobsAPI
+  private let policyRepository: ProcessingPolicyRepository
   let repository: ProcessingRepository
   let pipeline: AudioPipelineCoordinator
   let history: ProcessingHistoryModel
   let player: AudioPlayer
+  let libraryPreferences: LibraryPreferencesStore
   private let preparer: AudioInputPreparer
   private let originalFile: (String, String) async throws -> URL
   private let outputFile: (String, String) async throws -> URL
@@ -39,6 +42,7 @@ enum PlaybackRepeatMode: String, CaseIterable {
   private var epoch: UInt64 = 0
   private var actions: [UUID: Task<Void, Never>] = [:]
   private var privatePlaybackID: UUID?
+  private var playbackSelectionID = UUID()
   private var originalPrefetch: Task<Void, Never>?
   private var sourcePickerFence: SessionFence?
   private var sourcePickerPending = false
@@ -47,30 +51,43 @@ enum PlaybackRepeatMode: String, CaseIterable {
     api: JobsAPI, repository: ProcessingRepository, preparer: AudioInputPreparer,
     pipeline: AudioPipelineCoordinator,
     player: AudioPlayer, outputFile: @escaping (String, String) async throws -> URL,
+    libraryPreferences: LibraryPreferencesStore? = nil,
     originalFile: @escaping (String, String) async throws -> URL = { _, _ in
       throw JobArtifactFailure.unavailable
     },
     removeOutput: @escaping (String) async -> Void = { _ in },
     sessionDidChange: @escaping () -> Void = {},
+    policyCacheFile: URL? = nil,
     reportFailure: @escaping AudioPipelineCoordinator.FailureReporter = { _, _, _, _, _ in }
   ) {
     self.api = api
+    self.policyRepository = ProcessingPolicyRepository(api: api, cacheFile: policyCacheFile)
     self.urlImports = URLImportsModel(api: api, store: repository.store)
     self.usageRepository = ProcessingUsageRepository(api: api)
     self.repository = repository
     self.preparer = preparer
     self.pipeline = pipeline
     self.player = player
+    self.libraryPreferences = libraryPreferences ?? LibraryPreferencesStore()
     self.outputFile = outputFile
     self.originalFile = originalFile
     self.removeOutput = removeOutput
     self.sessionDidChange = sessionDidChange
     self.reportFailure = reportFailure
+    linkImportVisible = policyRepository.value?.linkImportVisible == true
     history = ProcessingHistoryModel(
       api: api,
       updateLibrary: { uid, jobs in
         try await repository.store.updateLibraryJobs(jobs, ownerUid: uid)
       })
+    policyRepository.onChange = { [weak self] response in
+      guard let self, let policy = try? response.validated() else { return }
+      self.linkImportVisible = response.linkImportVisible == true
+      let effective = response.acceptNewJobs ? policy : .standard
+      self.photoSourceLimit =
+        effective.maxSourceBytes ?? ProcessingMediaPolicy.standard.maxSourceBytes!
+      await self.preparer.configure(policy: effective)
+    }
     pipeline.beforePreparation = { [weak self] in
       guard let self else { throw CancellationError() }
       await self.refreshAvailability()
@@ -98,6 +115,13 @@ enum PlaybackRepeatMode: String, CaseIterable {
     player.onFinished = { [weak self] in self?.advanceAfterPlayback() }
     player.onNext = { [weak self] in self?.playNext() }
     player.onPrevious = { [weak self] in self?.playPrevious() }
+    player.onPlaybackStarted = { [weak self] playbackID in
+      guard let self, let uid = self.ownerUid, self.repository.session?.uid == uid,
+        let jobID = self.currentPlaybackJobID,
+        playbackID == self.playbackID(uid: uid, jobID: jobID)
+      else { return }
+      self.libraryPreferences.recordPlayback(jobID, ownerUID: uid)
+    }
   }
 
   func bindOwner(_ uid: String?) async {
@@ -106,9 +130,16 @@ enum PlaybackRepeatMode: String, CaseIterable {
     epoch &+= 1
     let ticket = epoch
     ownerUid = uid
+    playbackSelectionID = UUID()
+    libraryPreferences.bind(uid ?? "")
+    policyRepository.bindOwner(uid, watch: false)
+    linkImportVisible = policyRepository.value?.linkImportVisible == true
     usageRepository.bind(uid)
     photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
     await preparer.configure(policy: .standard)
+    guard ticket == epoch else { return }
+    await policyRepository.restoreCachedPolicy()
+    guard ticket == epoch else { return }
     sessionReady = false
     originalPrefetch?.cancel()
     originalPrefetch = nil
@@ -142,28 +173,22 @@ enum PlaybackRepeatMode: String, CaseIterable {
       libraryJobs = tracks
     }
     await history.bindOwner(uid)
-    guard ticket == epoch, uid != nil else { return }
-    await urlImports.bindOwner(uid)
     guard ticket == epoch else { return }
-    sessionReady = true
+    if uid != nil {
+      await urlImports.bindOwner(uid)
+      guard ticket == epoch else { return }
+      policyRepository.bindOwner(uid)
+      sessionReady = true
+    }
     await refreshAvailability()
   }
 
   func refreshAvailability() async {
-    guard let captured = repository.session else { return }
-    await usageRepository.refresh()
-    do {
-      let response = try await api.processingPolicy()
-      let policy = try response.validated()
+    if let captured = repository.session {
+      await usageRepository.refresh()
       guard repository.session == captured else { return }
-      let effective = response.acceptNewJobs ? policy : .standard
-      photoSourceLimit = effective.maxSourceBytes ?? ProcessingMediaPolicy.standard.maxSourceBytes!
-      await preparer.configure(policy: effective)
-    } catch {
-      guard repository.session == captured else { return }
-      photoSourceLimit = ProcessingMediaPolicy.standard.maxSourceBytes!
-      await preparer.configure(policy: .standard)
     }
+    await policyRepository.checkout()
   }
 
   func resumePending() async {
@@ -321,6 +346,8 @@ enum PlaybackRepeatMode: String, CaseIterable {
 
   func play(_ job: Job, queue: [Job]? = nil) {
     guard let uid = ownerUid, job.status == "ready", job.canDownloadOutput else { return }
+    let selectionID = UUID()
+    playbackSelectionID = selectionID
     let id = playbackID(uid: uid, jobID: job.id)
     let candidates = (queue ?? playbackQueue).filter {
       $0.status == "ready" && $0.canDownloadOutput
@@ -332,8 +359,15 @@ enum PlaybackRepeatMode: String, CaseIterable {
       return
     }
     perform(stage: .playback, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
-      let file = try await self.outputFile(job.id, job.preferredName)
+      let file: URL
+      do {
+        file = try await self.outputFile(job.id, job.preferredName)
+      } catch {
+        guard self.playbackSelectionID == selectionID else { throw CancellationError() }
+        throw error
+      }
       try self.check(uid, ticket)
+      guard self.playbackSelectionID == selectionID else { throw CancellationError() }
       self.privatePlaybackID = id
       self.currentPlaybackJobID = job.id
       self.player.toggle(id: id, title: job.preferredName, file: file)
@@ -357,12 +391,23 @@ enum PlaybackRepeatMode: String, CaseIterable {
       return
     }
     let expectedID = player.currentID
+    let selectionID = playbackSelectionID
     perform(stage: .playback, operationID: selectedOperationID, jobID: job.id) { uid, ticket in
       let current = job
-      let file = try await (original ? self.originalFile : self.outputFile)(
-        job.id, job.preferredName)
+      let file: URL
+      do {
+        file = try await (original ? self.originalFile : self.outputFile)(
+          job.id, job.preferredName)
+      } catch {
+        guard self.playbackSelectionID == selectionID, self.player.currentID == expectedID else {
+          throw CancellationError()
+        }
+        throw error
+      }
       try self.check(uid, ticket)
-      guard self.player.currentID == expectedID else { return }
+      guard self.playbackSelectionID == selectionID, self.player.currentID == expectedID else {
+        return
+      }
       let position = try comparisonPosition(
         self.player.position, toOriginal: original, job: current)
       try self.player.replaceSource(file: file, original: original, position: position)
@@ -598,8 +643,7 @@ enum PlaybackRepeatMode: String, CaseIterable {
 
   private func advanceAfterPlayback() {
     if repeatPlayback == .one {
-      player.seek(to: 0)
-      player.resume()
+      player.restart()
       return
     }
     guard autoPlayNext,

@@ -10,6 +10,7 @@ import {
 } from "../src/companion/cloud-provider.js";
 import {
   DesktopApiError,
+  CloudReplyValidationError,
   type AccountScope,
 } from "../src/companion/account-api.js";
 import {
@@ -775,4 +776,197 @@ describe("explicit native cloud provider", () => {
       ),
     ).toBe(false);
   });
+  it("preserves the original public thumbnail and treats missing or unsafe values as null", () => {
+    const thumbnail =
+      "https://i.ytimg.com/vi/bZxrIoCPsOc/hqdefault.jpg?sqp=fixture_123&rs=signature-123";
+    expect(
+      parseJobMetadata(job({ thumbnail_url: thumbnail })).thumbnail_url,
+    ).toBe(thumbnail);
+    for (const value of [
+      undefined,
+      null,
+      1,
+      "https://private.invalid/video.jpg",
+    ])
+      expect(
+        parseJobMetadata(job({ thumbnail_url: value })).thumbnail_url,
+      ).toBeNull();
+  });
+
+  it("retains backend-valid format characters in optional display titles", () => {
+    // Backend isAudioName permits Cf (for example Farsi joiners and emoji ZWJ),
+    // while rejecting Cc. Display text is not an audio identity declaration.
+    const title = "صدای موسیقی\u200c و خانواده 👨\u200d👩\u200d👧";
+    expect(
+      parseJobMetadata(job({ source_title: title, display_name: title })),
+    ).toMatchObject({ source_title: title, display_name: title });
+    expect(() =>
+      parseJobMetadata(job({ source_title: "invalid\ncontrol" })),
+    ).toThrow("CLOUD_REPLY_INVALID");
+  });
+
+  it("represents optional legacy input metadata without inventing a hash or content type", () => {
+    // JobView requires extension/bytes/duration_seconds; presenter legacy
+    // fixtures omit content_type/sha256 rather than inventing source identity.
+    const declared = { extension: "mp3", bytes: 100, duration_seconds: 10 };
+    const parsed = parseJobMetadata(
+      job({ input: declared, output: null, can_download_output: false }),
+    );
+    expect(parsed.input).toEqual(declared);
+    expect(parsed.input).not.toHaveProperty("sha256");
+    expect(parsed.input).not.toHaveProperty("content_type");
+  });
+
+  it("reads a documented legacy history row before an eligible account result", async () => {
+    const h = harness();
+    h.realtime.read.mockResolvedValue({
+      items: [
+        job({
+          id: "0123456789abcdef01234569",
+          source_kind: "file",
+          source_url: null,
+          input: { extension: "mp3", bytes: 100, duration_seconds: 10 },
+          output: null,
+          can_download_output: false,
+        }),
+        job(),
+      ],
+      next_cursor: null,
+    });
+    expect((await h.provider.findReusableYouTube("bZxrIoCPsOc"))?.id).toBe(
+      jobId,
+    );
+    expect(h.realtime.read).toHaveBeenCalledOnce();
+    expect(h.request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { content_type: null },
+    { content_type: "audio/wav" },
+    { content_type: 1 },
+    { sha256: null },
+    { sha256: "invalid" },
+    { sha256: 1 },
+  ])("still rejects malformed present original metadata %j", (invalid) => {
+    expect(() =>
+      parseJobMetadata(job({ input: { ...input, ...invalid } })),
+    ).toThrow("CLOUD_REPLY_INVALID");
+  });
+
+  it.each(["unknown", "constructor", "__proto__"])(
+    "requires an allowlisted extension even without optional original metadata: %s",
+    (extension) => {
+      expect(() =>
+        parseJobMetadata(
+          job({ input: { extension, bytes: 100, duration_seconds: 10 } }),
+        ),
+      ).toThrow("CLOUD_REPLY_INVALID");
+    },
+  );
+
+  it.each([["sha256"], ["content_type"], ["sha256", "content_type"]])(
+    "does not infer original identity or create grants/work from missing metadata %j",
+    async (...missing) => {
+      const h = harness();
+      const incomplete: Record<string, unknown> = { ...input };
+      for (const field of missing) delete incomplete[field];
+      const legacy = job({
+        source_kind: "file",
+        source_url: null,
+        input: incomplete,
+      });
+      h.realtime.read.mockResolvedValue({ items: [legacy], next_cursor: null });
+      expect(await h.provider.findReusableFile(input)).toBeNull();
+      h.realtime.read.mockResolvedValue(legacy);
+      await expect(h.provider.downloadJob(jobId, input)).rejects.toMatchObject({
+        code: "SOURCE_IDENTITY_MISMATCH",
+      });
+      const upload = vi.fn();
+      await expect(
+        h.provider.startFile(
+          {
+            request_id: requestId,
+            input: incomplete as unknown as typeof input,
+            source: "audio_file",
+          },
+          upload,
+        ),
+      ).rejects.toMatchObject({ code: "CLOUD_REPLY_INVALID" });
+      expect(h.request).not.toHaveBeenCalled();
+      expect(h.resolveDownload).not.toHaveBeenCalled();
+      expect(upload).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [null, "job_record"],
+    [job({ id: "invalid" }), "job_id"],
+    [job({ request_id: "invalid" }), "job_request_id"],
+    [job({ status: "invalid" }), "job_status"],
+    [job({ trim_enabled: null }), "job_trim"],
+    [job({ can_download_output: null }), "job_capabilities"],
+    [job({ input: null }), "input_record"],
+    [job({ input: { ...input, extension: "__proto__" } }), "input_extension"],
+    [job({ input: { ...input, content_type: null } }), "input_content_type"],
+    [job({ input: { ...input, bytes: 0 } }), "input_bytes"],
+    [job({ input: { ...input, duration_seconds: 0 } }), "input_duration"],
+    [job({ input: { ...input, sha256: "private-invalid" } }), "input_hash"],
+    [job({ output: [] }), "output_record"],
+    [
+      job({ output: { ...job().output, content_type: "invalid" } }),
+      "output_format",
+    ],
+    [job({ output: { ...job().output, bytes: 0 } }), "output_bytes"],
+    [
+      job({ output: { ...job().output, sha256: "private-invalid" } }),
+      "output_hash",
+    ],
+    [
+      job({ output: { ...job().output, duration_seconds: 0 } }),
+      "output_duration",
+    ],
+    [job({ source_url: "https://youtu.be/bZxrIoCPsOc" }), "source_reference"],
+    [job({ recipe_digest: "private-invalid" }), "recipe_digest"],
+    [job({ processing_origin: "private-invalid" }), "processing_origin"],
+    [job({ local_profile_id: "private-invalid" }), "local_profile"],
+    [job({ source_kind: "private-invalid" }), "source_kind"],
+    [job({ source_title: "private\ninvalid" }), "source_title"],
+    [job({ display_name: "private\ninvalid" }), "display_name"],
+    [job({ error: { code: "private invalid" } }), "error_metadata"],
+  ])(
+    "identifies a closed validation location without changing the error code %#",
+    (value, reason) => {
+      let failure: unknown;
+      try {
+        parseJobMetadata(value);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(CloudReplyValidationError);
+      expect(failure).toMatchObject({
+        code: "CLOUD_REPLY_INVALID",
+        validationReason: reason,
+        message: "CLOUD_REPLY_INVALID",
+      });
+      expect(JSON.stringify(failure)).not.toContain("private-invalid");
+    },
+  );
+
+  it.each([
+    [{ items: null, next_cursor: null }, "history_page"],
+    [{ items: [], next_cursor: "private invalid" }, "history_cursor"],
+  ])(
+    "keeps history validation failures precise and read-only %#",
+    async (page, reason) => {
+      const h = harness();
+      h.realtime.read.mockResolvedValue(page);
+      await expect(
+        h.provider.findReusableYouTube("bZxrIoCPsOc"),
+      ).rejects.toMatchObject({
+        code: "CLOUD_REPLY_INVALID",
+        validationReason: reason,
+      });
+      expect(h.request).not.toHaveBeenCalled();
+    },
+  );
 });

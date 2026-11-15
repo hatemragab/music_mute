@@ -23,7 +23,7 @@ export interface UpdateSelection {
     minimumBuild: number | null;
     directReleaseId: string | null;
     storeReleaseId: string | null;
-    source: 'direct_apk' | 'google_play';
+    source: 'google_play';
   };
   ios: { minimumBuild: number | null; storeReleaseId: string | null };
 }
@@ -65,7 +65,7 @@ export function validateSelection(raw: unknown): UpdateSelection {
     'source',
   ]);
   const ios = object(input.ios, ['minimumBuild', 'storeReleaseId']);
-  if (!['direct_apk', 'google_play'].includes(android.source as string))
+  if (android.source !== 'google_play' || android.directReleaseId !== null)
     throw adminError('INVALID_REQUEST');
   for (const platform of [android, ios]) {
     if (platform.minimumBuild !== null && !validBuild(platform.minimumBuild))
@@ -89,12 +89,8 @@ function currentSelection(
     revision: policy.revision,
     android: {
       minimumBuild: policy.platforms.android.minimumBuild,
-      source:
-        policy.platforms.android.releaseSelection?.source === 'google_play'
-          ? 'google_play'
-          : 'direct_apk',
-      directReleaseId:
-        policy.platforms.android.releaseSelection?.directReleaseId ?? null,
+      source: 'google_play',
+      directReleaseId: null,
       storeReleaseId:
         policy.platforms.android.releaseSelection?.storeReleaseId ?? null,
     },
@@ -104,6 +100,25 @@ function currentSelection(
         policy.platforms.ios.releaseSelection?.storeReleaseId ?? null,
     },
   };
+}
+
+/** An iOS-only operation must not migrate an unavailable historical Android channel. */
+function unchangedRetiredAndroid(
+  policy: AppPolicy,
+  selection: UpdateSelection,
+): AppPolicy['platforms']['android'] | undefined {
+  const android = policy.platforms.android;
+  const editable = currentSelection(policy).android;
+  if (
+    android.releaseSelection.source !== 'google_play' &&
+    android.releaseSelection.storeReleaseId === null &&
+    selection.android.minimumBuild === editable.minimumBuild &&
+    selection.android.storeReleaseId === editable.storeReleaseId &&
+    selection.android.directReleaseId === null &&
+    selection.android.source === 'google_play'
+  )
+    return android;
+  return undefined;
 }
 @Injectable()
 export class ReleasePublicationService {
@@ -132,9 +147,9 @@ export class ReleasePublicationService {
     session?: ClientSession,
     draft: string | 'preview' | null = null,
     excluded?: string,
+    preservedAndroid?: AppPolicy['platforms']['android'],
   ) {
     const ids = [
-      selection.android.directReleaseId,
       selection.android.storeReleaseId,
       selection.ios.storeReleaseId,
     ].filter((id): id is string => !!id);
@@ -157,12 +172,7 @@ export class ReleasePublicationService {
         release.platform !== platform ||
         release.source !== source ||
         (release.state !== 'published' &&
-          !(
-            release.state === 'draft' &&
-            (draft === 'preview' || draft === id)
-          )) ||
-        (source === 'direct_apk' &&
-          (release.artifactState !== 'verified' || !release.artifact))
+          !(release.state === 'draft' && (draft === 'preview' || draft === id)))
       )
         throw adminError('INVALID_UPDATE_POLICY');
       try {
@@ -175,18 +185,12 @@ export class ReleasePublicationService {
       }
       return release;
     };
-    const direct = get(
-      selection.android.directReleaseId,
-      'android',
-      'direct_apk',
-    );
     const play = get(
       selection.android.storeReleaseId,
       'android',
       'google_play',
     );
     const ios = get(selection.ios.storeReleaseId, 'ios', 'app_store');
-    const android = selection.android.source === 'direct_apk' ? direct : play;
     const minimumValid = (
       minimum: number | null,
       targets: (Release | null)[],
@@ -197,14 +201,14 @@ export class ReleasePublicationService {
       )
         throw adminError('INVALID_UPDATE_POLICY');
     };
-    minimumValid(selection.android.minimumBuild, [android, direct, play]);
+    if (!preservedAndroid) minimumValid(selection.android.minimumBuild, [play]);
     minimumValid(selection.ios.minimumBuild, [ios]);
     const platforms: AppPolicy['platforms'] = {
-      android: {
+      android: preservedAndroid ?? {
         minimumBuild: selection.android.minimumBuild,
         releaseSelection: {
-          source: selection.android.source,
-          directReleaseId: selection.android.directReleaseId,
+          source: 'google_play',
+          directReleaseId: null,
           storeReleaseId: selection.android.storeReleaseId,
         },
       },
@@ -217,14 +221,27 @@ export class ReleasePublicationService {
         },
       },
     };
-    return { direct, play, ios, android, platforms };
+    return { play, ios, platforms };
   }
   async preview(raw: unknown) {
     const selection = validateSelection(raw),
       current = await this.policy();
     try {
       validatePolicyTransition(current, selection, false);
-      const resolved = await this.resolve(selection, undefined, 'preview');
+      const currentIos = currentSelection(current).ios;
+      const iosChanged =
+        selection.ios.minimumBuild !== currentIos.minimumBuild ||
+        selection.ios.storeReleaseId !== currentIos.storeReleaseId;
+      const preservedAndroid = iosChanged
+        ? unchangedRetiredAndroid(current, selection)
+        : undefined;
+      const resolved = await this.resolve(
+        selection,
+        undefined,
+        'preview',
+        undefined,
+        preservedAndroid,
+      );
       const examples: {
         platform: string;
         distribution: Distribution;
@@ -233,7 +250,6 @@ export class ReleasePublicationService {
         targetBuild: number | null;
       }[] = [];
       for (const [platform, distribution, target] of [
-        ['android', 'direct', resolved.android],
         ['android', 'play', resolved.play],
         ['ios', 'app_store', resolved.ios],
       ] as const) {
@@ -346,6 +362,8 @@ export class ReleasePublicationService {
           throw adminError('REVISION_CONFLICT');
         const release = await this.releases.findById(objectId).session(session);
         if (!release) throw adminError('RESOURCE_NOT_FOUND');
+        if (release.source === 'direct_apk')
+          throw adminError('INVALID_REQUEST');
         if (
           release.revision !== body.expectedReleaseRevision ||
           release.state === 'withdrawn' ||
@@ -354,7 +372,6 @@ export class ReleasePublicationService {
           throw adminError('REVISION_CONFLICT');
         validatePolicyTransition(policy, selection, operation === 'publish');
         const selected = [
-          selection.android.directReleaseId,
           selection.android.storeReleaseId,
           selection.ios.storeReleaseId,
         ];
@@ -365,6 +382,9 @@ export class ReleasePublicationService {
           session,
           operation === 'publish' ? id : null,
           operation === 'withdraw' ? id : undefined,
+          release.platform === 'ios'
+            ? unchangedRetiredAndroid(policy, selection)
+            : undefined,
         );
         if (
           operation === 'publish' &&
@@ -374,7 +394,7 @@ export class ReleasePublicationService {
           throw adminError('INVALID_UPDATE_POLICY');
         const next: AppPolicy = {
           ...policy,
-          platforms: resolved.platforms,
+          platforms: { ...policy.platforms, ...resolved.platforms },
           revision: policy.revision + 1,
           updatedAt: new Date(),
         };

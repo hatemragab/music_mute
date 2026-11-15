@@ -94,6 +94,35 @@ test("uses one shared subscription, receives pushes and never repeats a ticket w
   second();
   expect(socket.sent.at(-1)?.type).toBe("unsubscribe");
 });
+
+test("job snapshots decode optional nullable original thumbnails with the same HTTP validation", async () => {
+  const f = await fixture();
+  const updates = vi.fn();
+  f.client.watch("jobs", {}, updates);
+  const socket = f.sockets[0];
+  socket.ready();
+  const original = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg";
+  socket.snapshot(1, {
+    items: [
+      { id: "valid", thumbnail_url: original },
+      { id: "invalid", thumbnail_url: "http://i.ytimg.com/image.jpg" },
+      { id: "null", thumbnail_url: null },
+      { id: "old" },
+    ],
+    next_cursor: null,
+  });
+  expect(updates).toHaveBeenLastCalledWith({
+    data: {
+      items: [
+        { id: "valid", thumbnailUrl: original },
+        { id: "invalid", thumbnailUrl: null },
+        { id: "null", thumbnailUrl: null },
+        { id: "old" },
+      ],
+      nextCursor: null,
+    },
+  });
+});
 test("keeps one socket alive while the browser tab is hidden", async () => {
   const f = await fixture();
   const socket = f.sockets[0];

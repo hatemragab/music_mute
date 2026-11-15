@@ -59,6 +59,7 @@ import { readHiddenTerminalLine } from "./secret-prompt.js";
 import { WorkerEnrollmentError } from "../../enrollment/enrollment-client.js";
 import {
   installMacUserWorker,
+  inspectPendingMacUserEnrollment,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
   resumeMacUserInstallation,
@@ -541,7 +542,8 @@ async function runUnlocked(
         );
       const label = flags.get("label");
       if (label === undefined) throw new TypeError("install requires --label");
-      if (newCodeFlag.present) await resetPendingMacUserEnrollment(layout);
+      if (newCodeFlag.present)
+        await resetPendingMacUserEnrollment(layout, { launchAgent });
       const pendingCredential =
         await readPendingMacUserEnrollmentCredential(layout);
       const enrollmentCredential =
@@ -1325,6 +1327,10 @@ async function readStatus(
     ? await loadLocalLifecycle(layout.lifecyclePath).catch(() => null)
     : null;
   const service = await launchAgent.status();
+  const pendingEnrollment = await inspectPendingMacUserEnrollment(
+    layout,
+    service,
+  );
   const runtime = installed
     ? await loadLocalRuntimeStatus(layout.runtimeStatusPath).catch(() => null)
     : null;
@@ -1456,6 +1462,7 @@ async function readStatus(
   return {
     schemaVersion: 2,
     installed,
+    pendingEnrollment,
     machineId: identity.machineId,
     activeReleaseVersion,
     lifecycle: lifecycle?.intent ?? "unknown",

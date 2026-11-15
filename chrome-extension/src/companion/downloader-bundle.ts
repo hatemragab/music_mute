@@ -1,3 +1,4 @@
+import "./local-debug.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readFile, readdir } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { PO_TOKEN_PROVIDER_WHEEL } from "./youtube-runtime.js";
 export const DOWNLOADER_VERSION = "2026.08.19";
 export const DOWNLOADER_BOOTSTRAP = "downloader_bootstrap.py";
 export const DOWNLOADER_BOOTSTRAP_SHA256 =
-  "ccf96466d04fcf623292471e73ca372ac7b90d5a0ccc7a0875b6258ca921d488";
+  "2f510f42390050de123e257a8ae85a00266409e02a8142490c3a1b04a9dda6a2";
 export const DOWNLOADER_WHEELS = [
   PO_TOKEN_PROVIDER_WHEEL,
   {
@@ -69,7 +70,7 @@ export async function verifyDownloaderBundle(
       information.nlink !== 1 ||
       (!packaged && information.uid !== process.getuid?.()) ||
       information.mode & modeMask ||
-      information.size > (file.endsWith(".whl") ? 4 * 1024 * 1024 : 32 * 1024)
+      information.size > (file.endsWith(".whl") ? 4 * 1024 * 1024 : 64 * 1024)
     )
       invalid();
   }
@@ -96,7 +97,7 @@ export async function verifyDownloaderBundle(
     bootstrapInfo.isSymbolicLink() ||
     bootstrapInfo.nlink !== 1 ||
     bootstrapInfo.mode & modeMask ||
-    bootstrapInfo.size > 32 * 1024 ||
+    bootstrapInfo.size > 64 * 1024 ||
     (!appBootstrap &&
       (bootstrap.file !== DOWNLOADER_BOOTSTRAP ||
         bootstrap.sha256 !== DOWNLOADER_BOOTSTRAP_SHA256 ||

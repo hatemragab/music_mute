@@ -1,6 +1,7 @@
-import { isAbsolute } from "node:path";
+import { desktopInputPathIsSafe } from "./local-platform.js";
 import { MVP_MAX_DURATION_SECONDS, parseYouTubeVideoId } from "./protocol.js";
 import { isOfflineVocalsBudget } from "./storage-policy.js";
+import { parseStrictJson } from "./strict-json.js";
 
 export const DESKTOP_PROTOCOL_VERSION = 1 as const;
 export { OFFLINE_VOCALS_BUDGET_BYTES } from "./storage-policy.js";
@@ -86,11 +87,14 @@ export function validateDesktopSession(
     throw new DesktopProtocolError();
   return value as unknown as DesktopSession;
 }
-export function parseDesktopRequest(raw: string): DesktopRequest {
+export function parseDesktopRequest(
+  raw: string,
+  options: { platform?: NodeJS.Platform } = {},
+): DesktopRequest {
   if (Buffer.byteLength(raw) > 64 * 1024) throw new DesktopProtocolError();
   let value: unknown;
   try {
-    value = JSON.parse(raw);
+    value = parseStrictJson(raw, 64 * 1024);
   } catch {
     throw new DesktopProtocolError();
   }
@@ -191,7 +195,7 @@ export function parseDesktopRequest(raw: string): DesktopRequest {
       if (
         typeof payload.source_path !== "string" ||
         payload.source_path.length > 4096 ||
-        !isAbsolute(payload.source_path) ||
+        !desktopInputPathIsSafe(payload.source_path, options.platform) ||
         payload.source_path.includes("\0")
       )
         throw new DesktopProtocolError();

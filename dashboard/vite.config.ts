@@ -41,8 +41,17 @@ export default defineConfig(({ command, mode }) => {
       include: ["@noble/hashes/sha2.js", "@noble/hashes/utils.js"],
     },
     envDir: false,
-    define: Object.fromEntries(
-      publicEnvironmentKeys.map((key) => [
+    define: Object.fromEntries([
+      ["__MUSICMUTE_LOCAL_DEBUG__", JSON.stringify(command === "serve")],
+      ...["ENABLED", "PAYLOADS", "CONSOLE"].map((name) => [
+        `import.meta.env.VITE_MUSICMUTE_LOG_${name}`,
+        JSON.stringify(
+          command === "serve"
+            ? (environment[`VITE_MUSICMUTE_LOG_${name}`] ?? "0")
+            : "0",
+        ),
+      ]),
+      ...publicEnvironmentKeys.map((key) => [
         `import.meta.env.${key}`,
         JSON.stringify(
           key === "VITE_SENTRY_RELEASE"
@@ -50,7 +59,7 @@ export default defineConfig(({ command, mode }) => {
             : (environment[key] ?? ""),
         ),
       ]),
-    ),
+    ]),
     build: { sourcemap: uploadSourceMaps ? "hidden" : false },
     plugins: [
       react(),

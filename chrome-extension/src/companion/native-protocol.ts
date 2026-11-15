@@ -4,6 +4,7 @@ import {
   MVP_MAX_DURATION_SECONDS,
   type NativeCommand,
 } from "../shared/protocol.js";
+import { parseStrictJson } from "../shared/strict-json.js";
 export const MAX_NATIVE_FRAME = 64 * 1024;
 const uuid =
   /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -25,7 +26,11 @@ export class FrameDecoder {
         throw new Error("FRAME_INVALID");
       if (this.pending.length < length + 4) break;
       frames.push(
-        JSON.parse(this.pending.subarray(4, length + 4).toString("utf8")),
+        parseStrictJson(
+          new TextDecoder("utf-8", { fatal: true }).decode(
+            this.pending.subarray(4, length + 4),
+          ),
+        ),
       );
       this.pending = this.pending.subarray(length + 4);
     }
@@ -106,6 +111,19 @@ export function validateCommand(value: unknown): NativeCommand {
               ].includes(capability),
           ) ||
           new Set(payload.capabilities).size !== payload.capabilities.length))
+    )
+      throw new Error("INVALID_COMMAND");
+  } else if (item.type === "STATUS" && Object.keys(payload).length) {
+    if (
+      Object.keys(payload).sort().join() !==
+        "duration_seconds,job_id,video_id" ||
+      !isVideoId(payload.video_id) ||
+      typeof payload.job_id !== "string" ||
+      !uuid.test(payload.job_id) ||
+      typeof payload.duration_seconds !== "number" ||
+      !Number.isFinite(payload.duration_seconds) ||
+      payload.duration_seconds <= 0 ||
+      payload.duration_seconds > MVP_MAX_DURATION_SECONDS
     )
       throw new Error("INVALID_COMMAND");
   } else if (

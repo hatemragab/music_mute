@@ -4,6 +4,19 @@
   "routes": [
     {
       "controller": "AdminUsersController",
+      "method": "GET",
+      "path": "/admin/users/:id/devices",
+      "permissions": ["users.read"],
+      "roles": ["owner", "support"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "page",
+      "validationOwner": "dto",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminUsersController",
       "method": "PUT",
       "path": "/admin/users/:id/worker-registration",
       "permissions": ["users.worker-registration.manage"],
@@ -727,9 +740,9 @@
         "expected_revision": 0,
         "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
       },
-      "responseCategory": "upload-reservation",
-      "validationOwner": "service",
-      "successStatus": 201
+      "responseCategory": "retired",
+      "validationOwner": "none",
+      "successStatus": 400
     },
     {
       "controller": "AdminReleaseUploadsController",
@@ -742,9 +755,9 @@
       "requestBody": {
         "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
       },
-      "responseCategory": "upload",
-      "validationOwner": "service",
-      "successStatus": 201
+      "responseCategory": "retired",
+      "validationOwner": "none",
+      "successStatus": 400
     },
     {
       "controller": "AdminReleaseUploadsController",
@@ -769,6 +782,41 @@
       "rateClass": "read",
       "requestBody": null,
       "responseCategory": "policy",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminUpdatePolicyController",
+      "method": "GET",
+      "path": "/admin/update-policy/desktop",
+      "permissions": ["releases.read"],
+      "roles": ["owner", "release_manager", "viewer"],
+      "freshAuth": false,
+      "rateClass": "read",
+      "requestBody": null,
+      "responseCategory": "desktop-policy",
+      "validationOwner": "service",
+      "successStatus": 200
+    },
+    {
+      "controller": "AdminUpdatePolicyController",
+      "method": "PATCH",
+      "path": "/admin/update-policy/desktop",
+      "permissions": ["releases.manage"],
+      "roles": ["owner", "release_manager"],
+      "freshAuth": true,
+      "rateClass": "write",
+      "requestBody": {
+        "expected_revision": 2,
+        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reason": "Reviewed desktop build",
+        "platforms": {
+          "windows": {
+            "minimum_build": 3
+          }
+        }
+      },
+      "responseCategory": "desktop-policy",
       "validationOwner": "service",
       "successStatus": 200
     },

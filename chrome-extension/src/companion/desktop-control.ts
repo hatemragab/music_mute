@@ -1,3 +1,4 @@
+import "./local-debug.js";
 import { loadLocalConfig } from "./config.js";
 import {
   parseDesktopRequest,

@@ -1,0 +1,48 @@
+cmake_minimum_required(VERSION 3.24)
+project(musicmute_msix_qa LANGUAGES CXX)
+if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT MSVC)
+  message(FATAL_ERROR "MSIX prototype requires native Windows x64 MSVC")
+endif()
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qa-config.hpp")
+  message(FATAL_ERROR "Generate an exclusive QA plan before compiling")
+endif()
+# Approved Z440 SDK readback, 2026-10-12. No PATH lookup or installer download.
+set(MM_QA_MAKEAPPX "C:/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64/MakeAppx.exe")
+set(MM_QA_MAKEAPPX_SHA256 "00fff202b71c1266b8c3899701e42b5468ea153b2b33a0a47215fe27695f16d0")
+if(NOT EXISTS "${MM_QA_MAKEAPPX}")
+  message(FATAL_ERROR "Approved MakeAppx input is missing")
+endif()
+file(SHA256 "${MM_QA_MAKEAPPX}" MM_QA_MAKEAPPX_ACTUAL)
+if(NOT MM_QA_MAKEAPPX_ACTUAL STREQUAL MM_QA_MAKEAPPX_SHA256)
+  message(FATAL_ERROR "Approved MakeAppx input changed")
+endif()
+add_executable(MusicMuteMsixProbe probe.cpp)
+add_executable(MusicMuteMsixChromeHost probe.cpp)
+target_compile_definitions(MusicMuteMsixChromeHost PRIVATE MUSICMUTE_MSIX_QA_CHROME_HOST)
+add_executable(MusicMuteMsixProtocolTest protocol.test.cpp)
+foreach(target MusicMuteMsixProbe MusicMuteMsixChromeHost MusicMuteMsixProtocolTest)
+  target_compile_features(${target} PRIVATE cxx_std_20)
+  target_compile_definitions(${target} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+  target_compile_options(${target} PRIVATE /W4 /WX /wd4505 /permissive- /sdl /guard:cf /utf-8)
+  target_link_options(${target} PRIVATE /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA /guard:cf /MANIFEST:EMBED /MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest)
+  set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endforeach()
+foreach(target MusicMuteMsixProbe MusicMuteMsixChromeHost)
+  target_link_libraries(${target} PRIVATE advapi32 crypt32 wintrust shell32 ole32 bcrypt windowsapp runtimeobject)
+endforeach()
+include(CTest)
+add_test(NAME msix-qa-protocol COMMAND MusicMuteMsixProtocolTest)
+set_tests_properties(msix-qa-protocol PROPERTIES TIMEOUT 10)
+# native-build.ts recreates the original guard's source geometry under the
+# exclusive plan/repository. Packaging stays in that guarded compile Job.
+get_filename_component(MM_QA_PLAN "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOLUTE)
+if(NOT EXISTS "${MM_QA_PLAN}/payload/AppxManifest.xml")
+  message(FATAL_ERROR "Exclusive QA payload manifest is missing")
+endif()
+add_custom_command(OUTPUT "${MM_QA_PLAN}/MusicMute-S03-QA.msix"
+  COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:MusicMuteMsixProbe>" "${MM_QA_PLAN}/payload/MusicMuteMsixProbe.exe"
+  COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:MusicMuteMsixChromeHost>" "${MM_QA_PLAN}/payload/MusicMuteMsixChromeHost.exe"
+  COMMAND "${MM_QA_MAKEAPPX}" pack /d "${MM_QA_PLAN}/payload" /p "${MM_QA_PLAN}/MusicMute-S03-QA.msix"
+  DEPENDS MusicMuteMsixProbe MusicMuteMsixChromeHost "${MM_QA_PLAN}/payload/AppxManifest.xml"
+  VERBATIM)
+add_custom_target(MusicMuteMsixPackage ALL DEPENDS "${MM_QA_PLAN}/MusicMute-S03-QA.msix")

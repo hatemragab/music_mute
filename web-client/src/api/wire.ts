@@ -1,3 +1,5 @@
+import { thumbnailUrl } from "./thumbnail";
+
 const keyToWire = (key: string) =>
   key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 const keyFromWire = (key: string) =>
@@ -19,9 +21,11 @@ function convert(
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       keyTransform(key),
-      key === "headers" || (parent === "signed" && key === "metadata")
-        ? item
-        : convert(item, keyTransform, key),
+      keyTransform === keyFromWire && key === "thumbnail_url"
+        ? thumbnailUrl(item)
+        : key === "headers" || (parent === "signed" && key === "metadata")
+          ? item
+          : convert(item, keyTransform, key),
     ]),
   );
 }

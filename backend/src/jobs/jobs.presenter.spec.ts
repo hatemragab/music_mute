@@ -165,3 +165,36 @@ it('exposes owner audio integrity metadata but never private keys or arbitrary p
   expect(JSON.stringify(presented)).not.toContain('private-provider');
   expect(presented.output).not.toHaveProperty('etag');
 });
+
+it('exposes a nullable original thumbnail without leaking other private metadata', () => {
+  const thumbnail =
+    'https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=fixture&rs=fixture';
+  const metadata = {
+    schema_version: 1 as const,
+    thumbnail_url: thumbnail,
+    title: 'Private metadata title',
+  };
+  const presented = presentJob({ ...job, extra_data: metadata } as Job);
+  expect(presented.thumbnailUrl).toBe(thumbnail);
+  expect(presented).not.toHaveProperty('extra_data');
+  expect(presented).not.toHaveProperty('extraData');
+  expect(presentJob(job).thumbnailUrl).toBeNull();
+  expect(
+    presentJob({ ...job, extra_data: null } as Job).thumbnailUrl,
+  ).toBeNull();
+  expect(
+    presentJob({
+      ...job,
+      extra_data: { schema_version: 1, thumbnail_url: null },
+    } as Job).thumbnailUrl,
+  ).toBeNull();
+  expect(
+    presentJob({
+      ...job,
+      extra_data: {
+        schema_version: 1,
+        thumbnail_url: 'https://provider.invalid/private',
+      },
+    } as Job).thumbnailUrl,
+  ).toBeNull();
+});

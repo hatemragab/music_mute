@@ -85,6 +85,13 @@ struct TransferCompletion: Sendable {
     let task = session.uploadTask(with: request, fromFile: file.fileURL)
     task.taskDescription = String(data: try JSONEncoder().encode(context), encoding: .utf8)
     task.resume()
+    LocalDiagnostics.emit(
+      "transfer.upload_scheduled", category: "transfer",
+      data: [
+        "operationId": context.operationId.uuidString.lowercased(),
+        "transferId": context.transferId.uuidString.lowercased(), "taskId": task.taskIdentifier,
+        "bytes": file.bytes, "contentType": file.contentType, "body": ["omitted": "binary_stream"],
+      ], userID: context.ownerUid)
     return task.taskIdentifier
   }
 
@@ -221,6 +228,18 @@ extension BackgroundTransferCoordinator: URLSessionTaskDelegate, URLSessionDeleg
     let completion = TransferCompletion(
       context: context, statusCode: status,
       succeeded: error == nil && status.map { (200...299).contains($0) } == true)
+    var details: [String: Any] = [
+      "operationId": context.operationId.uuidString.lowercased(),
+      "transferId": context.transferId.uuidString.lowercased(), "taskId": task.taskIdentifier,
+      "bytesSent": task.countOfBytesSent,
+      "result": completion.succeeded ? "provider_accepted" : "failed",
+      "body": ["omitted": "binary_stream"],
+    ]
+    if let status { details["status"] = status }
+    if let error { details["error"] = LocalDiagnostics.error(error) }
+    LocalDiagnostics.emit(
+      "transfer.upload_completed", category: "transfer",
+      level: completion.succeeded ? "info" : "warn", data: details, userID: context.ownerUid)
     MainActor.assumeIsolated { self.receiveCompletion(completion) }
   }
 

@@ -24,6 +24,23 @@ const REQUIRED_FILES = [
   "runtime/licenses/ffmpeg/COPYING.LGPLv2.1",
   "runtime/licenses/lame/COPYING",
 ] as const;
+const USER_REQUIRED_FILES = [
+  ...REQUIRED_FILES.filter(
+    (path) =>
+      !path.startsWith("runtime/service/") && !path.startsWith("installer/"),
+  ),
+  "runtime/native/musicmute-native.exe",
+  "agent/session-agent.cjs",
+  "agent/login-worker.cjs",
+  "agent/fleet.cjs",
+  "agent/personal.cjs",
+  "agent/prepare.cjs",
+  "app/engine/musicmute_engine/windows_gpu.py",
+  "app/engine/musicmute_engine/provider_adapter.py",
+  "app/engine/musicmute_engine/qualification.py",
+  "app/engine/musicmute_engine/consumer_personal.py",
+] as const;
+export type WindowsInstallationProfile = "windows-user";
 
 export interface WindowsReleaseFileEntry {
   path: string;
@@ -41,6 +58,7 @@ export type WindowsReleaseEntry =
   WindowsReleaseFileEntry | WindowsReleaseDirectoryEntry;
 
 export interface WindowsReleaseManifest {
+  installationProfile?: WindowsInstallationProfile;
   schemaVersion: 1;
   platform: "win32";
   architecture: "x64";
@@ -51,22 +69,25 @@ export interface WindowsReleaseManifest {
 export async function createWindowsReleaseManifest(
   releaseRoot: string,
   releaseVersion: string,
+  installationProfile?: WindowsInstallationProfile,
 ): Promise<WindowsReleaseManifest> {
   const root = safeRoot(releaseRoot);
   const info = await lstat(root);
   if (!info.isDirectory() || info.isSymbolicLink())
     throw new TypeError("Windows release root is unsafe");
   assertVersion(releaseVersion);
+  assertProfile(installationProfile);
   const entries: WindowsReleaseEntry[] = [];
   await walk(root, root, entries);
   entries.sort((left, right) => left.path.localeCompare(right.path));
   if (entries.length > MAX_ENTRIES)
     throw new TypeError("Windows release contains too many entries");
-  await assertShape(root);
+  await assertShape(root, installationProfile, entries);
   return {
     schemaVersion: WINDOWS_RELEASE_SCHEMA_VERSION,
     platform: "win32",
     architecture: "x64",
+    ...(installationProfile === undefined ? {} : { installationProfile }),
     releaseVersion,
     entries,
   };
@@ -75,9 +96,14 @@ export async function createWindowsReleaseManifest(
 export async function writeWindowsReleaseManifest(
   releaseRoot: string,
   releaseVersion: string,
+  installationProfile?: WindowsInstallationProfile,
 ): Promise<WindowsReleaseManifest> {
   const root = safeRoot(releaseRoot);
-  const manifest = await createWindowsReleaseManifest(root, releaseVersion);
+  const manifest = await createWindowsReleaseManifest(
+    root,
+    releaseVersion,
+    installationProfile,
+  );
   const handle = await open(join(root, WINDOWS_RELEASE_MANIFEST), "wx", 0o600);
   try {
     await handle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, "utf8");
@@ -89,6 +115,7 @@ export async function writeWindowsReleaseManifest(
 
 export async function verifyWindowsRelease(
   releaseRoot: string,
+  expectedInstallationProfile?: WindowsInstallationProfile,
 ): Promise<WindowsReleaseManifest> {
   const root = safeRoot(releaseRoot);
   const path = join(root, WINDOWS_RELEASE_MANIFEST);
@@ -106,10 +133,16 @@ export async function verifyWindowsRelease(
   } catch {
     throw new TypeError("Windows release manifest is not valid JSON");
   }
-  const expected = parseManifest(decoded);
+  const expected = parseWindowsReleaseManifest(decoded);
+  assertProfile(expectedInstallationProfile);
+  if (expected.installationProfile !== expectedInstallationProfile)
+    throw new TypeError(
+      "Windows release installation profile does not match the requested runtime",
+    );
   const actual = await createWindowsReleaseManifest(
     root,
     expected.releaseVersion,
+    expected.installationProfile,
   );
   if (JSON.stringify(actual) !== JSON.stringify(expected))
     throw new TypeError(
@@ -150,7 +183,9 @@ async function walk(
   }
 }
 
-function parseManifest(value: unknown): WindowsReleaseManifest {
+export function parseWindowsReleaseManifest(
+  value: unknown,
+): WindowsReleaseManifest {
   const record = strictRecord(
     value,
     new Set([
@@ -159,6 +194,7 @@ function parseManifest(value: unknown): WindowsReleaseManifest {
       "architecture",
       "releaseVersion",
       "entries",
+      "installationProfile",
     ]),
     "Windows release manifest",
   );
@@ -171,6 +207,7 @@ function parseManifest(value: unknown): WindowsReleaseManifest {
   if (typeof record.releaseVersion !== "string")
     throw new TypeError("Windows release version is invalid");
   assertVersion(record.releaseVersion);
+  assertProfile(record.installationProfile);
   if (
     !Array.isArray(record.entries) ||
     record.entries.length < 1 ||
@@ -189,6 +226,12 @@ function parseManifest(value: unknown): WindowsReleaseManifest {
     schemaVersion: WINDOWS_RELEASE_SCHEMA_VERSION,
     platform: "win32",
     architecture: "x64",
+    ...(record.installationProfile === undefined
+      ? {}
+      : {
+          installationProfile:
+            record.installationProfile as WindowsInstallationProfile,
+        }),
     releaseVersion: record.releaseVersion,
     entries,
   };
@@ -224,15 +267,56 @@ function parseEntry(value: unknown, index: number): WindowsReleaseEntry {
   };
 }
 
-async function assertShape(root: string): Promise<void> {
+async function assertShape(
+  root: string,
+  profile: WindowsInstallationProfile | undefined,
+  entries: readonly WindowsReleaseEntry[],
+): Promise<void> {
   const engine = await lstat(join(root, "app", "engine"));
   if (!engine.isDirectory() || engine.isSymbolicLink())
     throw new TypeError("Windows release engine is missing");
-  for (const path of REQUIRED_FILES) {
+  if (profile === "windows-user") {
+    const paths = entries.map((entry) => entry.path.toLowerCase());
+    if (
+      paths.some(
+        (path) =>
+          path === "runtime/service" ||
+          path.startsWith("runtime/service/") ||
+          path === "installer/manage-windows-service.ps1",
+      )
+    )
+      throw new TypeError(
+        "Windows user release must not contain a machine service payload",
+      );
+    if (new Set(paths).size !== paths.length)
+      throw new TypeError(
+        "Windows user release has case-insensitive path aliases",
+      );
+    for (const path of paths)
+      if (
+        path
+          .split("/")
+          .some(
+            (part) =>
+              /[<>:"|?*\p{Cc}]/u.test(part) ||
+              /[. ]$/u.test(part) ||
+              /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/u.test(part),
+          )
+      )
+        throw new TypeError("Windows user release path is unsafe");
+  }
+  for (const path of profile === "windows-user"
+    ? USER_REQUIRED_FILES
+    : REQUIRED_FILES) {
     const info = await lstat(join(root, ...path.split("/")));
     if (!info.isFile() || info.isSymbolicLink() || info.size < 1)
       throw new TypeError(`Windows release file is missing: ${path}`);
   }
+}
+
+function assertProfile(value: unknown): void {
+  if (value !== undefined && value !== "windows-user")
+    throw new TypeError("Windows release installation profile is unsupported");
 }
 
 function strictRecord(

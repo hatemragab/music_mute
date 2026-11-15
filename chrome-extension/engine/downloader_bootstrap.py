@@ -43,6 +43,248 @@ EJS_HASHES = {
 class BootstrapError(Exception):
     """Only fixed codes cross this boundary; no exception paths or text."""
 
+def validate_windows_path(path):
+    """Only ordinary absolute managed paths; device/UNC/ADS aliases are refused."""
+    import ntpath
+    if not isinstance(path, str) or not 3 < len(path) < 32760:
+        raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+    drive, tail = ntpath.splitdrive(path)
+    if not re.fullmatch(r"[A-Za-z]:", drive) or not tail.startswith("\\"):
+        raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+    parts = tail[1:].split("\\")
+    if any(not part or part in (".", "..") or re.search(r'[<>:"|?*\x00-\x1f]', part)
+           or part.endswith((".", " ")) or re.match(r"(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", part)
+           for part in parts):
+        raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+    return path
+
+
+def validate_windows_security(owner, current, entries):
+    """A real handle's DACL, never POSIX mode/UID, establishes Windows access."""
+    if (owner != current or current in {"S-1-5-18", "S-1-5-19", "S-1-5-20"}
+            or not re.fullmatch(r"S-1-(?:\d+-){1,14}\d+", current) or not entries or len(entries) > 16):
+        raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+    own_access = False
+    for kind, sid in entries:
+        if kind not in (0, 1) or (kind == 0 and sid not in {current, "S-1-5-18"}):
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        own_access = own_access or (kind == 0 and sid == current)
+    if not own_access:
+        raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+
+
+class WindowsFiles:
+    """Narrow Win32 file/ACL adapter, sealed into the verified bootstrap hash."""
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes as w
+        self.c, self.w = ctypes, w
+        self.kernel = ctypes.WinDLL("kernel32.dll", winmode=0x00000800, use_last_error=True)
+        self.advapi = ctypes.WinDLL("advapi32.dll", winmode=0x00000800, use_last_error=True)
+        def typed(library, name, result, arguments):
+            function = getattr(library, name)
+            function.restype, function.argtypes = result, arguments
+            return function
+        pointer = ctypes.c_void_p
+        self._close = typed(self.kernel, "CloseHandle", w.BOOL, [w.HANDLE])
+        self.local_free = typed(self.kernel, "LocalFree", pointer, [pointer])
+        self.create_file = typed(self.kernel, "CreateFileW", w.HANDLE, [w.LPCWSTR, w.DWORD, w.DWORD, pointer, w.DWORD, w.DWORD, w.HANDLE])
+        self.file_info = typed(self.kernel, "GetFileInformationByHandle", w.BOOL, [w.HANDLE, pointer])
+        self.windows_directory = typed(self.kernel, "GetWindowsDirectoryW", w.UINT, [w.LPWSTR, w.UINT])
+        self.create_directory = typed(self.kernel, "CreateDirectoryW", w.BOOL, [w.LPCWSTR, pointer])
+        self.process = typed(self.kernel, "GetCurrentProcess", w.HANDLE, [])
+        self.open_token = typed(self.advapi, "OpenProcessToken", w.BOOL, [w.HANDLE, w.DWORD, ctypes.POINTER(w.HANDLE)])
+        self.token_info = typed(self.advapi, "GetTokenInformation", w.BOOL, [w.HANDLE, ctypes.c_int, pointer, w.DWORD, ctypes.POINTER(w.DWORD)])
+        self.sid_string = typed(self.advapi, "ConvertSidToStringSidW", w.BOOL, [pointer, ctypes.POINTER(w.LPWSTR)])
+        self.valid_sid = typed(self.advapi, "IsValidSid", w.BOOL, [pointer])
+        self.sid_length = typed(self.advapi, "GetLengthSid", w.DWORD, [pointer])
+        self.security = typed(self.advapi, "GetSecurityInfo", w.DWORD, [w.HANDLE, ctypes.c_int, w.DWORD, ctypes.POINTER(pointer), pointer, ctypes.POINTER(pointer), pointer, ctypes.POINTER(pointer)])
+        self.get_ace = typed(self.advapi, "GetAce", w.BOOL, [pointer, w.DWORD, ctypes.POINTER(pointer)])
+        self.sddl = typed(self.advapi, "ConvertStringSecurityDescriptorToSecurityDescriptorW", w.BOOL, [w.LPCWSTR, w.DWORD, ctypes.POINTER(pointer), pointer])
+        self.parents, self.descriptor_parents = {}, {}
+        self.current_sid = self._current_sid()
+
+    def close(self, handle):
+        self._close(handle)
+        for parent in self.parents.pop(handle, []):
+            self._close(parent)
+
+    def _parent_handles(self, path):
+        import ntpath
+        handles, parent = [], ntpath.dirname(path)
+        try:
+            while parent:
+                native = "\\\\?\\" + parent if len(parent) > 248 else parent
+                handle = self.create_file(native, 0x80, 1, None, 3, 0x02200000, None)
+                if handle == self.c.c_void_p(-1).value or handle is None:
+                    raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+                handles.append(handle)
+                info = self.c.create_string_buffer(52)
+                if not self.file_info(handle, info):
+                    raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+                attributes = self.c.c_uint32.from_buffer(info).value
+                if attributes & 0x400 or not attributes & 0x10:
+                    raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+                next_parent = ntpath.dirname(parent)
+                if next_parent == parent:
+                    break
+                parent = next_parent
+            return handles
+        except Exception:
+            for handle in handles:
+                self._close(handle)
+            raise
+
+    def _sid(self, pointer):
+        if not pointer or not self.valid_sid(pointer):
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        result = self.w.LPWSTR()
+        if not self.sid_string(pointer, self.c.byref(result)):
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        try:
+            return result.value
+        finally:
+            self.local_free(self.c.cast(result, self.c.c_void_p))
+
+    def _current_sid(self):
+        token, size = self.w.HANDLE(), self.w.DWORD()
+        if not self.open_token(self.process(), 8, self.c.byref(token)):
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        try:
+            self.token_info(token, 1, None, 0, self.c.byref(size))
+            if not 8 <= size.value <= 65536:
+                raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+            buffer = self.c.create_string_buffer(size.value)
+            if not self.token_info(token, 1, buffer, size, self.c.byref(size)):
+                raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+            return self._sid(self.c.cast(buffer, self.c.POINTER(self.c.c_void_p)).contents.value)
+        finally:
+            self.close(token)
+
+    def _check(self, handle, directory):
+        c, w = self.c, self.w
+        class FileInfo(c.Structure):
+            _fields_ = [("attributes", w.DWORD), ("times", w.DWORD * 6), ("volume", w.DWORD),
+                        ("size_high", w.DWORD), ("size_low", w.DWORD), ("links", w.DWORD),
+                        ("index_high", w.DWORD), ("index_low", w.DWORD)]
+        information = FileInfo()
+        if (not self.file_info(handle, c.byref(information)) or information.attributes & 0x400
+                or bool(information.attributes & 0x10) != directory or (not directory and information.links != 1)):
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        owner, dacl, descriptor = c.c_void_p(), c.c_void_p(), c.c_void_p()
+        if self.security(handle, 1, 5, c.byref(owner), None, c.byref(dacl), None, c.byref(descriptor)) != 0:
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        try:
+            if not dacl:
+                raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+            count = c.c_ushort.from_address(dacl.value + 4).value
+            if not 1 <= count <= 16:
+                raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+            entries = []
+            for index in range(count):
+                ace = c.c_void_p()
+                if not self.get_ace(dacl, index, c.byref(ace)) or not ace:
+                    raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+                kind = c.c_ubyte.from_address(ace.value).value
+                length = c.c_ushort.from_address(ace.value + 2).value
+                if kind not in (0, 1) or length < 16 or not self.valid_sid(ace.value + 8) or self.sid_length(ace.value + 8) > length - 8:
+                    raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+                entries.append((kind, self._sid(ace.value + 8)))
+            validate_windows_security(self._sid(owner), self.current_sid, entries)
+        finally:
+            self.local_free(descriptor)
+
+    def open(self, path, directory=False):
+        c = self.c
+        validate_windows_path(path)
+        # No write/delete sharing: the checked object cannot be replaced while
+        # this handle is converted to the descriptor used for byte verification.
+        parents = self._parent_handles(path)
+        native = "\\\\?\\" + path if len(path) > 248 else path
+        handle = self.create_file(native, 0x80000000, 1, None, 3, 0x00200000 | (0x02000000 if directory else 0), None)
+        if handle == c.c_void_p(-1).value or handle is None:
+            for parent in parents:
+                self._close(parent)
+            raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
+        self.parents[handle] = parents
+        try:
+            self._check(handle, directory)
+            return handle
+        except Exception:
+            self.close(handle)
+            raise
+
+    def read_descriptor(self, path):
+        import msvcrt
+        handle = self.open(path)
+        try:
+            descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+            self.descriptor_parents[descriptor] = self.parents.pop(handle, [])
+            return descriptor
+        except Exception:
+            self.close(handle)
+            raise
+
+    def release_descriptor_parents(self, descriptor):
+        for parent in self.descriptor_parents.pop(descriptor, []):
+            self._close(parent)
+
+    def make_private_directory(self, path):
+        c, w = self.c, self.w
+        validate_windows_path(path)
+        descriptor = c.c_void_p()
+        text = "O:" + self.current_sid + "D:P(A;OICI;FA;;;" + self.current_sid + ")(A;OICI;FA;;;SY)"
+        if not self.sddl(text, 1, c.byref(descriptor), None):
+            raise BootstrapError("DOWNLOADER_ISOLATION_REQUIRED")
+        class Attributes(c.Structure):
+            _fields_ = [("length", w.DWORD), ("descriptor", c.c_void_p), ("inherit", w.BOOL)]
+        attributes = Attributes(c.sizeof(Attributes), descriptor, False)
+        try:
+            native = "\\\\?\\" + path if len(path) > 248 else path
+            if not self.create_directory(native, c.byref(attributes)):
+                raise BootstrapError("DOWNLOADER_ISOLATION_REQUIRED")
+        finally:
+            self.local_free(descriptor)
+        handle = self.open(path, directory=True)
+        self.close(handle)
+
+    def system_root(self):
+        buffer = self.c.create_unicode_buffer(32768)
+        length = self.windows_directory(buffer, len(buffer))
+        if not 0 < length < len(buffer):
+            raise BootstrapError("DOWNLOADER_ISOLATION_REQUIRED")
+        return buffer.value
+
+
+_WINDOWS_FILES = None
+
+def windows_files():
+    global _WINDOWS_FILES
+    if _WINDOWS_FILES is None:
+        _WINDOWS_FILES = WindowsFiles()
+    return _WINDOWS_FILES
+
+
+@contextmanager
+def private_guest_directory(temporary_root):
+    if sys.platform == "win32":
+        import uuid
+        import shutil
+        home = os.path.join(temporary_root, "musicmute-guest-" + uuid.uuid4().hex)
+        windows_files().make_private_directory(home)
+        try:
+            yield home
+        finally:
+            # Only the newly owned guest tree is cleaned, never its parent.
+            shutil.rmtree(home)
+    else:
+        with tempfile.TemporaryDirectory(prefix="musicmute-guest-", dir=temporary_root) as home:
+            yield home
+
+
+def deno_path(runtime_root):
+    return os.path.join(runtime_root, "bin", "deno.exe" if sys.platform == "win32" else "deno")
+
 
 TRACK_ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 SIGNATURE_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
@@ -115,14 +357,15 @@ def isolated_downloader_environment():
     temporary_root = previous.get("TMPDIR")
     if not temporary_root or not os.path.isabs(temporary_root):
         raise BootstrapError("DOWNLOADER_ISOLATION_REQUIRED")
-    information = os.lstat(temporary_root)
-    if (
-        not stat.S_ISDIR(information.st_mode)
-        or information.st_uid != os.getuid()
-        or information.st_mode & 0o077
-    ):
-        raise BootstrapError("DOWNLOADER_ISOLATION_REQUIRED")
-    with tempfile.TemporaryDirectory(prefix="musicmute-guest-", dir=temporary_root) as home:
+    if sys.platform == "win32":
+        handle = windows_files().open(temporary_root, directory=True)
+        windows_files().close(handle)
+    else:
+        information = os.lstat(temporary_root)
+        if (not stat.S_ISDIR(information.st_mode) or information.st_uid != os.getuid()
+                or information.st_mode & 0o077):
+            raise BootstrapError("DOWNLOADER_ISOLATION_REQUIRED")
+    with private_guest_directory(temporary_root) as home:
         environment = {
             name: previous[name]
             for name in ("PATH", "LANG", "LC_ALL", "MUSICMUTE_LOCAL_PARENT_PID", "DENO_DIR", "MUSICMUTE_UPDATE_LEASE_FD", "MUSICMUTE_LOCAL_ROOT", "MUSICMUTE_LOCAL_APP_RESOURCES")
@@ -139,7 +382,16 @@ def isolated_downloader_environment():
             "DENO_NO_UPDATE_CHECK": "1",
             "TOKEN_TTL": "1",
         })
-        os.mkdir(environment["XDG_CACHE_HOME"], 0o700)
+        if sys.platform == "win32":
+            system_root = windows_files().system_root()
+            environment.update({"SystemRoot": system_root, "WINDIR": system_root,
+                                "TEMP": home, "TMP": home, "USERPROFILE": home,
+                                "APPDATA": os.path.join(home, "config"),
+                                "LOCALAPPDATA": os.path.join(home, "data")})
+            for directory in (environment["XDG_CACHE_HOME"], environment["APPDATA"], environment["LOCALAPPDATA"]):
+                windows_files().make_private_directory(directory)
+        else:
+            os.mkdir(environment["XDG_CACHE_HOME"], 0o700)
         os.environ.clear()
         os.environ.update(environment)
         try:
@@ -296,6 +548,10 @@ def protected_packaged_resource(path):
 
 def safe_stat(path, *, directory=False):
     information = os.lstat(path)
+    if sys.platform == "win32":
+        handle = windows_files().open(path, directory=directory)
+        windows_files().close(handle)
+        return information
     expected = stat.S_ISDIR if directory else stat.S_ISREG
     if (
         not expected(information.st_mode)
@@ -305,6 +561,16 @@ def safe_stat(path, *, directory=False):
     ):
         raise BootstrapError("DOWNLOADER_IDENTITY_INVALID")
     return information
+
+
+@contextmanager
+def verified_reader(descriptor):
+    try:
+        with os.fdopen(descriptor, "rb") as archive:
+            yield archive
+    finally:
+        if sys.platform == "win32":
+            windows_files().release_descriptor_parents(descriptor)
 
 
 def verified_archives(check_contents=True, bundle_root=None):
@@ -322,8 +588,9 @@ def verified_archives(check_contents=True, bundle_root=None):
             # diagnostics retain the complete byte verification below.
             archives.append(path)
             continue
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(descriptor, "rb") as archive:
+        descriptor = (windows_files().read_descriptor(path) if sys.platform == "win32"
+                      else os.open(path, os.O_RDONLY | os.O_NOFOLLOW))
+        with verified_reader(descriptor) as archive:
             opened = os.fstat(archive.fileno())
             if (
                 (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
@@ -383,7 +650,7 @@ def check_challenge_runtime(runtime_root):
     code += "const output = jsc(" + json.dumps(challenge) + ");\n"
     code += "if (output.type !== 'result' || output.responses[0].data.musicmute !== 'etumcisum' || output.responses[1].data.abc !== 'bc') throw new Error(); console.log('ready');\n"
     completed = subprocess.run([
-        os.path.join(runtime_root, "bin", "deno"), "run", "--ext=js", "--no-code-cache",
+        deno_path(runtime_root), "run", "--ext=js", "--no-code-cache",
         "--no-prompt", "--no-remote", "--no-lock", "--node-modules-dir=none", "--no-config", "--no-npm", "--cached-only", "-",
     ], input=code, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, check=False)
     if completed.returncode or completed.stdout.strip() != "ready":
@@ -432,7 +699,9 @@ def install_token_provider(runtime_root, check_contents=True, bundle_root=None):
     safe_stat(script_path)
     # The owned wrapper source is pinned independently of its manifest.
     if check_contents:
-        with open(script_path, "rb") as script:
+        descriptor = (windows_files().read_descriptor(script_path) if sys.platform == "win32"
+                      else os.open(script_path, os.O_RDONLY | os.O_NOFOLLOW))
+        with verified_reader(descriptor) as script:
             if hashlib.sha256(script.read()).hexdigest() != PROVIDER_SCRIPT_SHA256:
                 raise BootstrapError("PO_TOKEN_PROVIDER_INVALID")
     for name in ("yt_dlp_plugins", "yt_dlp_plugins.extractor"):
@@ -440,7 +709,9 @@ def install_token_provider(runtime_root, check_contents=True, bundle_root=None):
         module.__path__ = []
         sys.modules[name] = module
     archive_path = os.path.join(bundle_root or os.path.dirname(os.path.abspath(__file__)), WHEELS[0][0])
-    with zipfile.ZipFile(archive_path) as archive:
+    descriptor = (windows_files().read_descriptor(archive_path) if sys.platform == "win32"
+                  else os.open(archive_path, os.O_RDONLY | os.O_NOFOLLOW))
+    with verified_reader(descriptor) as source, zipfile.ZipFile(source) as archive:
         for suffix in ("getpot_bgutil", "getpot_bgutil_script"):
             name = "yt_dlp_plugins.extractor." + suffix
             module = types.ModuleType(name)
@@ -453,7 +724,7 @@ def install_token_provider(runtime_root, check_contents=True, bundle_root=None):
     provider._server_home.__set_name__(provider, "_server_home")
     provider._script_cache_dir = functools.cached_property(lambda self: os.environ["XDG_CACHE_HOME"])
     provider._script_cache_dir.__set_name__(provider, "_script_cache_dir")
-    provider._jsrt_path_impl = lambda self: os.path.join(runtime_root, "bin", "deno")
+    provider._jsrt_path_impl = lambda self: deno_path(runtime_root)
     def arguments(self):
         def escaped(value):
             return value.replace(",", ",,")
@@ -508,6 +779,9 @@ PROVIDER_SCRIPT_SHA256 = "718ba412feecbc67d423c30048fb9a5066c195a610773208abfe19
 def install_process_lease():
     if "MUSICMUTE_UPDATE_LEASE_FD" not in os.environ:
         return
+    if sys.platform == "win32":
+        # Windows uses owned Job Objects/broker leases, never POSIX pass_fds.
+        raise BootstrapError("LOCAL_UPDATE_LEASE_INVALID")
     import importlib.util
     resources = os.environ.get("MUSICMUTE_LOCAL_APP_RESOURCES")
     if not resources or not os.path.isabs(resources):

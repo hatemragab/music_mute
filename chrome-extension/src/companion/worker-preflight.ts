@@ -1,3 +1,4 @@
+import "./local-debug.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { reclaimIdlePersonalReservation } from "../../../worker/src/runtime/personal-admission.js";
 import { loadLocalConfig } from "./config.js";

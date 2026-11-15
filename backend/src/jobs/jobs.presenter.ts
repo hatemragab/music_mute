@@ -2,6 +2,7 @@ import { presentServerStageTimings } from './job-stage-timing.js';
 import type { Job } from './job.schema.js';
 import { YOUTUBE_SOURCE_URL_PATTERN } from './job-metadata.js';
 import { presentJobTiming } from './job-timing.js';
+import { normalizeThumbnailUrl } from './job-extra-data.js';
 
 export function presentJob(job: Job, includeAttemptTimings = true) {
   const now = new Date();
@@ -42,6 +43,7 @@ export function presentJob(job: Job, includeAttemptTimings = true) {
       : null,
     sourceTitle: job.sourceTitle ?? null,
     displayName: job.displayName ?? job.sourceTitle ?? null,
+    thumbnailUrl: normalizeThumbnailUrl(job.extra_data?.thumbnail_url),
     sourceKind: job.sourceKind ?? null,
     status: job.status,
     serverTime: now.toISOString(),

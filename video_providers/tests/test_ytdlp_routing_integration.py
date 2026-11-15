@@ -66,6 +66,7 @@ class YtdlpRoutingIntegration(routing_fixture.RoutingFixture, unittest.TestCase)
                 metadata={'schema_version': 1, 'site': 'youtube', 'format_id': '250',
                           'audio_codec': 'opus', 'extension': 'webm', 'bitrate_kbps': 70,
                           'title': 'Synthetic native audio',
+                          'thumbnail_url': 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
                           'channel': 'synthetic-residential-password',
                           'delivery_url': 'https://never-forward.invalid/signed'},
                 timings_ms={'extraction_ms': 1, 'token_generation_ms': 2, 'transfer_ms': 3},
@@ -143,6 +144,7 @@ class YtdlpRoutingIntegration(routing_fixture.RoutingFixture, unittest.TestCase)
         self.assertEqual(metadata['format_id'], '250')
         self.assertEqual(metadata['audio_codec'], 'opus')
         self.assertEqual(metadata['title'], 'Synthetic native audio')
+        self.assertEqual(metadata['thumbnail_url'], 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg')
         self.assertNotIn('channel', metadata)
         self.assertNotIn('delivery_url', metadata)
         self.assertEqual(len(self.calls), 1)

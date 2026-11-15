@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
+import { observeWebSocket } from '../observability/local-service-diagnostics.js';
 import { registerWebSocketUpgrade } from '../http/websocket-upgrades.js';
 import { responseValue } from '../http/snake-case-wire.js';
 import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
@@ -148,6 +149,7 @@ export class YouTubeCommunitySocketService implements OnModuleDestroy {
     );
   }
   private authenticate(socket: WebSocket, ip: string): void {
+    observeWebSocket(socket, {}, 'youtube-community');
     this.pending.add(socket);
     const deadline = setTimeout(
       () => socket.close(1008, 'Authentication required'),

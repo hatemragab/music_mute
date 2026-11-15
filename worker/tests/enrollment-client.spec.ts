@@ -202,6 +202,59 @@ describe("worker enrollment client", () => {
     ]);
   });
 
+  it("requests and binds consumer artifacts without falling back to the service profile", async () => {
+    const manifest = {
+      ...artifactManifest("windows-amd64"),
+      installationProfile: "windows-user",
+    };
+    const fetchMock = vi.fn(
+      async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
+        json(manifest),
+    );
+    const client = new WorkerEnrollmentClient({
+      baseUrl: "https://workers.example.invalid",
+      fetch: fetchMock as typeof fetch,
+      maxAttempts: 1,
+    });
+    await expect(
+      client.artifacts(
+        installationId,
+        installationCredential,
+        "windows-amd64",
+        undefined,
+        "windows-user",
+      ),
+    ).resolves.toEqual(manifest);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      platform: "windows-amd64",
+      installation_profile: "windows-user",
+    });
+    await expect(
+      client.artifacts(installationId, installationCredential, "windows-amd64"),
+    ).rejects.toThrow("profile changed");
+    fetchMock.mockImplementation(async () =>
+      json(artifactManifest("windows-amd64")),
+    );
+    await expect(
+      client.artifacts(
+        installationId,
+        installationCredential,
+        "windows-amd64",
+        undefined,
+        "windows-user",
+      ),
+    ).rejects.toThrow("profile changed");
+    await expect(
+      client.artifacts(
+        installationId,
+        installationCredential,
+        "darwin-arm64",
+        undefined,
+        "windows-user",
+      ),
+    ).rejects.toThrow("profile is invalid");
+  });
+
   it("accepts future fields in enrollment responses while validating required artifact fields", async () => {
     const manifest = artifactManifest("darwin-arm64");
     const client = new WorkerEnrollmentClient({

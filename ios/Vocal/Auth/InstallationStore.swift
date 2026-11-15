@@ -124,6 +124,8 @@ actor InstallationStore {
         (1...9_007_199_254_740_991).contains(state.report.metadataRevision)
       else { throw AuthFailure.configuration }
       cached = state
+      LocalDiagnostics.emit(
+        "storage.read", category: "storage", data: ["store": "installation", "result": "completed"])
       return state
     } catch let failure as AuthFailure {
       throw failure
@@ -143,7 +145,13 @@ actor InstallationStore {
       var mutableFile = file
       try mutableFile.setResourceValues(values)
       cached = state
+      LocalDiagnostics.emit(
+        "storage.write", category: "storage",
+        data: ["store": "installation", "bytes": data.count, "result": "completed"])
     } catch {
+      LocalDiagnostics.emit(
+        "storage.failed", category: "storage", level: "warn",
+        data: ["store": "installation", "error": LocalDiagnostics.error(error)])
       throw AuthFailure.configuration
     }
   }

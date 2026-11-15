@@ -12,6 +12,10 @@ import {
   SnakeCaseRequestPipe,
   SnakeCaseResponseInterceptor,
 } from './snake-case-wire.js';
+import {
+  LocalIdentityDiagnosticsInterceptor,
+  localHttpDiagnostics,
+} from '../observability/local-http-diagnostics.js';
 
 export function configureHttp(app: NestExpressApplication): void {
   const config = app.get(ConfigService);
@@ -25,6 +29,7 @@ export function configureHttp(app: NestExpressApplication): void {
     response.setHeader('Cache-Control', 'no-store');
     next();
   });
+  app.use(localHttpDiagnostics);
   app.useBodyParser('json', {
     limit: config.getOrThrow<number>('BODY_LIMIT_BYTES'),
   });
@@ -55,7 +60,10 @@ export function configureHttp(app: NestExpressApplication): void {
       disableErrorMessages: config.get('APP_ENV') === 'production',
     }),
   );
-  app.useGlobalInterceptors(new SnakeCaseResponseInterceptor());
+  app.useGlobalInterceptors(
+    new LocalIdentityDiagnosticsInterceptor(),
+    new SnakeCaseResponseInterceptor(),
+  );
   app.useGlobalFilters(new PublicExceptionFilter());
   const server: Server = app.getHttpServer();
   server.requestTimeout = 30000;

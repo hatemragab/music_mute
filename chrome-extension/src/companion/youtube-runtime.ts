@@ -1,3 +1,4 @@
+import "./local-debug.js";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readFile, readdir, readlink } from "node:fs/promises";

@@ -1413,3 +1413,28 @@ it("rejects an unverified original before downloading or processing it", async (
     e.client.lookupOriginal(reservation, 5, e.hooks.signal),
   ).rejects.toMatchObject({ code: "COMMUNITY_REPLY_INVALID" });
 });
+it("accepts a strictly trusted bounded original without a pre-acquisition duration hint and keeps its HTTP body unchanged", async () => {
+  const e = await environment(),
+    reservation = await e.client.reserve(videoId, e.hooks.signal);
+  const source = await e.client.lookupOriginal(
+    reservation,
+    undefined,
+    e.hooks.signal,
+  );
+  expect(source?.declaration).toMatchObject({ duration_seconds: 5 });
+  expect(
+    e.calls.find((call) => call.url.endsWith("/source-deliveries"))?.body,
+  ).toEqual({});
+});
+it.each([NaN, Infinity, 0, 1201])(
+  "refuses invalid original duration hint %s before any HTTP command",
+  async (duration) => {
+    const e = await environment(),
+      reservation = await e.client.reserve(videoId, e.hooks.signal),
+      calls = e.calls.length;
+    await expect(
+      e.client.lookupOriginal(reservation, duration, e.hooks.signal),
+    ).rejects.toMatchObject({ code: "TIMELINE_MISMATCH" });
+    expect(e.calls).toHaveLength(calls);
+  },
+);

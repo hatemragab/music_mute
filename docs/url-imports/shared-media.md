@@ -22,6 +22,19 @@ checks. URL jobs reference the same confirmed input/output identities; no media
 copy is made for each user. Playback/download grants require the existing account
 and owned-job checks. Internal cache keys and provider URLs are not exposed.
 
+Submitting the same completed shared rendition again returns the existing
+undeleted ready job in that account's history, even with a new request UUID or
+after the original import receipt expires. Its saved title, storage accounting
+and notification remain unchanged. New request UUIDs retain separate import
+receipts pointing to that job. An account without that rendition gets one new
+owned job referencing the same shared audio, without another media copy.
+Different output renditions (including full versus trimmed audio) remain distinct;
+deleted jobs can be added again through a fresh submission. Failed/cancelled jobs
+do not prevent a new ready delivery. Existing duplicate rows are not rewritten.
+Account-fenced Mongo transactions serialize concurrent deliveries across API
+instances. The import-to-job link commits with delivery so recovery cannot
+recreate a reused job deleted after an interrupted response.
+
 The first original uploads directly to a unique shared input key. The existing
 worker uploads to its private attempt reservation. Backend completion verifies
 that output and publishes it once to a fresh shared output key, then records
@@ -154,3 +167,9 @@ read on 2026-10-01. Applied security/ownership, compatibility, idempotent reques
 asynchronous POST semantics and OpenAPI/error documentation. Routes, bearer
 authentication, snake_case responses and non-cacheable HTTP behavior remain
 compatible; storage reuse is not HTTP response caching.
+
+History reuse preflight: the same official guidelines were read on 2026-10-17.
+Rules 101 (OpenAPI), 104 (authorization), 106 (compatibility), 118 (snake_case),
+151 (documented responses) and 229 (idempotent operations) apply. The existing
+HTTP 202 import receipt, owner-scoped snapshots and no-store responses remain
+compatible. Source and isolated fixtures do not establish deployed behavior.

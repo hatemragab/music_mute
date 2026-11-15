@@ -10,6 +10,7 @@ import {
   Library,
   Link2,
   LockKeyhole,
+  Puzzle,
   Radio,
   ShieldCheck,
   Smartphone,
@@ -142,13 +143,6 @@ export function App({
             <Globe2 aria-hidden="true" />
             {t.languageAction}
           </a>
-          <ExternalLink
-            className="button button-small"
-            href={PRODUCT_LINKS.webApp}
-          >
-            {t.openApp}
-            <ArrowUpRight aria-hidden="true" />
-          </ExternalLink>
         </div>
       </header>
 
@@ -164,14 +158,40 @@ export function App({
               <strong>{t.hero.accent}</strong>
             </h1>
             <p className="hero-body">{t.hero.body}</p>
-            <div className="hero-actions">
-              <ExternalLink className="button" href={PRODUCT_LINKS.webApp}>
-                {t.openApp}
+            <nav
+              className="hero-direct-actions"
+              aria-label={t.hero.platformsLabel}
+            >
+              <ExternalLink
+                className="hero-direct-action"
+                href={PRODUCT_LINKS.webApp}
+              >
+                <span className="hero-direct-action-copy">
+                  <span className="status-chip status-live">
+                    {t.appsSection.web.status}
+                  </span>
+                  <strong>{t.openApp}</strong>
+                  <span>{t.hero.webActionDescription}</span>
+                </span>
                 <ArrowUpRight aria-hidden="true" />
               </ExternalLink>
-              <a className="button button-secondary" href="#how-it-works">
-                {t.hero.secondaryAction}
-              </a>
+              <ExternalLink
+                className="hero-direct-action"
+                href={PRODUCT_LINKS.chromeExtension}
+              >
+                <span className="hero-direct-action-copy">
+                  <span className="status-chip status-live">
+                    {t.appsSection.chrome.status}
+                  </span>
+                  <strong>{t.appsSection.chrome.action}</strong>
+                  <span>{t.hero.chromeActionDescription}</span>
+                </span>
+                <ArrowUpRight aria-hidden="true" />
+              </ExternalLink>
+            </nav>
+            <div className="hero-availability-notes">
+              <p>{t.hero.chromeRequirement}</p>
+              <p>{t.hero.pendingReleases}</p>
             </div>
             <p className="rights-note">
               <Check aria-hidden="true" />
@@ -442,17 +462,24 @@ export function App({
                 <ArrowUpRight aria-hidden="true" />
               </ExternalLink>
             </article>
-            <article className="app-card">
+            <article className="app-card app-card-featured">
               <div className="app-card-heading">
                 <span className="app-icon">
-                  <Smartphone aria-hidden="true" />
+                  <Puzzle aria-hidden="true" />
                 </span>
-                <span className="status-chip">
-                  {t.appsSection.mobile.status}
+                <span className="status-chip status-live">
+                  {t.appsSection.chrome.status}
                 </span>
               </div>
-              <h3>{t.appsSection.mobile.title}</h3>
-              <p>{t.appsSection.mobile.body}</p>
+              <h3>{t.appsSection.chrome.title}</h3>
+              <p>{t.appsSection.chrome.body}</p>
+              <ExternalLink
+                className="card-action"
+                href={PRODUCT_LINKS.chromeExtension}
+              >
+                {t.appsSection.chrome.action}
+                <ArrowUpRight aria-hidden="true" />
+              </ExternalLink>
             </article>
             <article className="app-card">
               <div className="app-card-heading">
@@ -465,6 +492,30 @@ export function App({
               </div>
               <h3>{t.appsSection.desktop.title}</h3>
               <p>{t.appsSection.desktop.body}</p>
+            </article>
+            <article className="app-card" aria-labelledby="windows-app-title">
+              <div className="app-card-heading">
+                <span className="app-icon">
+                  <Laptop aria-hidden="true" />
+                </span>
+                <span className="status-chip">
+                  {t.appsSection.windows.status}
+                </span>
+              </div>
+              <h3 id="windows-app-title">{t.appsSection.windows.title}</h3>
+              <p>{t.appsSection.windows.body}</p>
+            </article>
+            <article className="app-card">
+              <div className="app-card-heading">
+                <span className="app-icon">
+                  <Smartphone aria-hidden="true" />
+                </span>
+                <span className="status-chip">
+                  {t.appsSection.mobile.status}
+                </span>
+              </div>
+              <h3>{t.appsSection.mobile.title}</h3>
+              <p>{t.appsSection.mobile.body}</p>
             </article>
           </div>
           <p className="release-note">

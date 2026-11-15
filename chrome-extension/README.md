@@ -2,10 +2,48 @@
 
 Companion downloads now use the separate public R2 release bucket at
 `https://downloads.music-mute.com/releases/`. The recommended
-[Mac app, build 1791395910](https://downloads.music-mute.com/releases/macos-store-companion-2026-10-07/MusicMuteLocal-0.1.1-arm64-development-build-1791395910.dmg), seals R2 URLs for all seven checksum-verified runtime ZIPs. Each successful
+[Mac development app, build 1791422383](https://downloads.music-mute.com/releases/macos-store-companion-2026-10-08/MusicMuteLocal-0.1.1-arm64-development-build-1791422383.dmg), seals R2 URLs for all seven checksum-verified runtime ZIPs. Each successful
 setup stage removes its downloaded ZIP. Kim Vocal 2 stays at its approved
 upstream source. See [R2 downloads](docs/r2-downloads.md) for the uploaded assets,
 packaging command, verification scope and development-release limits.
+
+Published development build `1791422383` includes the automatic setup behavior
+below and dashboard-controlled native link-import visibility. It is installed
+and validated on this Mac; the public DMG and checksum match the local package.
+It remains ad hoc signed, unnotarized and updater-unconfigured. See the
+[October 8 validation](../docs/link-import-ui/VALIDATION.md) for the checks and
+distribution limits.
+
+Current source also applies selected-user link-import hiding through the existing
+resolved policy. Signed-in policy reads use the account token, with separate guest
+and owner caches for offline use. This requires matching backend/dashboard changes
+and rebuilt clients; the published build above does not establish this behavior.
+
+Local recovery build `1791424182` adds the safeguards below and has not been
+published. Temporary downloads retry within bounded budgets. Setup waits through
+temporary preparation locks and can resume once when an offline connection returns.
+Damaged owned models are replaced only after complete byte/hash verification;
+interrupted worker setup reuses verified qualification and its original transaction.
+See [setup recovery](docs/setup-updates.md#resilient-setup-recovery--2026-10-08).
+
+The `0.1.2` candidate adds original video thumbnails to account Library songs.
+Nullable `thumbnail_url` metadata is retained through the cloud job parser and
+owned offline catalog; only bounded public YouTube HTTPS thumbnails are eligible.
+Missing or invalid metadata, local-only songs and image download failures keep
+the existing Play/waveform control. This does not add video metadata extraction
+or construct thumbnail URLs. Package validation and publication are separate
+release steps.
+
+The Mac app automatically opens Setup and starts **Prepare my Mac** when its
+processing tools, model, Chrome helper or app-data extension are missing. Local
+preparation works while signed out. Approved Google accounts register and start
+the background worker after preparation; interrupted setup recovers once per
+launch, with a visible retry after failure. **Settings → Worker** keeps a compact
+status and the relevant Start, Pause or Resume controls, with technical information
+under the collapsed **Advanced** section. The app’s
+explicit stop/pause/removal choices and existing machine credentials are preserved. See
+[automatic preparation](docs/setup-updates.md#automatic-preparation-and-recovery--2026-10-08)
+for behavior and verification boundaries.
 
 The 2026-10-04 setup and update work adds bundled Deno, matching yt-dlp/EJS and
 the PO-token provider, offline component health checks, clear extension errors,
@@ -101,6 +139,15 @@ For direct DMG distribution, see the [macOS release guide](docs/macos-release.md
 Release signing and Apple acceptance are separate from the local checkpoints below.
 
 ## Home, account and product discovery
+
+The shared browser assets can be built independently with
+`scripts/build-extension.mjs`'s `buildSharedExtension` helper. The regular full
+build calls that same helper and retains its Mac/companion/worker steps and
+development source maps. Windows packaging uses a fresh exclusive temporary
+browser output with maps disabled, preserving the same manifest key/ID and
+HTML/JS/static assets. It never reads an old `dist/extension`, runs Swift, installs
+an app or copies browser profiles/private configuration. The existing Store
+package still applies its separate key-omission and release-review rules.
 
 Native Home owns the cross-device account prompt. A signed-out user can start
 Google sign-in there or open the email flow without navigating through Settings.
@@ -440,6 +487,26 @@ Chrome still needs extension Reload for the updated Stop and account-change
 cleanup. Reconnecting native computer use to the newest app failed after its
 restart, so its visual acceptance remains separate from the previous build's
 verified title/playback. Mobile UI sync and listening quality remain pending.
+
+## Device-local Library listening history
+
+Current Mac source adds a one-click **Show starred** checkbox, **All / Most Played**
+Library tabs and a **Most Played** sort option. The tab includes played songs only
+and always ranks them by play count; the sort ranks the full visible list. Search,
+offline/online and removed filters combine with the checkbox, and Up Next keeps
+the displayed order captured when a song is selected.
+
+Listening history starts with this feature and stays in device-local preferences,
+isolated between signed-out use and each account. Cache and account versions of a
+linked song share one count. A song counts when playback actually starts; actual
+repeat and A/B loop restarts also count. Preparation failures, buffering retries,
+pause/resume, manual seeks and switching between voice/original do not create
+additional plays. Counts and the checkbox are never saved to the API or database.
+Existing stars remain compatible, including reopening while signed out.
+
+The Chrome extension controls vocals alongside the current website video and has
+no standalone song Library; these Library controls belong to the Mac app. This is
+source behavior until a rebuilt app is separately installed.
 
 ## Current account-connected source
 
@@ -1267,3 +1334,86 @@ last-check results. Popup connection status alone is not a fresh integrity check
 Same-video local READY playback can reuse its native grant across a five-second
 reload handoff. See [setup and updates](docs/setup-updates.md#installed-content-trust-and-explicit-checks-2026-10-06)
 for the trust policy, compatibility and handoff fences.
+
+## Private local diagnostics
+
+The [local logging guide](../docs/local-logging/README.md) describes the repository
+collector, Logdy and read-only MCP. `npm run build:debug` enables compile-time
+debug gates; normal `npm run build` and Chrome packaging compile them off.
+Use the root logging launcher's `chrome-extension` command to build a debug
+extension, register its exact ID with `allow-extension`, then load that unpacked
+artifact manually. Each background/popup/offscreen context has its own random
+instance and `globalThis.__MUSICMUTE_LOCAL_LOG_STATUS__` delivery counters.
+Native messaging records distinguish send attempts from received frames.
+
+The 2026-10-18 local UI audit found installed-release playback journal events with
+missing request/job IDs. Current source retains the admitted session's existing
+IDs in diagnostic `EVENT` records after matching generation and sender
+tab/document; stale, unrelated and unscoped events stay uncorrelated. No business
+payload or protocol schema changed. The regression check passes 2,410 tests
+(4 guarded skips), including native frame round-trips and forged/stale sender
+cases. Installed UI evidence remains separate until the rebuilt extension is
+manually loaded or reloaded.
+
+Optional desktop account lookup, restore and local-pair staging warnings retain
+the command's request ID, a closed operation stage, approved error codes and a
+typed HTTP status when available. Untrusted error text and unapproved codes use
+the safe `DESKTOP_OPERATION_FAILED` fallback. These warnings do not change local
+processing fallback behavior. Historical `UNKNOWN_ERROR` records without this
+context cannot be attributed to a particular optional operation afterward.
+
+The account reader accepts the documented optional legacy input hash/content type
+without inventing either value, and preserves valid Unicode format characters in
+display titles. Present malformed declarations still fail. Original transfers,
+file reuse and uploads require complete verified input identity before grants or
+cache changes. Internal `CLOUD_REPLY_INVALID` errors include a closed
+`validation_reason` metric for the next actual parser failure; response contents,
+arbitrary field names and error prose are never used as reasons. Contract fixtures
+prove these compatibility fixes, but do not identify the cause of earlier live
+warnings. The [official API guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-10-18: rules 104 (security), 106/108/111 (compatibility),
+118 (snake_case) and 123 (optional/null semantics) informed the unchanged server
+contract and strict transfer boundaries.
+
+The `macos` launcher command runs the development companion with its source key.
+HTTP, bounded JSON parsing, native command context, existing validated job/engine
+diagnostics and account realtime observations share the process identity. Swift
+UIJournal forwarding and diagnostic environment propagation are compiled only
+under `DEBUG`; release Swift builds have no forwarding branch. This does not
+install or rebuild the existing Mac app, worker service, runtime or model.
+Provider/media capabilities, credentials, storage values, arbitrary exception
+messages and raw subprocess stderr are omitted or redacted before ingress.
+
+To exercise the actual SwiftUI app without changing the installed app or its data,
+start the root collector, then build a private source DEBUG session:
+
+```sh
+cd chrome-extension
+node scripts/local-debug-ui.mjs build
+```
+
+The JSON result contains the unique `app` path and `session_id` under
+`.runtime/local-logging/macos-ui/`. Open that exact `.app` in Finder (or the native
+app automation API). It can also be started from a developer terminal with
+`node scripts/local-debug-ui.mjs launch <session_id>`. No installation or native
+host registration is performed. A repeated terminal launch reuses its running
+owned process. The bundle ID and UserDefaults are unique, and all app support
+paths point to that session's private support directory. Production binaries
+reject these debug metadata fields entirely.
+
+Direct GUI launch reads only the fixed repository collector key from the private
+`keys.json`; non-owned, linked, oversized or nonprivate files are rejected. The
+key is never embedded in the app. Explicit `MUSICMUTE_LOG_ENABLED=0` disables
+forwarding when launched from a terminal. UI events contain only allowlisted
+action names and counters; they contain no account or media payloads.
+Quit the debug app before changing launch flags; an already running session keeps
+its original settings.
+
+This navigable real GUI seeds a twelve-second owned synthetic tone for normal
+AVPlayer playback. The helper executes the existing prepared ffmpeg/ffprobe
+read-only and writes the new tone only inside the session. Account transport,
+Keychain access, provider/cloud calls, inference, Prepare, worker enrollment,
+native registration, updates and cache deletion are unavailable in this isolated
+session. Their UI reports the limitation. Full processing remains a separate
+authorized integration test with the installed runtime. Nothing is copied to
+`/Applications`, and no runtime, model, worker or real library is replaced.

@@ -1,6 +1,6 @@
 # MusicMute administrator dashboard
 
-Private React + TypeScript + Vite operations console for the MusicMute NestJS API. The dashboard covers administrator access, jobs, user processing controls, private media grants, releases and APK verification, update policy, processing settings, health alerts, audit history, and bounded CSV exports.
+Private React + TypeScript + Vite operations console for the MusicMute NestJS API. The dashboard covers administrator access, jobs, user processing controls, private media grants, store releases, update policy, processing settings, health alerts, audit history, and bounded CSV exports.
 
 ## Local setup
 
@@ -48,7 +48,7 @@ npm run test:e2e
 npm run build
 ```
 
-`npm run test:e2e` uses installed Google Chrome. It starts the Vite app plus a compiled NestJS fixture backed by test-owned, loopback-only MongoDB and Redis processes. It requires `mongod` and `redis-server` locally, uses synthetic Firebase/storage/APK-verifier doubles, and removes its temporary database files when the run ends.
+`npm run test:e2e` uses installed Google Chrome. It starts the Vite app plus a compiled NestJS fixture backed by test-owned, loopback-only MongoDB and Redis processes. It requires `mongod` and `redis-server` locally, uses synthetic Firebase/storage doubles, and removes its temporary database files when the run ends.
 
 The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, R2 CORS/IAM, production data, or deployment.
 
@@ -132,6 +132,31 @@ DMG; the signed appcast already saved by the server is retained. This workflow's
 fixture checks do not establish live R2, signing, Sparkle or deployment success.
 
 ## Processing administration
+
+User detail includes a **Devices** section backed by the shared
+`admin.user_devices` WebSocket subscription (`users.read`). It pages through
+recorded installations and shows platform/model, OS, app version/build,
+country/city, last seen and session status. Expand a device for installation ID,
+metadata revision, first seen/authentication/history-hidden dates, every available
+location field and up to 20 recorded version transitions. Hidden user-history
+records are labeled and remain visible to authorized administrators. Missing
+values are shown as unavailable; `unknown` sessions are never labeled online.
+Location is the latest detected connection location. Web records represent
+browser-profile installations. No additional device collection, polling,
+automatic HTTP refetch or Refresh control is introduced. The compatible
+`GET /admin/users/{id}/devices` is a bounded, no-store administration read;
+backend support must be deployed before this dashboard change.
+
+The update-policy page has a separate **Desktop build gates** section for macOS
+and Windows. It reads `/admin/update-policy/desktop` once, reviews only changed
+desktop channels and requires fresh Google release-management authority plus a
+reason before PATCH. Blank means no minimum; accepted build numbers are whole
+integers 1–2147483647. A global revision conflict reads back once and requires a new
+review; lost replies reconcile the operation receipt without replaying PATCH.
+No periodic status reads or focus/reconnect refetches are introduced. This editor
+does not publish an installer or alter mobile release selection. Below-minimum
+desktop builds retain local processing and completed-download access while new
+cloud processing follows the existing backend access policy.
 
 User detail includes current UTC-month processing usage, upload grants/confirmed
 bytes, result grants/estimated bytes, retained-output bytes, effective limits, reset
@@ -231,3 +256,53 @@ at command execution, not continuous CPU/GPU utilization or memory budgets. Olde
 workers may omit metrics. The engine checks share one packaged probe: a failed
 probe means its requested checks failed or could not complete. Successful unrelated
 checks remain visible. See [review and plan](../docs/dashboard/worker-insights-plan.md).
+
+## Native link-import visibility
+
+The standard account policy includes **Show import from link**, a searchable
+country multi-select, and **Hide link import for these users**. Search the account
+directory explicitly by email, exact ID, or supported prefix, then select accounts
+to hide their new-link controls. User search requires `users.read`; changing the
+policy requires `settings.manage`. Selected account IDs remain removable if an
+account is deleted or its details cannot be loaded. Removing a user selection
+restores the global and country rules; it does not force visibility when another
+rule hides the controls. Up to 1,000 accounts can be selected, with selected-user
+details loaded in bounded pages and no recurring directory reads. Older policies
+without a selected-user list start with no user exclusions.
+
+These controls hide new-link UI on Android, iOS, and macOS
+while file import, history, retries, queued imports, downloads, and running jobs
+keep their existing behavior. Web and the Chrome browser panel are unaffected.
+The stored switch defaults to off; the existing API process flag can also keep
+the native UI hidden, which the form reports. Saving uses the existing revision,
+reason, fresh admin authentication, and `settings.manage` permission. Native
+apps consume the existing owner `policy` snapshot; signed-out Macs use public
+policy checkout and offline apps retain the last installation policy.
+
+## Android update releases
+
+Android release drafts record the Google Play version name, version code,
+English changelog and the fixed MusicMute listing. Upload the AAB in Play
+Console; this dashboard does not receive an APK or AAB. The Android policy
+contains only the minimum supported build and Play release ID. Builds below
+the minimum must install a Play update before continuing; any Play build that
+meets the minimum clears that requirement after installation. Builds between
+the minimum and target may receive an optional update to the latest target.
+
+Publication requires a valid preview, confirmation that the store release is
+available to its intended audience, a reason and fresh authentication. Play
+releases do not need artifact verification. Historical direct APK releases
+remain readable as **Retired direct APK**, with no edit, upload, publication or
+policy-target action. These source and fixture checks do not prove availability
+in Play Console or a Play-installed device update.
+
+## Private local diagnostics
+
+From the repository root, start `node tools/local-logging/cli.mjs up`, then
+`node tools/local-logging/cli.mjs run dashboard`. The Vite development server logs
+HTTP, raw WebSocket reception/sends, lifecycle, actions, storage operation metadata
+and safe errors. `globalThis.__MUSICMUTE_LOCAL_LOG_STATUS__` reports bounded queue,
+delivery, drops and failures. Payload, console and collector controls are separate;
+release builds compile the collector gate off even when development environment
+variables are supplied. See the [local logging guide](../docs/local-logging/README.md)
+for privacy, retained files, source coverage, Logdy and read-only MCP setup.

@@ -17,6 +17,7 @@ import {
   ACCOUNT_DELETION,
   ACCOUNT_RECOVERY,
   PUBLIC_ROUTE,
+  OPTIONAL_AUTH,
   type AuthOperation,
 } from './auth.decorators.js';
 import type { AuthRequest } from './auth-request.js';
@@ -48,7 +49,13 @@ export class AuthGuard implements CanActivate {
       this.reflector.getAllAndOverride<boolean>(ADMIN_ROUTE, targets) === true;
     const workerRoute =
       this.reflector.getAllAndOverride<boolean>(WORKER_ROUTE, targets) === true;
-    if ([publicRoute, adminRoute, workerRoute].filter(Boolean).length > 1)
+    const optionalAuth =
+      this.reflector.getAllAndOverride<boolean>(OPTIONAL_AUTH, targets) ===
+      true;
+    if (
+      [publicRoute, adminRoute, workerRoute, optionalAuth].filter(Boolean)
+        .length > 1
+    )
       throw authError('UNAUTHENTICATED');
     if (publicRoute) return true;
     // WorkerRoute always installs the fail-closed WorkerAuthGuard. C2 replaces
@@ -78,6 +85,10 @@ export class AuthGuard implements CanActivate {
       (value, index) =>
         index % 2 === 0 && value.toLowerCase() === 'authorization',
     ).length;
+    if (optionalAuth && header === undefined && count === 0) {
+      req.user = null;
+      return true;
+    }
     if (count > 1 || typeof header !== 'string' || header.length > 8199)
       throw fail('UNAUTHENTICATED');
     const match = /^Bearer ([A-Za-z0-9._~-]+)$/i.exec(header);

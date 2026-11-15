@@ -14,7 +14,7 @@ describe("ReleaseDraftForm", () => {
         onOpenChange={() => undefined}
         getProposal={async () => ({
           platform: "android",
-          source: "direct_apk",
+          source: "google_play",
           current: { versionName: "0.1.0", buildNumber: 1 },
           suggested: { versionName: "0.1.1", buildNumber: 2 },
         })}
@@ -25,6 +25,14 @@ describe("ReleaseDraftForm", () => {
     expect(await screen.findByText("Current release: 0.1.0 (1)")).toBeVisible();
     expect(screen.getByLabelText("Version name")).toHaveValue("0.1.1");
     expect(screen.getByLabelText("Build number")).toHaveValue(2);
+    expect(screen.queryByLabelText("Store URL")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("APK file")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Upload the Android App Bundle in Play Console/),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "Distribution" }),
+    ).toHaveTextContent("Google Play");
 
     await user.type(screen.getByLabelText("English changelog"), "New release");
     await user.type(screen.getByLabelText("Reason"), "Ship new release");
@@ -48,11 +56,12 @@ describe("ReleaseDraftForm", () => {
     await waitFor(() =>
       expect(submit).toHaveBeenCalledWith({
         platform: "android",
-        source: "direct_apk",
+        source: "google_play",
         versionName: "0.2.0",
         buildNumber: 5,
         changelogEn: "New release",
-        storeUrl: null,
+        storeUrl:
+          "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
         reason: "Ship new release",
       }),
     );
@@ -90,5 +99,16 @@ describe("ReleaseDraftForm", () => {
     expect(await screen.findByText("Current release: 0.5.0 (8)")).toBeVisible();
     expect(screen.getByLabelText("Version name")).toHaveValue("0.5.1");
     expect(screen.getByLabelText("Build number")).toHaveValue(9);
+    expect(screen.getByLabelText("Store URL")).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "Distribution" }),
+    ).toHaveTextContent("App Store");
+    await user.click(screen.getByRole("combobox", { name: "Platform" }));
+    await user.click(screen.getByRole("option", { name: "Android" }));
+    expect(await screen.findByText("Current release: 0.1.0 (1)")).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "Distribution" }),
+    ).toHaveTextContent("Google Play");
+    expect(screen.queryByLabelText("Store URL")).not.toBeInTheDocument();
   });
 });

@@ -59,6 +59,27 @@ enum DesktopHomeLibraryConnection: Equatable {
   }
 }
 
+struct DesktopImportProgress: View {
+  let finalizing: Bool
+  let progress: String
+  let cancel: () -> Void
+  var body: some View {
+    HStack(spacing: 10) {
+      ProgressView().controlSize(.small)
+      Text(
+        finalizing ? LocalizedStringKey("Updating local library…") : LocalizedStringKey(progress)
+      )
+      .desktopFont(.callout)
+      .foregroundStyle(Brand.secondary)
+      if !finalizing {
+        Button("Cancel", action: cancel)
+          .buttonStyle(.bordered)
+          .accessibilityIdentifier("import_cancel")
+      }
+    }
+  }
+}
+
 struct DesktopHomeView: View {
   @ObservedObject var workspace: DesktopWorkspace
   @ObservedObject var account: DesktopAccountModel
@@ -89,7 +110,17 @@ struct DesktopHomeView: View {
       source = DesktopImportSourcePreference.file.rawValue
       return true
     }
-    .onAppear { applyCloudHandoff() }
+    .onAppear {
+      if !account.linkImportVisible { source = DesktopImportSourcePreference.file.rawValue }
+      applyCloudHandoff()
+    }
+    .onChange(of: account.linkImportVisible) { _, visible in
+      if !visible {
+        source = DesktopImportSourcePreference.file.rawValue
+        confirmCloud = false
+        cloudConfirmation = nil
+      }
+    }
     .onChange(of: workspace.pendingCloudHandoff) { _, _ in applyCloudHandoff() }
     .onChange(of: link) { _, _ in
       if link != estimatedCloudSource {
@@ -162,7 +193,11 @@ struct DesktopHomeView: View {
         if account.updateRequired { updateNotice }
 
         Text(
-          "Paste a supported video link or choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio."
+          LocalizedStringKey(
+            account.linkImportVisible
+              ? "Paste a supported video link or choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio."
+              : "Choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio."
+          )
         )
         .desktopFont(.body)
         .foregroundStyle(Brand.secondary)
@@ -269,19 +304,22 @@ struct DesktopHomeView: View {
         .desktopFont(.headline)
         .foregroundStyle(Brand.text)
 
-      Picker("Source", selection: $source) {
-        ForEach(DesktopImportSourcePreference.allCases, id: \.self) { option in
-          Label(
-            LocalizedStringKey(option.title),
-            systemImage: option == .youtube ? "play.rectangle.fill" : "waveform"
-          )
-          .tag(option.rawValue)
+      if account.linkImportVisible {
+        Picker("Source", selection: $source) {
+          ForEach(DesktopImportSourcePreference.allCases, id: \.self) { option in
+            Label(
+              LocalizedStringKey(option.title),
+              systemImage: option == .youtube ? "play.rectangle.fill" : "waveform"
+            )
+            .tag(option.rawValue)
+          }
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Source")
+        .accessibilityIdentifier("import_source")
+
       }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .accessibilityLabel("Source")
-      .accessibilityIdentifier("import_source")
 
       if selectedSource == .youtube {
         HStack(spacing: 10) {
@@ -509,7 +547,10 @@ struct DesktopHomeView: View {
   @ViewBuilder private var processingAction: some View {
     HStack(spacing: 10) {
       Button(
-        LocalizedStringKey(workspace.processing ? "Preparing voice…" : "Remove background music")
+        LocalizedStringKey(
+          workspace.processing
+            ? (workspace.finalizingProcessing ? "Updating library…" : "Preparing voice…")
+            : "Remove background music")
       ) { startProcessing() }
       .buttonStyle(.borderedProminent)
       .controlSize(.large)
@@ -518,13 +559,11 @@ struct DesktopHomeView: View {
       .accessibilityIdentifier("import_start")
 
       if workspace.processing {
-        ProgressView().controlSize(.small)
-        Text(workspace.progress)
-          .desktopFont(.callout)
-          .foregroundStyle(Brand.secondary)
-        Button("Cancel") { workspace.cancelProcessing() }
-          .buttonStyle(.bordered)
-          .accessibilityIdentifier("import_cancel")
+        DesktopImportProgress(
+          finalizing: workspace.finalizingProcessing, progress: workspace.progress
+        ) {
+          workspace.cancelProcessing()
+        }
       }
     }
   }
@@ -613,7 +652,7 @@ struct DesktopHomeView: View {
   }
 
   private var selectedSource: DesktopImportSourcePreference {
-    DesktopImportSourcePreference(rawValue: source) ?? .youtube
+    DesktopImportSourcePreference.resolved(source, linkImportVisible: account.linkImportVisible)
   }
 
   private var selectedProcessing: DesktopProcessingPreference {
@@ -678,7 +717,7 @@ struct DesktopHomeView: View {
   }
 
   private func applyCloudHandoff() {
-    guard let handoff = workspace.pendingCloudHandoff else { return }
+    guard account.linkImportVisible, let handoff = workspace.pendingCloudHandoff else { return }
     confirmCloud = false
     cloudConfirmation = nil
     source = DesktopImportSourcePreference.youtube.rawValue
@@ -809,11 +848,77 @@ struct DesktopLibraryCountPresentation: Equatable {
   }
 }
 
+#if MUSICMUTE_NATIVE_TESTS
+  private struct DesktopArtworkFixturePhaseKey: EnvironmentKey {
+    static let defaultValue: AsyncImagePhase? = nil
+  }
+  extension EnvironmentValues {
+    var desktopArtworkFixturePhase: AsyncImagePhase? {
+      get { self[DesktopArtworkFixturePhaseKey.self] }
+      set { self[DesktopArtworkFixturePhaseKey.self] = newValue }
+    }
+  }
+#endif
+
+struct DesktopTrackArtwork<Placeholder: View>: View {
+  let url: URL?
+  let cornerRadius: CGFloat
+  var preparing = false
+  @ViewBuilder let placeholder: () -> Placeholder
+  #if MUSICMUTE_NATIVE_TESTS
+    @Environment(\.desktopArtworkFixturePhase) private var fixturePhase
+  #endif
+
+  var body: some View {
+    GeometryReader { geometry in
+      if let safeURL = DesktopThumbnailURL.validated(url?.absoluteString) {
+        #if MUSICMUTE_NATIVE_TESTS
+          if let fixturePhase {
+            artwork(fixturePhase, size: geometry.size)
+          } else {
+            AsyncImage(url: safeURL) { artwork($0, size: geometry.size) }.id(safeURL)
+          }
+        #else
+          AsyncImage(url: safeURL) { artwork($0, size: geometry.size) }.id(safeURL)
+        #endif
+      } else {
+        artwork(.empty, size: geometry.size)
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        .stroke(Brand.border.opacity(0.65), lineWidth: 0.5)
+    }
+    .accessibilityHidden(true)
+  }
+
+  private func artwork(_ phase: AsyncImagePhase, size: CGSize) -> some View {
+    ZStack {
+      placeholder().frame(width: size.width, height: size.height)
+      if let image = phase.image {
+        image.resizable().scaledToFill().frame(width: size.width, height: size.height)
+          .overlay {
+            if preparing { ProgressView().controlSize(.small) }
+          }
+      }
+    }.clipped()
+  }
+}
+
+@MainActor private func queueArtwork(_ track: DesktopTrack) -> some View {
+  DesktopTrackArtwork(url: track.thumbnailURL, cornerRadius: 10) {
+    Image(systemName: "music.note").foregroundStyle(Brand.accent)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }.frame(width: 32, height: 32)
+}
+
 struct DesktopLibraryView: View {
   @ObservedObject var workspace: DesktopWorkspace
   @State private var search = ""
   @State private var filter = "All"
-  @State private var sort = "Newest"
+  @State private var tab = DesktopLibraryTab.all
+  @State private var sort = DesktopLibrarySort.newest
   @State private var renameTrack: DesktopTrack?
   @State private var renameTitle = ""
   @State private var deleteTrack: DesktopTrack?
@@ -824,28 +929,32 @@ struct DesktopLibraryView: View {
       libraryConnected: workspace.libraryConnected)
   }
   private var visible: [DesktopTrack] {
-    let values = workspace.tracks.filter { track in
-      (search.isEmpty || track.title.localizedCaseInsensitiveContains(search))
-        && (filter == "Removed" ? workspace.removed(track) : !workspace.removed(track))
-        && (filter != "Starred" || workspace.starred(track))
-        && (filter != "Offline" || track.path != nil)
-        && (filter != "Online" || track.path == nil)
-    }
-    return sort == "Title"
-      ? values.sorted { left, right in
-        let order = left.title.localizedStandardCompare(right.title)
-        return order == .orderedSame ? left.id < right.id : order == .orderedAscending
-      }
-      : DesktopWorkspace.newestTracks(values)
+    DesktopLibrarySelection.visible(
+      tracks: workspace.tracks, search: search, filter: filter, tab: tab, sort: sort,
+      showStarredOnly: workspace.showStarredOnly, favorites: workspace.favorites,
+      hidden: workspace.hidden, history: workspace.playHistory)
   }
   private var cacheUsage: Double {
     guard workspace.budgetBytes > 0 else { return 0 }
     return min(max(Double(workspace.cacheBytes) / Double(workspace.budgetBytes), 0), 1)
   }
+  private var hasListFilters: Bool {
+    !search.isEmpty || filter != "All" || workspace.showStarredOnly
+  }
+  private var emptyTitle: LocalizedStringKey {
+    if hasListFilters { return "No songs match your filters" }
+    return tab == .mostPlayed ? "No played songs yet" : "Your voices appear here"
+  }
+  private var emptyDescription: LocalizedStringKey {
+    if hasListFilters { return "Try another search or change the filters." }
+    return tab == .mostPlayed
+      ? "Play songs to build your Most Played list. Listening history stays on this Mac."
+      : "Process audio on Home or sign in to see your account library. Saved voices are available offline."
+  }
   private var songCountPresentation: DesktopLibraryCountPresentation {
     DesktopLibraryCountPresentation(
       visibleCount: visible.count,
-      filtering: !search.isEmpty || filter != "All",
+      filtering: hasListFilters || tab != .all,
       hasMorePages: workspace.localHasMore || workspace.cloudHasMore)
   }
   var body: some View {
@@ -856,10 +965,9 @@ struct DesktopLibraryView: View {
       }
       if visible.isEmpty {
         ContentUnavailableView(
-          "Your voices appear here", systemImage: "waveform",
-          description: Text(
-            "Process audio on Home or sign in to see your account library. Saved voices are available offline."
-          )
+          emptyTitle,
+          systemImage: tab == .mostPlayed ? "play.circle" : "waveform",
+          description: Text(emptyDescription)
         )
         .frame(minHeight: 180)
       }
@@ -869,15 +977,22 @@ struct DesktopLibraryView: View {
             Button {
               Task { await workspace.playFromLibrary(track, orderedTracks: visible) }
             } label: {
-              Group {
-                if workspace.currentTrack?.id == track.id && workspace.preparingPlayback {
-                  ProgressView().controlSize(.small)
-                } else {
-                  Image(
-                    systemName: workspace.currentTrack?.id == track.id && workspace.playing
-                      ? "waveform" : "play.fill")
-                }
-              }.frame(width: 44, height: 44)
+              DesktopTrackArtwork(
+                url: track.thumbnailURL, cornerRadius: 14,
+                preparing: workspace.currentTrack?.id == track.id && workspace.preparingPlayback
+              ) {
+                Group {
+                  if workspace.currentTrack?.id == track.id && workspace.preparingPlayback {
+                    ProgressView().controlSize(.small)
+                  } else {
+                    Image(
+                      systemName: workspace.currentTrack?.id == track.id && workspace.playing
+                        ? "waveform" : "play.fill")
+                  }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+              }
+              .frame(width: 44, height: 44)
+              .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
             }.buttonStyle(.bordered).tint(Brand.accent).accessibilityLabel("Play \(track.title)")
               .help("Play \(track.title)")
               .disabled(workspace.currentTrack?.id == track.id && workspace.preparingPlayback)
@@ -953,6 +1068,9 @@ struct DesktopLibraryView: View {
           VStack(alignment: .leading) {
             ForEach(Array(workspace.queue.enumerated()), id: \.offset) { index, track in
               HStack {
+                if track.thumbnailURL != nil {
+                  queueArtwork(track)
+                }
                 Text(track.title).lineLimit(1)
                 Spacer()
                 Button("Play") {
@@ -969,7 +1087,6 @@ struct DesktopLibraryView: View {
       }
     }
     .searchable(text: $search, placement: .toolbar, prompt: "Search voices")
-    .accessibilityIdentifier("library_search")
     .sheet(
       isPresented: Binding(get: { renameTrack != nil }, set: { if !$0 { renameTrack = nil } })
     ) {
@@ -1134,13 +1251,40 @@ struct DesktopLibraryView: View {
   }
 
   @ViewBuilder private var libraryControls: some View {
+    Picker("Library", selection: $tab) {
+      ForEach(DesktopLibraryTab.allCases, id: \.self) { value in
+        Text(LocalizedStringKey(value.rawValue)).tag(value)
+      }
+    }
+    .pickerStyle(.segmented)
+    .accessibilityIdentifier("library_tabs")
+    Toggle(
+      isOn: Binding(
+        get: { workspace.showStarredOnly }, set: { workspace.setShowStarredOnly($0) })
+    ) {
+      Label("Show starred", systemImage: "star.fill")
+    }
+    .toggleStyle(.checkbox)
+    .accessibilityIdentifier("library_show_starred")
+    .help("Show only starred songs in this list")
     libraryMenu(
       title: "Filter", selection: $filter,
-      options: ["All", "Starred", "Offline", "Online", "Removed"],
+      options: ["All", "Offline", "Online", "Removed"],
       accessibilityIdentifier: "library_filter")
     libraryMenu(
-      title: "Sort", selection: $sort, options: ["Newest", "Title"],
-      accessibilityIdentifier: "library_sort")
+      title: "Sort",
+      selection: Binding(
+        get: { (tab == .mostPlayed ? DesktopLibrarySort.mostPlayed : sort).rawValue },
+        set: { sort = DesktopLibrarySort(rawValue: $0) ?? .newest }),
+      options: DesktopLibrarySort.allCases.map(\.rawValue),
+      accessibilityIdentifier: "library_sort"
+    )
+    .disabled(tab == .mostPlayed)
+    if tab == .mostPlayed || sort == .mostPlayed {
+      Text("Listening history stays on this Mac.")
+        .desktopFont(.caption)
+        .foregroundStyle(Brand.secondary)
+    }
   }
 
   private func libraryMenu(
@@ -1354,19 +1498,20 @@ struct DesktopMiniPlayer: View {
 
   private func trackIdentity(_ track: DesktopTrack) -> some View {
     HStack(spacing: 12) {
-      ZStack {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
-          .fill(
-            LinearGradient(
-              colors: [Brand.accent.opacity(0.38), Brand.accent.opacity(0.12)],
-              startPoint: .topLeading, endPoint: .bottomTrailing))
-        Image(systemName: workspace.originalPlaying ? "music.note" : "waveform")
-          .desktopFont(.headline, weight: .semibold)
-          .foregroundStyle(Brand.accent)
+      DesktopTrackArtwork(url: track.thumbnailURL, cornerRadius: 10) {
+        LinearGradient(
+          colors: [Brand.accent.opacity(0.38), Brand.accent.opacity(0.12)],
+          startPoint: .topLeading, endPoint: .bottomTrailing
+        ).overlay {
+          Image(systemName: workspace.originalPlaying ? "music.note" : "waveform")
+            .desktopFont(.headline, weight: .semibold)
+            .foregroundStyle(Brand.accent)
+        }
       }
       .frame(width: 42, height: 42)
+      .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
       .overlay(
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
           .stroke(Brand.border.opacity(0.65))
       )
       .accessibilityHidden(true)
@@ -1586,6 +1731,9 @@ struct DesktopMiniPlayer: View {
         } else {
           ForEach(Array(workspace.queue.prefix(4).enumerated()), id: \.offset) { index, item in
             HStack(spacing: 8) {
+              if item.thumbnailURL != nil {
+                queueArtwork(item)
+              }
               Text(item.title).lineLimit(1)
               Spacer()
               Button {

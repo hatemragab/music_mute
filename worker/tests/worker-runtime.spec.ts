@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +27,10 @@ import {
 } from "../src/runtime/transfers.js";
 import { ChildCommandError } from "../src/agent/child-process.js";
 import { DiagnosticSpool } from "../src/runtime/diagnostic-spool.js";
-import { WorkspaceManager } from "../src/runtime/workspace.js";
+import {
+  WorkspaceManager,
+  type RuntimeWorkspace,
+} from "../src/runtime/workspace.js";
 import { RuntimeResourceLimitError } from "../src/runtime/resource-limits.js";
 import {
   initializeLocalLifecycle,
@@ -301,6 +311,8 @@ async function runtimeFixture(
   pollMs = 100,
   maintenancePending?: () => Promise<boolean>,
   personalAdmission?: PersonalAdmission,
+  terminatedInferenceIdle?: () => Promise<boolean>,
+  workspaceFactory?: (root: string) => RuntimeWorkspace,
 ) {
   const root = await mkdtemp(join(tmpdir(), "musicmute-runtime-"));
   roots.push(root);
@@ -332,11 +344,17 @@ async function runtimeFixture(
       idlePollMinimumMs: pollMs,
       idlePollMaximumMs: pollMs,
       resources,
+      ...(workspaceFactory === undefined
+        ? {}
+        : { workspace: workspaceFactory(root) }),
       ...(commandExecutor === undefined ? {} : { commandExecutor }),
       ...(maintenancePending === undefined
         ? {}
         : { maintenancePending, deferPreloadForMaintenance: true }),
       ...(personalAdmission === undefined ? {} : { personalAdmission }),
+      ...(terminatedInferenceIdle === undefined
+        ? {}
+        : { terminatedInferenceIdle }),
       onEvent: (event) => events.push(event),
     },
     f.control,
@@ -354,6 +372,89 @@ async function runtimeFixture(
 }
 
 describe("worker runtime ownership", () => {
+  it("uses an injected owned workspace lifecycle for initialization, transfer paths and final cleanup", async () => {
+    let workspace!: WorkspaceManager;
+    const f = await runtimeFixture(
+      fixture(),
+      undefined,
+      false,
+      false,
+      undefined,
+      100,
+      undefined,
+      undefined,
+      undefined,
+      (root) => {
+        workspace = new WorkspaceManager(join(root, "owned-attempts"));
+        vi.spyOn(workspace, "initialize");
+        vi.spyOn(workspace, "create");
+        vi.spyOn(workspace, "cleanup");
+        return workspace;
+      },
+    );
+    await f.runtime.start();
+    expect(await f.runtime.reconcileOnce()).toBe(1);
+    await f.runtime.waitForIdle();
+    expect(workspace.initialize).toHaveBeenCalledOnce();
+    expect(workspace.create).toHaveBeenCalledWith(attemptId, "audio/mpeg");
+    expect(workspace.cleanup).toHaveBeenCalledOnce();
+    expect(f.transfers.download.mock.calls[0]![2]).toBe(
+      join(
+        await realpath(join(f.root, "owned-attempts")),
+        attemptId,
+        "input.mp3",
+      ),
+    );
+    expect(await readdir(join(f.root, "owned-attempts"))).toEqual([]);
+    await f.runtime.stop();
+  });
+
+  it("does not start inference or claim work when the owned workspace initializer cannot establish cleanup", async () => {
+    const workspace: RuntimeWorkspace = {
+        initialize: vi.fn(async () => {
+          throw new Error("OWNED_WORKSPACE_PENDING");
+        }),
+        create: vi.fn(),
+        cleanup: vi.fn(),
+      },
+      f = await runtimeFixture(
+        fixture(),
+        undefined,
+        false,
+        false,
+        undefined,
+        100,
+        undefined,
+        undefined,
+        undefined,
+        () => workspace,
+      );
+    await expect(f.runtime.start()).rejects.toThrow("OWNED_WORKSPACE_PENDING");
+    expect(f.supervisor.start).not.toHaveBeenCalled();
+    expect(f.control.claim).not.toHaveBeenCalled();
+    expect(workspace.create).not.toHaveBeenCalled();
+    expect(workspace.cleanup).not.toHaveBeenCalled();
+  });
+
+  it.each([null, {}, { initialize: async () => {} }])(
+    "rejects an explicitly invalid workspace lifecycle without a legacy fallback: %j",
+    async (workspace) => {
+      await expect(
+        runtimeFixture(
+          fixture(),
+          undefined,
+          false,
+          false,
+          undefined,
+          100,
+          undefined,
+          undefined,
+          undefined,
+          () => workspace as RuntimeWorkspace,
+        ),
+      ).rejects.toThrow("Worker workspace lifecycle is invalid");
+    },
+  );
   it("grants idle personal ownership even while the backend configuration endpoint is unavailable", async () => {
     let pending = false;
     const admission = {
@@ -752,17 +853,71 @@ describe("worker runtime ownership", () => {
     expect(f.supervisor.stop).toHaveBeenCalled();
   });
 
-  it("stops after three exhausted reconciliation rounds", async () => {
-    const f = await runtimeFixture();
+  it("survives a prolonged backend outage, fences claims and resumes without reloading", async () => {
+    const f = await runtimeFixture(fixture(), undefined, false, true);
     await f.runtime.start();
-    f.control.config
-      .mockClear()
-      .mockRejectedValue(new ControlPlaneError("NETWORK_UNAVAILABLE", 0, true));
-    await expect(f.runtime.run()).rejects.toMatchObject({
-      code: "NETWORK_UNAVAILABLE",
+    const original = f.control.config.getMockImplementation()!;
+    let failures = 0;
+    f.control.config.mockClear().mockImplementation(async () => {
+      if (++failures <= 7)
+        throw new ControlPlaneError("HTTP_502", 502, true, 200);
+      return original();
     });
-    expect(f.control.config).toHaveBeenCalledTimes(3);
-    expect(f.control.claim).not.toHaveBeenCalled();
+    const running = f.runtime.run();
+    try {
+      await vi.waitFor(() =>
+        expect(f.control.config.mock.calls.length).toBeGreaterThanOrEqual(4),
+      );
+      expect(f.control.claim).not.toHaveBeenCalled();
+      expect(f.supervisor.stop).not.toHaveBeenCalled();
+      expect(
+        await loadLocalRuntimeStatus(f.localRuntimeStatusPath),
+      ).toMatchObject({
+        childState: "ready",
+        cachedPolicy: { claimAllowed: false },
+      });
+      await vi.waitFor(
+        () => expect(f.control.complete).toHaveBeenCalledOnce(),
+        { timeout: 4000 },
+      );
+      expect(f.supervisor.start).toHaveBeenCalledOnce();
+      expect(f.supervisor.stop).not.toHaveBeenCalled();
+      expect(
+        await loadLocalRuntimeStatus(f.localRuntimeStatusPath),
+      ).toMatchObject({
+        cachedPolicy: { claimAllowed: true },
+      });
+    } finally {
+      await f.runtime.stop();
+      await running;
+    }
+  });
+
+  it("closes local admission and reports unavailable when child shutdown fails", async () => {
+    const admission = {
+      start: vi.fn(async () => {}),
+      pending: () => false,
+      grant: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+    };
+    const f = await runtimeFixture(
+      fixture(),
+      undefined,
+      false,
+      true,
+      undefined,
+      100,
+      undefined,
+      admission,
+    );
+    await f.runtime.start();
+    f.supervisor.stop.mockRejectedValue(new Error("exit unconfirmed"));
+    await expect(f.runtime.stop()).rejects.toThrow("exit unconfirmed");
+    expect(admission.stop).toHaveBeenCalledOnce();
+    expect(admission.grant).not.toHaveBeenCalled();
+    expect(
+      await loadLocalRuntimeStatus(f.localRuntimeStatusPath),
+    ).toMatchObject({ childState: "unavailable" });
   });
 
   it("preserves a workspace with uncertain file ownership and blocks subsequent claims", async () => {
@@ -1673,6 +1828,62 @@ describe("worker runtime ownership", () => {
     expect(f.events).toContainEqual(
       expect.objectContaining({ kind: "attempt-stopped", code: "cancelled" }),
     );
+    await f.runtime.stop();
+  });
+  it.each([false, "query-failed"])(
+    "consumer cancellation retains exact scratch without positive native inference idle (%s)",
+    async (mode) => {
+      const proof = vi.fn(async () => {
+        if (mode === "query-failed") throw new Error("native unavailable");
+        return false;
+      });
+      const f = await runtimeFixture(
+        fixture({ hang: true, cancelled: true }),
+        undefined,
+        false,
+        false,
+        undefined,
+        100,
+        undefined,
+        undefined,
+        proof,
+      );
+      await f.runtime.start();
+      await f.runtime.reconcileOnce();
+      await f.runtime.waitForIdle();
+      expect(proof).toHaveBeenCalledOnce();
+      expect(f.supervisor.restart).not.toHaveBeenCalled();
+      expect(await readdir(join(f.root, "attempts"))).toContain(attemptId);
+      expect(f.events).toContainEqual(
+        expect.objectContaining({
+          kind: "workspace-cleanup-failed",
+          code: "inference-stop-unconfirmed",
+        }),
+      );
+      const claims = f.control.claim.mock.calls.length;
+      await f.runtime.reconcileOnce();
+      expect(f.control.claim).toHaveBeenCalledTimes(claims);
+      await f.runtime.stop();
+    },
+  );
+  it("consumer cancellation cleans its scratch only after the native role proves inference exited", async () => {
+    const proof = vi.fn(async () => true),
+      f = await runtimeFixture(
+        fixture({ hang: true, cancelled: true }),
+        undefined,
+        false,
+        false,
+        undefined,
+        100,
+        undefined,
+        undefined,
+        proof,
+      );
+    await f.runtime.start();
+    await f.runtime.reconcileOnce();
+    await f.runtime.waitForIdle();
+    expect(proof).toHaveBeenCalledOnce();
+    expect(await readdir(join(f.root, "attempts"))).not.toContain(attemptId);
     await f.runtime.stop();
   });
 

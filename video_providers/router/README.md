@@ -59,7 +59,10 @@ Bytes outside HTTP's declared response framing are never relayed.
 
 All responses use `Cache-Control: no-store`. Only bounded, decoded, allowlisted
 schema-version-1 metadata is re-encoded into `X-Import-Extra-Data-Base64`; invalid
-metadata is nonfatal. URLs, credential-shaped text, exact runtime service keys
+metadata is nonfatal. Optional `thumbnail_url` is preserved only for bounded
+HTTPS `i.ytimg.com` `/vi/` or `/vi_webp/` images with an 11-character video ID
+and optional bounded `sqp`/`rs` thumbnail parameters. No image fetch or metadata
+lookup is added. Every other URL, credential-shaped text, exact runtime service keys
 and unknown fields are dropped. No Location, cookie, signed-URL or other raw
 upstream header is forwarded. Error bodies are never read or copied. Only
 allowlisted `IMPORT_*` error/status pairs survive; other failures become a

@@ -1,5 +1,6 @@
 package com.hatem.musicmute.processing
 
+import com.hatem.musicmute.diagnostics.LocalDiagnostics
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -29,7 +30,12 @@ class ObjectStorageUploader(
             withTimeout(300_000) {
                 suspendCancellableCoroutine<Unit> { continuation ->
                     val current = AtomicReference<HttpURLConnection?>()
+                    val traceId = java.util.UUID.randomUUID().toString()
                     val future = executor.submit {
+                        val started = System.nanoTime()
+                        var result = "failed"
+                        var status: Int? = null
+                        var failure: Map<String, Any> = emptyMap()
                         try {
                             val uri = URI(grant.url)
                             if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null || uri.rawFragment != null)
@@ -77,14 +83,19 @@ class ObjectStorageUploader(
                                 if (sent != input.bytes || Base64.getEncoder().encodeToString(digest.digest()) != input.sha256)
                                     throw ProcessingTransferException(ProcessingLocalProblem.INPUT_CHANGED)
                             }
-                            if (client.responseCode !in 200..299) throw IOException("Storage did not accept the upload")
+                            status = client.responseCode
+                            if (status !in 200..299) throw IOException("Storage did not accept the upload")
+                            result = "provider_accepted"
                             if (continuation.isActive) continuation.resume(Unit)
                         } catch (error: Exception) {
+                            failure = LocalDiagnostics.error(error)
                             if (continuation.isActive) continuation.resumeWithException(
                                 if (error is ProcessingTransferException) error else IOException("Upload could not be completed")
                             )
                         } finally {
                             current.get()?.disconnect()
+                            if (result == "failed" && !continuation.isActive) result = "aborted_or_failed"
+                            LocalDiagnostics.emit("transfer.upload_completed", "transfer", if (result == "provider_accepted") "info" else "warn", mapOf("operation" to "artifact.upload", "bytes" to input.bytes, "contentType" to input.contentType, "status" to status, "result" to result, "durationMs" to (System.nanoTime() - started) / 1_000_000.0, "body" to mapOf("omitted" to "binary_stream"), "error" to failure), traceId = traceId)
                         }
                     }
                     continuation.invokeOnCancellation {

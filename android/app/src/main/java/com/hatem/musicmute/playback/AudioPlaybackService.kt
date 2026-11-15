@@ -34,6 +34,7 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import android.os.SystemClock
 import com.hatem.musicmute.MainActivity
 import com.hatem.musicmute.VocalApplication
+import com.hatem.musicmute.auth.AuthPhase
 import com.hatem.musicmute.createPlaybackNotificationChannel
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -62,14 +63,13 @@ class AudioPlaybackService : MediaLibraryService() {
     private var restoring = false
     private val ownerRestore = OwnerQueueRestore()
     private val failedItems = mutableSetOf<Int>()
+    private val playCounter = PlaybackPlayCounter()
     private val dependencies get() = application as? PlaybackDependencies
 
     override fun onCreate() {
         super.onCreate()
-        if ((application as? VocalApplication)?.updateAdmission?.isRequired() == true) {
-            stopSelf()
-            return
-        }
+        // Keep a browse session available while blocked so car hosts can explain how to
+        // recover. Queue restoration, media resolution and playback remain update-fenced.
         val notificationChannel = createPlaybackNotificationChannel(this)
         setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this)
             .setChannelId(notificationChannel.id)
@@ -116,6 +116,14 @@ class AudioPlaybackService : MediaLibraryService() {
                 setWakeMode(C.WAKE_MODE_LOCAL)
             }
         player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                val key = mediaItem?.queueTrack()?.key
+                if (restoring) playCounter.restored(key)
+                else playCounter.transitioned(key, reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+            }
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                playCounter.selectionApplied(newPosition.mediaItem?.queueTrack()?.key)
+            }
             override fun onShuffleModeEnabledChanged(enabled: Boolean) {
                 if (!restoring && enabled) {
                     shuffleSeed = Random.nextLong()
@@ -134,6 +142,17 @@ class AudioPlaybackService : MediaLibraryService() {
                 }
             }
             override fun onEvents(p: Player, events: Player.Events) {
+                val expected = owner
+                val key = p.currentMediaItem?.queueTrack()?.key
+                if (expected != null && dependencies?.currentPlaybackSession() == expected && key?.ownerUid == expected.uid) {
+                    playCounter.playing(key, p.isPlaying && p.playerError == null)?.let { started ->
+                        scope.launch(Dispatchers.IO) {
+                            try { dependencies?.recordPlaybackStart(started, expected) }
+                            catch (error: CancellationException) { throw error }
+                            catch (_: Exception) { /* Listening history must never interrupt audio. */ }
+                        }
+                    }
+                }
                 if (p.playbackState == Player.STATE_READY) failedItems.clear()
                 val identity = p.currentMediaItem?.let { "${it.mediaId}:${it.localConfiguration?.uri}" }
                 if (identity != listeningIdentity) {
@@ -152,7 +171,10 @@ class AudioPlaybackService : MediaLibraryService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
                     if (sleepEnd) { clearSleep(player); publishExtras() }
-                    else listeningLoop?.takeIf { it.valid(player.duration) }?.let { player.seekTo(it.startMs); player.play() }
+                    else listeningLoop?.takeIf { it.valid(player.duration) }?.let {
+                        playCounter.loopRestarted(player.currentMediaItem?.queueTrack()?.key)
+                        player.seekTo(it.startMs); player.play()
+                    }
                 }
             }
             override fun onPlayerError(error: PlaybackException) {
@@ -190,24 +212,33 @@ class AudioPlaybackService : MediaLibraryService() {
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                         .add(SessionCommand(AUTO_NEXT_COMMAND, Bundle.EMPTY))
                         .add(SessionCommand(EDIT_QUEUE_COMMAND, Bundle.EMPTY))
+                        .add(SessionCommand(PLAY_START_COMMAND, Bundle.EMPTY))
                         .add(SessionCommand(LISTENING_COMMAND, Bundle.EMPTY)).build())
                 return builder.build()
             }
             override fun onPlayerCommandRequest(session: MediaSession, controller: MediaSession.ControllerInfo, command: Int): Int {
                 val admission = (application as? VocalApplication)?.updateAdmission
-                if (admission?.isRequired() == true) return SessionError.ERROR_PERMISSION_DENIED
+                if (admission?.isRequired() == true) return reportUnavailable(session, controller)
                 // An empty session may accept a resume request; the async resumption callback
                 // waits for both auth and update restoration before returning any media.
                 if (session.player.mediaItemCount == 0 && command in setOf(Player.COMMAND_PLAY_PAUSE, Player.COMMAND_PREPARE))
                     return SessionResult.RESULT_SUCCESS
-                return if (admission?.isBlocked() == true || owner == null || dependencies?.currentPlaybackSession() != owner)
-                    SessionError.ERROR_PERMISSION_DENIED else SessionResult.RESULT_SUCCESS
+                return if (!canAccessPlayback() || owner == null || dependencies?.currentPlaybackSession() != owner)
+                    reportUnavailable(session, controller) else SessionResult.RESULT_SUCCESS
             }
 
             override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo, command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
                 if (controller.packageName != packageName || owner == null || dependencies?.currentPlaybackSession() != owner ||
                     (application as? VocalApplication)?.updateAdmission?.isBlocked() == true)
                     return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                if (command.customAction == PLAY_START_COMMAND) {
+                    val expected = owner ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                    val job = args.getString("job")?.takeIf { it.isNotBlank() }
+                    if (restoring || args.getString("owner") != expected.uid || args.getLong("epoch", -1) != expected.epoch || job == null)
+                        return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                    playCounter.requestStart(LibraryKey(expected.uid, job))
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
                 if (command.customAction == EDIT_QUEUE_COMMAND) {
                     val expected = owner
                     val edit = QueueEdit.entries.firstOrNull { it.name == args.getString("edit") }
@@ -280,12 +311,14 @@ class AudioPlaybackService : MediaLibraryService() {
             }
         }
         session = MediaLibrarySession.Builder(this, player, libraryCallback)
+            .setLibraryErrorReplicationMode(MediaLibrarySession.LIBRARY_ERROR_REPLICATION_MODE_FATAL)
             .setSessionActivity(MainActivity.playerPendingIntent(this)).build()
         publishExtras()
         scope.launch { dependencies?.playbackSessions?.collectLatest { current ->
             if (!ownerRestore.attach(current)) return@collectLatest
             val old = owner
             owner = current
+            playCounter.clear()
             listeningLoop = null
             clearSleep(player)
             skipSilence = false
@@ -297,12 +330,17 @@ class AudioPlaybackService : MediaLibraryService() {
             if (old != null) {
                 player.stop(); player.clearMediaItems(); failedItems.clear()
                 withContext(Dispatchers.IO) { dependencies?.playbackQueueStore?.clear(old.uid) }
+                session?.notifyChildrenChanged("musicmute-library", 0, null)
+                session?.notifyChildrenChanged("musicmute-recent", 0, null)
             }
             if (current == null) { restoring = false; return@collectLatest }
             (application as? VocalApplication)?.updateCoordinator?.state?.first { !it.restoring }
             if ((application as? VocalApplication)?.updateAdmission?.isBlocked() == true) return@collectLatest
             val saved = withContext(Dispatchers.IO) { dependencies?.playbackQueueStore?.load(current.uid) }
-            if (dependencies?.currentPlaybackSession() != current) return@collectLatest
+            val app = application as? VocalApplication
+            if (dependencies?.currentPlaybackSession() != current || app?.updateAdmission?.isBlocked() == true ||
+                app?.authSession?.state?.value?.phase != AuthPhase.AUTHENTICATED ||
+                app?.authSession?.state?.value?.identity?.uid != current.uid) return@collectLatest
             if (saved != null && player.mediaItemCount == 0) {
                 autoNext = saved.autoNext
                 shuffleSeed = saved.shuffleSeed
@@ -312,10 +350,16 @@ class AudioPlaybackService : MediaLibraryService() {
                     ?.toIntArray() ?: queueOrder(saved.tracks.size, saved.shuffle, shuffleSeed, saved.index).toIntArray(), shuffleSeed))
                 player.shuffleModeEnabled = saved.shuffle
                 player.playWhenReady = false // No prepare: restore cannot download or autoplay.
+                playCounter.restored(player.currentMediaItem?.queueTrack()?.key)
                 publishExtras()
             }
             restoring = false
             ownerRestore.restored(current)
+            session?.clearReplicatedLibraryError()
+            val count = (application as? VocalApplication)?.libraryRepository?.entries?.value
+                ?.count { !it.hidden && it.key.ownerUid == current.uid } ?: 0
+            session?.notifyChildrenChanged("musicmute-library", count, null)
+            session?.notifyChildrenChanged("musicmute-recent", if (player.currentMediaItem == null) 0 else 1, null)
         } }
         scope.launch {
             (application as? VocalApplication)?.libraryRepository?.entries?.collectLatest { entries ->
@@ -331,7 +375,11 @@ class AudioPlaybackService : MediaLibraryService() {
                 val fading = sleepFade && sleepAt?.let { it - SystemClock.elapsedRealtime() in 1..5000 } == true
                 delay(if (listeningLoop != null || fading) 100 else 1000)
                 if (owner == null || dependencies?.currentPlaybackSession() != owner) continue
-                if (player.isPlaying) loopSeek(player.currentPosition, listeningLoop, player.duration)?.let(player::seekTo)
+                if (player.isPlaying) loopSeek(player.currentPosition, listeningLoop, player.duration)?.let { position ->
+                    if (listeningLoop?.let { player.currentPosition >= it.endMs } == true)
+                        playCounter.loopRestarted(player.currentMediaItem?.queueTrack()?.key)
+                    player.seekTo(position)
+                }
                 val remaining = sleepAt?.minus(SystemClock.elapsedRealtime())
                 if (remaining != null && remaining <= 0) {
                     player.pause(); clearSleep(player); publishExtras(); checkpoint()
@@ -378,10 +426,7 @@ class AudioPlaybackService : MediaLibraryService() {
             session?.isAutoCompanionController(controllerInfo) == true || session?.isAutomotiveController(controllerInfo) == true
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
-        session.takeIf {
-            (application as? VocalApplication)?.updateAdmission?.isRequired() != true &&
-                allowedController(controllerInfo)
-        }
+        session.takeIf { allowedController(controllerInfo) }
 
     override fun onDestroy() {
         session?.run {

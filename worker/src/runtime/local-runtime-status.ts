@@ -186,6 +186,11 @@ export async function loadLocalRuntimeStatus(
   )
     throw new TypeError("Local runtime status file is unsafe");
   const value = JSON.parse(await readFile(path, "utf8")) as unknown;
+  return parseLocalRuntimeStatus(value);
+}
+
+/** Also used by consumer descriptor reads after native ACL/path validation. */
+export function parseLocalRuntimeStatus(value: unknown): LocalRuntimeStatus {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError("Local runtime status is invalid");
   const record = value as Record<string, unknown>;

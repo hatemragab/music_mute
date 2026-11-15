@@ -21,10 +21,6 @@ const { StoragePreflightService } =
   await import('../../dist/storage/storage-preflight.service.js');
 const { StorageTransfersService } =
   await import('../../dist/storage/storage-transfers.service.js');
-const { ReleaseArtifactStorageService } =
-  await import('../../dist/releases/release-artifact-storage.service.js');
-const { ApkVerifierService } =
-  await import('../../dist/releases/apk-verifier.service.js');
 const { authError } = await import('../../dist/auth/auth.errors.js');
 
 const useCurl = process.env.DASHBOARD_HTTP_CLIENT === 'curl';
@@ -163,30 +159,7 @@ const builder = Test.createTestingModule({ imports: [AppModule] })
     }),
   })
   .overrideProvider(StorageTransfersService)
-  .useValue(storage)
-  .overrideProvider(ReleaseArtifactStorageService)
-  .useValue({
-    grant: async () => ({
-      ...grant(),
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/vnd.android.package-archive',
-        'x-amz-checksum-sha256': 'A'.repeat(43) + '=',
-        'x-amz-meta-sha256': 'A'.repeat(43) + '=',
-        'If-None-Match': '*',
-      },
-    }),
-    pin: async () => '"fixture-apk-etag"',
-    download: async () => undefined,
-  })
-  .overrideProvider(ApkVerifierService)
-  .useValue({
-    verify: async () => ({
-      packageId: 'com.example.fixture',
-      minimumSdk: 26,
-      signerSha256Hex: 'b'.repeat(64),
-    }),
-  });
+  .useValue(storage);
 let app;
 try {
   const module = await builder.compile();
@@ -253,6 +226,29 @@ try {
       successfulOperations.add(body.operation_id);
     return value;
   }
+  for (const [method, retiredPath] of [
+    ['GET', `/app-updates/releases/${'a'.repeat(24)}`],
+    ['POST', `/app-updates/releases/${'a'.repeat(24)}/download-grants`],
+    ['POST', `/app-updates/releases/${'a'.repeat(24)}/download-redirects`],
+  ]) {
+    const rejected = await api(
+      method,
+      retiredPath,
+      method === 'POST' ? {} : undefined,
+      '',
+      404,
+    );
+    assert.equal(rejected.code, 'RESOURCE_NOT_FOUND');
+    assert.equal('url' in rejected, false);
+  }
+  await api(
+    'GET',
+    '/app-updates/policy?platform=android&distribution=direct',
+    undefined,
+    '',
+    400,
+  );
+
   let curlProbes = 0;
   if (routeInventory) {
     assert.equal(useCurl, true);
@@ -367,33 +363,43 @@ try {
     '/admin/releases',
     command({
       platform: 'android',
-      source: 'direct_apk',
+      source: 'google_play',
       version_name: '1.0.0',
       build_number: 2,
       changelog_en: 'Fixture release notes',
-      store_url: null,
+      store_url: `https://play.google.com/store/apps/details?id=${process.env.APK_EXPECTED_PACKAGE_ID ?? 'com.example.fixture'}`,
     }),
   );
-  const upload = await api('POST', `/admin/releases/${draft.id}/uploads`, {
-    operation_id: randomUUID(),
-    expected_revision: draft.revision,
-    bytes: 32,
-    sha256_hex: 'a'.repeat(64),
-  });
-  await api(
-    'POST',
-    `/admin/releases/${draft.id}/uploads/${upload.upload_id}/completions`,
-    { operation_id: randomUUID() },
-  );
   const verified = await api('GET', `/admin/releases/${draft.id}`);
-  assert.equal(verified.artifact_state, 'verified');
+  assert.equal(verified.artifact_state, null);
+  const uploadCount = await model('ReleaseUpload').countDocuments();
+  for (const retiredPath of [
+    `/admin/releases/${draft.id}/uploads`,
+    `/admin/releases/${draft.id}/uploads/${'a'.repeat(24)}/completions`,
+  ]) {
+    const rejected = await api('POST', retiredPath, {}, 'owner-fixture', 400);
+    assert.equal(rejected.code, 'INVALID_REQUEST');
+    assert.equal('grant' in rejected, false);
+  }
+  assert.equal(await model('ReleaseUpload').countDocuments(), uploadCount);
+  await model('Release').create({
+    platform: 'android',
+    source: 'direct_apk',
+    versionName: '0.9.0',
+    buildNumber: 1,
+    changelogEn: 'Historical retired direct APK',
+    storeUrl: null,
+    state: 'published',
+    artifactState: 'verified',
+    createdBy: 'owner-fixture',
+  });
   const policy = await api('GET', '/admin/update-policy');
   const selection = {
     android: {
       minimum_build: null,
-      direct_release_id: draft.id,
-      store_release_id: null,
-      source: 'direct_apk',
+      direct_release_id: null,
+      store_release_id: draft.id,
+      source: 'google_play',
     },
     ios: { minimum_build: null, store_release_id: null },
   };
@@ -404,7 +410,7 @@ try {
       policy: selection,
       expected_revision: policy.revision,
       expected_release_revision: verified.revision,
-      store_availability_confirmed: false,
+      store_availability_confirmed: true,
     }),
   );
   assert.equal(published.release.state, 'published');
@@ -414,7 +420,7 @@ try {
     command({
       replacement_policy: {
         ...selection,
-        android: { ...selection.android, direct_release_id: null },
+        android: { ...selection.android, store_release_id: null },
       },
       expected_revision: published.policy_revision,
       expected_release_revision: published.release.revision,

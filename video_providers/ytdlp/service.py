@@ -80,7 +80,16 @@ def request(headers, raw):
     return url, maximum, duration
 
 
-class Handler(BaseHTTPRequestHandler):
+# The source-only logger is intentionally absent from deployment allowlists.
+try:
+    from local_logging import LocalLoggingHandlerMixin
+except ModuleNotFoundError:
+    class LocalLoggingHandlerMixin:
+        pass
+
+
+class Handler(LocalLoggingHandlerMixin, BaseHTTPRequestHandler):
+    local_log_service = 'ytdlp'
     protocol_version = 'HTTP/1.1'
     server_version = 'AudioAcquisition/1'
 
@@ -225,8 +234,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not 0 < size <= maximum or audio.content_type not in MEDIA_TYPES:
                     raise Failure('IMPORT_INVALID_AUDIO', 422)
                 timings.update(clean_timings(audio.timings_ms))
-                encoded = base64.b64encode(json.dumps({**audio.metadata, 'schema_version': 1,
-                                                       'provider': 'yt-dlp'}).encode()).decode()
+                metadata_fields = {**audio.metadata, 'schema_version': 1, 'provider': 'yt-dlp'}
+                encoded = base64.b64encode(json.dumps(metadata_fields).encode()).decode()
+                if len(encoded) > 4096 and 'thumbnail_url' in metadata_fields:
+                    del metadata_fields['thumbnail_url']
+                    encoded = base64.b64encode(json.dumps(metadata_fields).encode()).decode()
                 metadata = clean_metadata(encoded, (self.server.api_key, proxy, *self.server.sessions.secrets))
                 self.send_response(200)
                 self.response_status = 200

@@ -72,6 +72,117 @@ class DownloaderBootstrapTests(unittest.TestCase):
             cwd=self.home, env=env, capture_output=True, timeout=10,
         )
 
+    def windows_fixture(self, code):
+        prelude = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('windows_bootstrap_fixture', sys.argv[1])
+bootstrap = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bootstrap)
+"""
+        result = subprocess.run([sys.executable, '-I', '-B', '-S', '-c', prelude + code, str(self.script)],
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b'windows-fixture-ready\n')
+
+    def test_windows_path_and_acl_policy_rejects_unsafe_aliases_and_other_principals(self):
+        self.windows_fixture(r"""
+current = 'S-1-5-21-111-222-333-1001'
+azure = 'S-1-12-1-111-222-333-444'
+bootstrap.validate_windows_security(current, current, [(0,current),(0,'S-1-5-18')])
+bootstrap.validate_windows_security(azure, azure, [(0,azure)])
+for owner, sid, aces in [(current,current,[]), ('S-1-5-18',current,[(0,current)]),
+                         (current,current,[(0,current),(0,'S-1-1-0')]),
+                         (current,current,[(0,current),(0,'S-1-5-32-544')]),
+                         (current,current,[(3,current)]), ('S-1-5-19','S-1-5-19',[(0,'S-1-5-19')])]:
+    try:
+        bootstrap.validate_windows_security(owner,sid,aces)
+        raise AssertionError('unsafe ACL accepted')
+    except bootstrap.BootstrapError:
+        pass
+bootstrap.validate_windows_path(r'C:\Users\User\AppData\Local\MusicMuteLocal\wheel.whl')
+for path in [r'\\server\share\wheel.whl',r'\\?\C:\private\wheel.whl',r'C:\private\wheel.whl:stream',
+             r'C:\private\..\wheel.whl',r'C:\private\CON',r'C:\private\trailing.',r'C:\private\file ']:
+    try:
+        bootstrap.validate_windows_path(path)
+        raise AssertionError('unsafe path accepted')
+    except bootstrap.BootstrapError:
+        pass
+print('windows-fixture-ready')
+""")
+
+    def test_windows_branch_uses_native_security_and_guest_environment_without_posix_fallback(self):
+        self.windows_fixture(r"""
+import os, tempfile
+class NativeFixture:
+    def __init__(self): self.opened=[]; self.closed=[]; self.created=[]
+    def open(self,path,directory=False): self.opened.append((path,directory)); return len(self.opened)
+    def close(self,handle): self.closed.append(handle)
+    def make_private_directory(self,path): self.created.append(path); os.mkdir(path,0o700)
+    def system_root(self): return r'C:\Windows'
+native=NativeFixture()
+bootstrap._WINDOWS_FILES=native
+with tempfile.TemporaryDirectory() as root:
+    before=dict(os.environ)
+    os.environ.update({'TMPDIR':root,'APPDATA':'private-account-data','SystemRoot':'untrusted-root',
+                       'WINDIR':'untrusted-root','GOOGLE_TOKEN':'secret-account-token'})
+    os.getuid=lambda: (_ for _ in ()).throw(AssertionError('Windows used getuid'))
+    bootstrap.sys.platform='win32'
+    bootstrap.safe_stat(sys.argv[1])
+    with bootstrap.isolated_downloader_environment():
+        home=os.environ['HOME']
+        assert os.environ['SystemRoot']==r'C:\Windows'
+        assert os.environ['WINDIR']==r'C:\Windows'
+        assert os.environ['TEMP']==home and os.environ['TMP']==home
+        assert os.environ['USERPROFILE']==home
+        assert os.environ['APPDATA']==os.path.join(home,'config')
+        assert os.environ['LOCALAPPDATA']==os.path.join(home,'data')
+        assert 'GOOGLE_TOKEN' not in os.environ and 'private-account-data' not in str(dict(os.environ))
+        assert os.path.isdir(home)
+    assert not os.path.exists(home)
+    assert os.environ['GOOGLE_TOKEN']=='secret-account-token'
+    assert len(native.created)==4 and len(native.opened)==len(native.closed)
+    assert bootstrap.deno_path(root).endswith('deno.exe')
+    os.environ['MUSICMUTE_UPDATE_LEASE_FD']='5'
+    try:
+        bootstrap.install_process_lease()
+        raise AssertionError('Windows accepted a POSIX descriptor lease')
+    except bootstrap.BootstrapError as error:
+        assert str(error)=='LOCAL_UPDATE_LEASE_INVALID'
+    os.environ.clear(); os.environ.update(before)
+print('windows-fixture-ready')
+""")
+
+    def test_windows_verified_reads_use_native_handle_descriptor_and_release_parent_pins(self):
+        self.windows_fixture(r"""
+import os, tempfile, hashlib
+class NativeFixture:
+    def __init__(self): self.descriptors=[]; self.released=[]
+    def open(self,path,directory=False): return 5
+    def close(self,handle): pass
+    def read_descriptor(self,path):
+        descriptor=os.open(path,os.O_RDONLY)
+        self.descriptors.append(descriptor)
+        return descriptor
+    def release_descriptor_parents(self,descriptor): self.released.append(descriptor)
+native=NativeFixture(); bootstrap._WINDOWS_FILES=native
+with tempfile.TemporaryDirectory() as root:
+    data=b'synthetic-wheel-byte-fixture'
+    path=os.path.join(root,'synthetic.whl')
+    with open(path,'wb') as file: file.write(data)
+    bootstrap.WHEELS=(('synthetic.whl',len(data),hashlib.sha256(data).hexdigest()),)
+    bootstrap.sys.platform='win32'
+    os.getuid=lambda: (_ for _ in ()).throw(AssertionError('Windows used POSIX owner checks'))
+    assert bootstrap.verified_archives(bundle_root=root)==[path]
+    with open(path,'wb') as file: file.write(b'x'*len(data))
+    try:
+        bootstrap.verified_archives(bundle_root=root)
+        raise AssertionError('tampered native read accepted')
+    except bootstrap.BootstrapError:
+        pass
+    assert native.descriptors==native.released and len(native.descriptors)==2
+print('windows-fixture-ready')
+""")
+
     def test_other_account_packaged_assets_require_protected_containment(self):
         command = """
 import importlib.util

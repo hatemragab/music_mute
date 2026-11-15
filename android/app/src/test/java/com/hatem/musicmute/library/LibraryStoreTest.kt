@@ -118,4 +118,72 @@ class LibraryStoreTest {
         val reopened = ProcessingStore(root, backgroundScope)
         assertTrue(reopened.library("owner").first().single().starred)
     }
+
+    @Test
+    fun thumbnailEnrichmentSurvivesRenameEqualRevisionRestartAndOlderPages() = runTest {
+        val root = kotlin.io.path.createTempDirectory().toFile()
+        val storeJob = SupervisorJob()
+        val store = ProcessingStore(root, CoroutineScope(storeJob + Dispatchers.IO))
+        val original = job("with-thumbnail")
+        val thumbnail = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
+        store.updateLibraryJobs("owner", listOf(original))
+        store.updateLibraryFlags("owner", original.id, starred = true, hidden = true)
+        store.updateLibraryJob("owner", original.copy(displayName = "Renamed title"))
+        store.updateLibraryJobs("owner", listOf(original.copy(thumbnailUrl = thumbnail)))
+        store.updateLibraryJobs("owner", listOf(original))
+        storeJob.cancelAndJoin()
+
+        val reopened = ProcessingStore(root, backgroundScope)
+        val cached = reopened.library("owner").first().single()
+        assertEquals(thumbnail, cached.job.thumbnailUrl)
+        assertEquals("Renamed title", cached.job.displayName)
+        assertTrue(cached.starred)
+        assertTrue(cached.hidden)
+        assertTrue(reopened.library("other").first().isEmpty())
+        reopened.updateLibraryJobs("owner", listOf(cached.job.copy(updatedAt = Instant.ofEpochMilli(1), thumbnailUrl = null)))
+        assertNull(reopened.library("owner").first().single().job.thumbnailUrl)
+    }
+
+    @Test
+    fun concurrentPlaysPersistAcrossRefreshRenameAndRestartWithoutCrossingAccounts() = runTest {
+        val root = kotlin.io.path.createTempDirectory().toFile()
+        val storeJob = SupervisorJob()
+        val store = ProcessingStore(root, CoroutineScope(storeJob + Dispatchers.IO))
+        val original = job("popular")
+        store.updateLibraryJobs("owner", listOf(original))
+        store.updateLibraryJobs("other", listOf(original))
+        coroutineScope { repeat(12) { launch { store.incrementLibraryPlay("owner", original.id) } } }
+        store.incrementLibraryPlay("owner", original.id) { false }
+        store.updateLibraryJobs("owner", listOf(original.copy(updatedAt = Instant.ofEpochMilli(1))))
+        store.updateLibraryJob("owner", original.copy(updatedAt = Instant.ofEpochMilli(1), displayName = "New title"))
+        assertEquals(12L, store.library("owner").first().single().playCount)
+        assertEquals(0L, store.library("other").first().single().playCount)
+        storeJob.cancelAndJoin()
+        val reopened = ProcessingStore(root, backgroundScope)
+        assertEquals(12L, reopened.library("owner").first().single().playCount)
+        reopened.removeLibraryJob("owner", original.id)
+        reopened.incrementLibraryPlay("owner", original.id)
+        reopened.updateLibraryJobs("owner", listOf(original))
+        assertTrue(reopened.library("owner").first().isEmpty())
+    }
+
+    @Test
+    fun optionalCountsDecodeOldAndInvalidValuesWithoutLosingJobsAndCannotOverflow() = runTest {
+        val json = kotlinx.serialization.json.Json
+        val encoded = json.encodeToString(StoredLibraryTrack.serializer(), StoredLibraryTrack(job("old")))
+        assertEquals(0L, json.decodeFromString(StoredLibraryTrack.serializer(), encoded).playCount)
+        listOf("-1", "1.5", "null", "\"20\"", "{}", "9223372036854775808").forEach { invalid ->
+            val withCount = encoded.dropLast(1) + ",\"playCount\":$invalid}"
+            assertEquals(0L, json.decodeFromString(StoredLibraryTrack.serializer(), withCount).playCount)
+        }
+        val root = kotlin.io.path.createTempDirectory().toFile()
+        val file = java.io.File(com.hatem.musicmute.processing.processingOwnerDirectory(root, "owner"), "processing.json")
+        file.parentFile!!.mkdirs()
+        val document = com.hatem.musicmute.processing.ProcessingDocument(library =
+            listOf(StoredLibraryTrack(job("max"), playCount = Long.MAX_VALUE)))
+        file.writeText(json.encodeToString(com.hatem.musicmute.processing.ProcessingDocument.serializer(), document))
+        val store = ProcessingStore(root, backgroundScope)
+        store.incrementLibraryPlay("owner", "max")
+        assertEquals(Long.MAX_VALUE, store.library("owner").first().single().playCount)
+    }
 }

@@ -1,0 +1,27 @@
+Keep the voice. Reduce the music.
+
+MusicMute helps separate voices from background music in audio you own or have permission to process. Bring a recording, review the audio, and create a voice-focused version with cloud processing.
+
+Start with your own files
+Choose a supported audio or video file from your device. MusicMute prepares the audio for review before you confirm your rights and start processing. Follow the job's progress and return to completed results in your account library.
+
+Public links, where available
+You can also submit supported public links when link import is enabled for your account and country. Availability depends on service policy and may change. Only submit links to media you own or are authorized to process.
+
+Compare and listen
+Switch between the prepared original and the voice-only result in the player. Adjust playback speed, arrange your listening queue, and keep listening in the background with Android media controls. Bookmarks, passage loops and sleep timers help you listen your way. Playback starts when you choose Play. Use Android media controls to pause or resume, and close the player in MusicMute to stop playback.
+
+Save and share
+Download completed audio, save a copy to your device, or share it through other apps. Rename library entries so your recordings are easy to find.
+
+English and Arabic
+Use MusicMute in English or Arabic, with right-to-left layouts. Account settings include privacy information, support and account deletion controls.
+
+Before you start
+An account and an internet connection are required for cloud processing. Processing time, availability and limits depend on service capacity and your account. Results vary with the source audio, and background music may not be removed completely. Video files are used as audio sources; MusicMute creates audio results.
+
+Only process media you own or are authorized to use. MusicMute does not grant rights to third-party content. Read the privacy policy for details about audio processing, service providers, retention and deletion.
+
+Privacy policy: https://api.music-mute.com/privacy
+Support: https://api.music-mute.com/support
+Account deletion: https://api.music-mute.com/delete-account

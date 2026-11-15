@@ -3,7 +3,8 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  define: { __MUSICMUTE_LOCAL_DEBUG__: JSON.stringify(command === "serve") },
   plugins: [
     react(),
     tailwindcss(),
@@ -24,4 +25,4 @@ export default defineConfig({
     setupFiles: ["./src/tests/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
   },
-});
+}));

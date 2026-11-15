@@ -1,3 +1,4 @@
+import { initializeLocalDiagnostics } from "./diagnostics/local-debug";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
@@ -5,6 +6,7 @@ import { watchDeployment } from "./deployment-update";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { initializeMonitoring, reportBrowserFailure } from "./observability";
 
+initializeLocalDiagnostics();
 initializeMonitoring();
 watchDeployment();
 

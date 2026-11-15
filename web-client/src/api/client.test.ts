@@ -14,6 +14,40 @@ test("wire conversion keeps signed transfer headers unchanged", () => {
   expect(fromWire({ next_cursor: null })).toEqual({ nextCursor: null });
 });
 
+test("HTTP job responses preserve the original thumbnail, discard unsafe values, and accept older omitted fields", async () => {
+  const original = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            { id: "valid", thumbnail_url: original },
+            { id: "invalid", thumbnail_url: "https://example.com/image.jpg" },
+            { id: "null", thumbnail_url: null },
+            { id: "old" },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    ),
+  );
+  const api = new ApiClient({
+    origin: "https://api.example.com",
+    token: async () => "token",
+    installationId: () => "id",
+  });
+  await expect(api.get("/jobs")).resolves.toEqual({
+    items: [
+      { id: "valid", thumbnailUrl: original },
+      { id: "invalid", thumbnailUrl: null },
+      { id: "null", thumbnailUrl: null },
+      { id: "old" },
+    ],
+    nextCursor: null,
+  });
+});
+
 test("a safe read refreshes a 401 once and preserves installation scope", async () => {
   const fetchMock = vi
     .fn()

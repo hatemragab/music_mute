@@ -56,6 +56,15 @@ independent supervisor process-handle watcher. Native Windows acceptance and its
 [current readiness report](../docs/worker-windows-macos/READINESS.md). These controls do not provide a hard
 CPU, GPU or resident-memory quota.
 
+Temporary backend/network failures suspend new claims and retry in the running
+supervisor with backoff capped at thirty seconds. The loaded model and uncertain
+claim request IDs are preserved; successful reconciliation restores admission.
+Authorization and protocol failures still fail closed. Process-group exit probes
+retry transient permission/interruption errors within the existing stop deadline;
+only confirmed absence releases the GPU fence. Shutdown always closes local
+admission, even when child termination fails, so a failed supervisor cannot stay
+alive solely because its admission socket remains open.
+
 Service startup has a persisted five-start failure budget with jittered backoff.
 Successful jobs and orderly shutdown reset it; abrupt process death consumes a
 start. Permanent errors or exhausted admission leave the service quiescent and
@@ -1031,3 +1040,16 @@ Successful-attempt diagnostics add `inputGrant`, `outputGrant`, and `outputPut`
 to the existing stage timings. `upload` includes its grant/PUT components; do not
 sum overlapping measurements. `outputPut` includes failed transfer calls before
 successful retry/recovery. See [the measurement and rollout guide](../docs/audio-transfer-performance/README.md).
+
+## Private local diagnostics
+
+Build with `pnpm run build:debug`, then from the repository root use
+`node tools/local-logging/cli.mjs run worker <existing CLI arguments>`. The
+logging command does not install, enroll, start or restart a managed worker.
+The actual runtime event observer, control-plane HTTP client and hint socket
+share one process identity. AsyncLocalStorage preserves per-operation identity
+across awaits and HTTP retries, with existing job/attempt/session IDs retained.
+`localDiagnostics.status()` exposes bounded pending work, delivery, drop and
+failure counters. Native child/media bytes and unsupported streams are metadata.
+The normal build emits a disabled compile gate; production environments cannot
+activate payload capture. See the [local logging guide](../docs/local-logging/README.md).

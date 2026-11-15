@@ -29,7 +29,12 @@
       </section>
       <section class="helper-card" aria-labelledby="helper-title">
         <div class="card-topline">
-          <span class="eyebrow" data-i18n="On this Mac">On this Mac</span>
+          <span
+            id="platform-eyebrow"
+            class="eyebrow"
+            data-i18n="On this computer"
+            >On this computer</span
+          >
           <span class="status-pill" id="helper-pill" data-i18n="Checking"
             >Checking</span
           >
@@ -49,8 +54,8 @@
         </p>
         <pre id="check-results" aria-live="polite" hidden></pre>
         <div class="helper-footer">
-          <span id="helper-meta" data-i18n="Apple Silicon · macOS"
-            >Apple Silicon · macOS</span
+          <span id="helper-meta" data-i18n="Companion not connected"
+            >Companion not connected</span
           >
           <button
             id="check"
@@ -130,16 +135,19 @@
           <span aria-hidden="true">⌄</span>
         </summary>
         <div class="setup-content">
-          <p data-i18n="MusicMute runs locally on Apple Silicon.">
-            MusicMute runs locally on Apple Silicon.
+          <p
+            id="platform-summary"
+            data-i18n="Local processing uses installed tools and requires a supported GPU."
+          >
+            Local processing uses installed tools and requires a supported GPU.
           </p>
           <a
             id="companion-download"
             class="app-link"
             target="_blank"
             rel="noopener noreferrer"
-            ><span data-i18n="Download MusicMute for Mac (development release)"
-              >Download MusicMute for Mac (development release)</span
+            ><span data-i18n="View MusicMute Downloads"
+              >View MusicMute Downloads</span
             >
             <span aria-hidden="true">↗</span></a
           >
@@ -148,10 +156,12 @@
             <span aria-hidden="true">↗</span></a
           >
           <p
-            data-i18n="If the app doesn&#x27;t open, install the local MusicMute Mac app first, then open it to complete setup. Return here and use Check again."
+            id="app-open-help"
+            data-i18n="If the app doesn&#x27;t open, install MusicMute for your supported computer first, then open it to complete setup. Return here and use Check again."
           >
-            If the app doesn't open, install the local MusicMute Mac app first,
-            then open it to complete setup. Return here and use Check again.
+            If the app doesn't open, install MusicMute for your supported
+            computer first, then open it to complete setup. Return here and use
+            Check again.
           </p>
         </div>
       </details>
@@ -162,8 +172,8 @@
           <span
             id="diagnostic-count"
             class="small-label"
-            data-i18n="Private on your Mac"
-            >Private on your Mac</span
+            data-i18n="Private on this computer"
+            >Private on this computer</span
           >
         </summary>
         <div class="provider-field">
@@ -171,8 +181,8 @@
             >Processing mode</label
           >
           <select id="provider" aria-describedby="provider-note" disabled>
-            <option value="LOCAL_MACOS" data-i18n="On this Mac — Apple Silicon">
-              On this Mac — Apple Silicon
+            <option value="LOCAL_MACOS" data-i18n="On this computer">
+              On this computer
             </option>
             <option value="ONLINE_MUSICMUTE" data-i18n="MusicMute cloud">
               MusicMute cloud

@@ -41,11 +41,12 @@ assert.equal(
 for (const safetyGuard of [
   "    journal = fixture ? nil : UIJournal()",
   "    guard !fixture else {",
-  "if !model.fixture && model.status == nil && !model.busy",
+  "            model.beginInitialReadinessCheck()",
 ])
   assert.ok(source.includes(safetyGuard), "PREVIEW_SAFETY_GUARD_CHANGED");
 const shared = [
   "Models.swift",
+  "LocalUIDebugSession.swift",
   "DesktopCloudHandoff.swift",
   "ProcessBridge.swift",
   "UIJournal.swift",

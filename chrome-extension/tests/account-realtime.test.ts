@@ -106,6 +106,38 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("portable account raw realtime", () => {
+  it("shares worker-registration and owned local-sync subscriptions without polling or account selectors", async () => {
+    const h = harness();
+    const permissions: AccountSnapshot[] = [];
+    const syncs: AccountSnapshot[] = [];
+    h.client.watch("worker_registration", {}, (value) =>
+      permissions.push(value),
+    );
+    h.client.watch("local_media_sync", { id }, (value) => syncs.push(value));
+    expect(() =>
+      h.client.watch("worker_registration", { user_id: id }, () => {}),
+    ).toThrow("REALTIME_PARAMS_INVALID");
+    expect(() =>
+      h.client.watch("local_media_sync", { id: "invalid" }, () => {}),
+    ).toThrow("REALTIME_PARAMS_INVALID");
+    await Promise.resolve();
+    const socket = h.sockets[0]!;
+    ready(socket);
+    snapshot(
+      socket,
+      1,
+      { worker_registration_allowed: false },
+      "stream-a",
+      "s2",
+    );
+    snapshot(socket, 1, { state: "ready" }, "stream-a", "s3");
+    expect(permissions).toEqual([
+      { data: { worker_registration_allowed: false } },
+    ]);
+    expect(syncs).toEqual([{ data: { state: "ready" } }]);
+    expect(h.request).toHaveBeenCalledOnce();
+    h.client.close();
+  });
   it("keeps tickets in subprotocols and delivers full snapshots with zero GET polling", async () => {
     const h = harness();
     await Promise.resolve();

@@ -16,6 +16,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { LocalProcessingError, runBounded } from "./local-provider.js";
+import { LocalSetupError } from "./local-setup-error.js";
+export { LocalSetupError } from "./local-setup-error.js";
 import {
   DOWNLOADER_VERSION,
   downloaderToolArguments,
@@ -29,6 +31,9 @@ import {
 } from "./youtube-runtime.js";
 
 export interface LocalConfig {
+  platform?: "darwin" | "win32";
+  runtime_provider?: "mps" | "directml";
+  directml_device_id?: number;
   app_resources?: string;
   runtime_id?: string;
   runtime_root?: string;
@@ -64,13 +69,6 @@ interface PackagedRuntimeIdentity {
 export interface ResolvedPackagedRuntime extends PackagedRuntimeIdentity {
   release_root: string;
   runtime_root: string;
-}
-
-export class LocalSetupError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = "LocalSetupError";
-  }
 }
 
 export type ReadinessProbe =
@@ -428,7 +426,23 @@ export async function resolvePackagedRuntime(
 /** Packaged apps own their runtime/model; developer reuse never reads fleet config. */
 export async function loadLocalConfig(
   environment: NodeJS.ProcessEnv = process.env,
+  adapters: {
+    windows?: (environment: NodeJS.ProcessEnv) => Promise<LocalConfig>;
+  } = {},
 ): Promise<LocalConfig> {
+  if (process.platform === "win32" && process.arch === "x64") {
+    if (!adapters.windows) throw new LocalSetupError("APP_RUNTIME_MISSING");
+    const config = await adapters.windows(environment);
+    if (
+      config.platform !== "win32" ||
+      config.runtime_provider !== "directml" ||
+      !Number.isInteger(config.directml_device_id) ||
+      Number(config.directml_device_id) < 0 ||
+      Number(config.directml_device_id) > 15
+    )
+      throw new LocalSetupError("INVALID_LOCAL_CONFIG");
+    return config;
+  }
   if (process.platform !== "darwin" || process.arch !== "arm64") {
     throw new LocalSetupError("UNSUPPORTED_PLATFORM");
   }

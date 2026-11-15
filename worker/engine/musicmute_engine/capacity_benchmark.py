@@ -139,7 +139,7 @@ def run_capacity(arguments: argparse.Namespace) -> dict[str, object]:
                 worker.recipe_id = recipe_id
                 worker.benchmark_mode = True
                 worker.iterations = 1 + arguments.warmup_runs + arguments.measured_runs
-                worker.directml_device_id = 0
+                worker.directml_device_id = getattr(arguments, "directml_device_id", 0)
                 worker.candidate_engine_root = None
                 workers.append(worker)
             remaining = deadline - time.perf_counter()
@@ -202,7 +202,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--measured-runs", type=int, default=3)
     parser.add_argument("--group-size", type=int, default=1)
     parser.add_argument("--watch-parent", action="store_true")
+    parser.add_argument("--directml-device-id", type=int, default=0)
+    parser.add_argument("--runtime-profile", choices=("legacy-service", "windows-user"), default="legacy-service")
+    parser.add_argument("--expected-user-sid")
     arguments = parser.parse_args()
+    if not 0 <= arguments.directml_device_id <= 15:
+        parser.error("DirectML device ordinal must be 0-15")
+    if arguments.runtime_profile == "windows-user" and (arguments.provider != "directml" or not arguments.expected_user_sid):
+        parser.error("windows-user requires DirectML and --expected-user-sid")
     if any(not value.is_absolute() for value in vars(arguments).values() if isinstance(value, Path)):
         parser.error("Capacity paths must be absolute")
     if arguments.warmup_runs not in (1, 2) or not 3 <= arguments.measured_runs <= 10:

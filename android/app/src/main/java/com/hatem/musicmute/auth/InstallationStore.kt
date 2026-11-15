@@ -113,6 +113,7 @@ class InstallationStore(directory: File, private val currentMetadata: () -> Inst
         )
             throw AuthFailure(AuthProblem.STORAGE)
         validate(stored.report.metadata())
+        com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.read", "storage", data = mapOf("store" to "installation", "result" to "completed"))
         return stored
     }
 
@@ -122,8 +123,10 @@ class InstallationStore(directory: File, private val currentMetadata: () -> Inst
         try {
             stream.write(json.encodeToString(value).toByteArray())
             file.finishWrite(stream)
+            com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.write", "storage", data = mapOf("store" to "installation", "result" to "completed"))
         } catch (error: Exception) {
             file.failWrite(stream)
+            com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.failed", "storage", "warn", mapOf("store" to "installation", "error" to com.hatem.musicmute.diagnostics.LocalDiagnostics.error(error)))
             throw error
         }
     }

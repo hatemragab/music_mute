@@ -1,4 +1,6 @@
 import AppKit
+import ApplicationServices
+import Combine
 import CoreText
 import Foundation
 import SwiftUI
@@ -102,6 +104,53 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
 }
 
 @main struct SettingsTests {
+  @MainActor private static func checkPlaybackCommandObservation() async throws {
+    let suite = "musicmute.command-observation.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var model: CompanionModel? = CompanionModel(fixtureName: "ready", preferences: defaults)
+    weak var retired = model
+    var invalidations = 0
+    let observation = model!.objectWillChange.sink { invalidations += 1 }
+    let workspace = model!.workspace
+    let beforeSelection = invalidations
+    let track = DesktopTrack(
+      id: "owned", title: "Owned", duration: 12, path: nil,
+      jobId: nil, bytes: 0, sourceVideoId: nil)
+    _ = await workspace.play(track)
+    guard invalidations > beforeSelection else {
+      throw SettingsTestFailure.failed("Selecting a track must invalidate scene playback commands")
+    }
+    let beforeStop = invalidations
+    workspace.stop()
+    guard workspace.currentTrack == nil, invalidations > beforeStop else {
+      throw SettingsTestFailure.failed(
+        "Stopping must invalidate scene playback command availability")
+    }
+    observation.cancel()
+    model = nil
+    guard retired == nil else {
+      throw SettingsTestFailure.failed("Nested command observation must not retain the app model")
+    }
+    print(
+      "Playback command checks passed: selection/stop invalidate menus without retaining the app"
+    )
+  }
+  private static func checkWorkerNavigation() throws {
+    guard DesktopSettingsSection.allCases.filter({ $0 == .worker }).count == 1,
+      DesktopSettingsSection.worker.title == "Worker",
+      DesktopSettingsSection.worker.symbol == "server.rack",
+      !CompanionPage.allCases.contains(where: { $0.rawValue == "Worker" }),
+      CompanionPage.restored("Worker") == .overview,
+      CompanionPage.restored("unknown") == .overview,
+      CompanionPage.restored("") == .overview,
+      CompanionPage.allCases.allSatisfy({ CompanionPage.restored($0.rawValue) == $0 })
+    else {
+      throw SettingsTestFailure.failed("Worker settings or saved page restoration regressed")
+    }
+    print("Settings navigation checks passed: Worker is in Settings and old page values recover")
+  }
+
   @MainActor private static func checkTextSizeIdentity() async throws {
     let model = TextSizeProbeModel()
     let capture = TextSizeCapture()
@@ -268,6 +317,9 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
       cases.append((language, language == "en" ? .dark : .light, .system, .appearance, "alternate"))
       cases.append(
         (language, language == "en" ? .light : .dark, .accessibility, .appearance, "large"))
+      cases.append((language, language == "en" ? .light : .dark, .compact, .worker, "compact"))
+      cases.append(
+        (language, language == "en" ? .light : .dark, .accessibility, .worker, "large"))
     }
     var images = [String]()
     for (language, scheme, textSize, section, variant) in cases {
@@ -285,6 +337,8 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
       )
       let updater = DesktopUpdater(
         support: destination.appendingPathComponent("unused-updates"), fixture: true)
+      let worker = DesktopWorkerModel(resources: nil, fixture: true, preferences: defaults)
+      worker.applyPreview()
       let preferences = DesktopVisualPreferences(defaults: defaults)
       preferences.appearance = scheme == .dark ? .dark : .light
       preferences.textSize = textSize
@@ -292,7 +346,7 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
       let width: CGFloat = textSize == .accessibility ? 1000 : 850
       let height: CGFloat = textSize == .accessibility ? 1050 : 780
       let preview = DesktopPreferencesView(
-        workspace: workspace, visualPreferences: preferences, updater: updater,
+        workspace: workspace, visualPreferences: preferences, updater: updater, worker: worker,
         isPreview: true, initialSection: section
       )
       .defaultAppStorage(defaults)
@@ -393,9 +447,134 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
     )
   }
 
+  @MainActor private static func accessibilityDescendants(_ value: Any, depth: Int = 0)
+    -> [any NSAccessibilityProtocol]
+  {
+    guard depth < 30 else { return [] }
+    if let element = value as? any NSAccessibilityProtocol {
+      return [element]
+        + (element.accessibilityChildren() ?? []).flatMap {
+          accessibilityDescendants($0, depth: depth + 1)
+        }
+    }
+    // SwiftUI intermediary nodes implement the public selector without formally adopting
+    // NSAccessibilityProtocol. The actual editable text cell adopts the protocol.
+    let children = NSSelectorFromString("accessibilityChildren")
+    guard let element = value as? NSObject, element.responds(to: children),
+      let result = element.perform(children)?.takeUnretainedValue() as? [Any]
+    else { return [] }
+    return result.flatMap { accessibilityDescendants($0, depth: depth + 1) }
+  }
+  @MainActor private static func checkCompletedProcessingPresentation() async throws {
+    for finalizing in [false, true] {
+      let host = NSHostingView(
+        rootView: DesktopImportProgress(
+          finalizing: finalizing,
+          progress: "Starting…", cancel: {}
+        ).frame(width: 600, height: 100).environment(\.locale, Locale(identifier: "en")))
+      host.frame = NSRect(x: 0, y: 0, width: 600, height: 100)
+      let window = NSWindow(
+        contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      window.isReleasedWhenClosed = false
+      window.contentView = host
+      defer { window.close() }
+      var ownWindows: CFTypeRef?
+      _ = AXUIElementCopyAttributeValue(
+        AXUIElementCreateApplication(getpid()), kAXWindowsAttribute as CFString, &ownWindows)
+      func text(_ value: Any, depth: Int = 0) -> [String] {
+        guard depth < 30, let node = value as? NSObject else { return [] }
+        var values: [String] = []
+        for name in ["accessibilityLabel", "accessibilityValue", "accessibilityIdentifier"] {
+          let selector = NSSelectorFromString(name)
+          if node.responds(to: selector),
+            let value = node.perform(selector)?.takeUnretainedValue() as? String
+          {
+            values.append(value)
+          }
+        }
+        let children = NSSelectorFromString("accessibilityChildren")
+        if node.responds(to: children),
+          let nodes = node.perform(children)?.takeUnretainedValue() as? [Any]
+        {
+          values += nodes.flatMap { text($0, depth: depth + 1) }
+        }
+        return values
+      }
+      let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+      var values: [String] = []
+      repeat {
+        host.layoutSubtreeIfNeeded()
+        values = text(host)
+        if values.contains(finalizing ? "Updating local library…" : "Starting…") { break }
+        try await Task.sleep(for: .milliseconds(5))
+      } while ContinuousClock.now < deadline
+      guard !window.isVisible,
+        values.contains(finalizing ? "Updating local library…" : "Starting…"),
+        values.contains("import_cancel") != finalizing,
+        !finalizing || !values.contains("Starting…")
+      else {
+        throw SettingsTestFailure.failed(
+          "Completed voice refresh must not announce starting processing or offer processing cancellation: \(values)"
+        )
+      }
+    }
+    print(
+      "Processing presentation checks passed: active preparation can cancel; completed result only updates Library"
+    )
+  }
+  @MainActor private static func checkStorageAccessibility() async throws {
+    let suite = "musicmute.storage-accessibility.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let account = DesktopAccountModel(
+      vault: UnusedSettingsVault(), transport: UnusedSettingsHTTPTransport(),
+      installationId: UUID().uuidString.lowercased(), preferences: defaults)
+    let workspace = DesktopWorkspace(account: account, resources: nil, preferences: defaults)
+    let state = DesktopStoragePreferencesState(workspace: workspace, loadCache: { true })
+    await state.loadIfNeeded()
+    let hosting = NSHostingView(
+      rootView: Form { DesktopStoragePreferencesSection(workspace: workspace, state: state) }.frame(
+        width: 650, height: 600))
+    hosting.frame = NSRect(x: 0, y: 0, width: 650, height: 600)
+    let window = NSWindow(
+      contentRect: hosting.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = hosting
+    defer {
+      window.close()
+      workspace.shutdown()
+    }
+    // A standard AX read of this process materializes SwiftUI's lazy accessibility tree.
+    // The window remains hidden and the test never requests an accessibility permission prompt.
+    var ownWindows: CFTypeRef?
+    _ = AXUIElementCopyAttributeValue(
+      AXUIElementCreateApplication(getpid()), kAXWindowsAttribute as CFString, &ownWindows)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    var found: (any NSAccessibilityProtocol)?
+    repeat {
+      hosting.layoutSubtreeIfNeeded()
+      found = accessibilityDescendants(hosting).first {
+        $0.accessibilityIdentifier() == "desktopPreferences.offlineStorageLimit"
+          && $0.accessibilityRole() == .textField
+      }
+      if found != nil { break }
+      try await Task.sleep(for: .milliseconds(5))
+    } while ContinuousClock.now < deadline
+    guard let field = found else {
+      throw SettingsTestFailure.failed("Storage limit must expose its own accessible text field")
+    }
+    field.setAccessibilityValue("3")
+    await Task.yield()
+    guard field.accessibilityValue() as? String == "3", !window.isVisible else {
+      throw SettingsTestFailure.failed(
+        "The accessible storage field must accept edits without showing a window")
+    }
+    print("Storage accessibility checks passed: distinct editable text field accepts an AX value")
+  }
   @MainActor static func main() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)
+    NSApp.finishLaunching()
     let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
       .deletingLastPathComponent().appendingPathComponent("Resources")
     guard DesktopTypography.registerFont(resources: resources) else {
@@ -411,8 +590,12 @@ private struct UnusedSettingsHTTPTransport: DesktopHTTPTransport {
     guard CommandLine.arguments.count == 1 else {
       throw SettingsTestFailure.failed("Unsupported Settings test arguments")
     }
+    try checkWorkerNavigation()
+    try await checkPlaybackCommandObservation()
     try checkTypography()
     try await checkTextSizeIdentity()
     try await checkStorageLoadLifecycle()
+    try await checkStorageAccessibility()
+    try await checkCompletedProcessingPresentation()
   }
 }

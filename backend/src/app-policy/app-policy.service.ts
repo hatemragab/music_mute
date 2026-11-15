@@ -32,9 +32,8 @@ export class AppPolicyService {
     platform: ClientPlatform,
   ): Promise<void> {
     if (platform === 'web') return;
-    // The local Mac MVP is distributed as a native bundle. Its independent build
-    // gate is enforced by evaluateProcessingAccess, without a mobile store ID.
-    if (platform === 'macos') return;
+    // Desktop build gates are independent of Android/iOS store selection.
+    if (platform === 'macos' || platform === 'windows') return;
     const channel = policy.platforms[platform];
     const selection = channel.releaseSelection;
     const id =
@@ -90,6 +89,9 @@ export class AppPolicyService {
               'platforms.ios': next.platforms.ios,
               ...(next.platforms.macos
                 ? { 'platforms.macos': next.platforms.macos }
+                : {}),
+              ...(next.platforms.windows
+                ? { 'platforms.windows': next.platforms.windows }
                 : {}),
               revision: expectedRevision + 1,
               updatedAt: new Date(),

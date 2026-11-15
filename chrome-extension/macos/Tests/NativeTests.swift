@@ -257,11 +257,15 @@ private final class RuntimeDownloadFixtureStore: @unchecked Sendable {
     let hold: Bool
     let delivered: DispatchSemaphore?
     let chunkDelay: DispatchTimeInterval
+    let error: URLError.Code?
+    let rangeBody: Data?
+    let finishAfter: DispatchSemaphore?
 
     init(
       status: Int = 200, headers: [String: String] = [:], chunks: [Data] = [],
       redirect: URL? = nil, hold: Bool = false, delivered: DispatchSemaphore? = nil,
-      chunkDelay: DispatchTimeInterval = .never
+      chunkDelay: DispatchTimeInterval = .never, error: URLError.Code? = nil,
+      rangeBody: Data? = nil, finishAfter: DispatchSemaphore? = nil
     ) {
       self.status = status
       self.headers = headers
@@ -270,6 +274,9 @@ private final class RuntimeDownloadFixtureStore: @unchecked Sendable {
       self.hold = hold
       self.delivered = delivered
       self.chunkDelay = chunkDelay
+      self.error = error
+      self.rangeBody = rangeBody
+      self.finishAfter = finishAfter
     }
   }
 
@@ -326,23 +333,50 @@ private final class RuntimeDownloadFixtureProtocol: URLProtocol, @unchecked Send
       client?.urlProtocol(self, wasRedirectedTo: redirected, redirectResponse: response)
       return
     }
+    var status = step.status
+    var headers = step.headers
+    var chunks = step.chunks
+    if let body = step.rangeBody {
+      let range = request.value(forHTTPHeaderField: "Range")
+      if let range, range.hasPrefix("bytes="), range.hasSuffix("-"),
+        let start = Int(range.dropFirst(6).dropLast()), start > 0, start < body.count
+      {
+        status = 206
+        headers["Content-Length"] = String(body.count - start)
+        headers["Content-Range"] = "bytes \(start)-\(body.count - 1)/\(body.count)"
+        chunks = [Data(body.dropFirst(start))]
+      } else {
+        status = 200
+        headers["Content-Length"] = String(body.count)
+        chunks = [body]
+      }
+    }
     let response = HTTPURLResponse(
-      url: url, statusCode: step.status, httpVersion: "HTTP/1.1",
-      headerFields: step.headers)!
+      url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    let responseChunks = chunks
     let work = DispatchWorkItem { [weak self] in
       guard let self, self.isActive else { return }
-      for (index, chunk) in step.chunks.enumerated() {
+      for (index, chunk) in responseChunks.enumerated() {
         guard self.isActive else { return }
         self.client?.urlProtocol(self, didLoad: chunk)
         if index == 0 { step.delivered?.signal() }
-        if index + 1 < step.chunks.count, step.chunkDelay != .never {
+        if index + 1 < responseChunks.count, step.chunkDelay != .never {
           let delayed = DispatchSemaphore(value: 0)
           _ = delayed.wait(timeout: .now() + step.chunkDelay)
         }
       }
-      if step.chunks.isEmpty { step.delivered?.signal() }
-      if !step.hold, self.isActive { self.client?.urlProtocolDidFinishLoading(self) }
+      if responseChunks.isEmpty { step.delivered?.signal() }
+      if let finishAfter = step.finishAfter {
+        _ = finishAfter.wait(timeout: .now() + 5)
+      }
+      if !step.hold, self.isActive {
+        if let error = step.error {
+          self.client?.urlProtocol(self, didFailWithError: URLError(error))
+        } else {
+          self.client?.urlProtocolDidFinishLoading(self)
+        }
+      }
     }
     lock.lock()
     self.work = work
@@ -407,12 +441,72 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
   static let status = """
     {"type":"result","protocol_version":1,"status":{"ready":true,"platform":"darwin","arch":"arm64","version":"0.1.0","runtime_ready":true,"model_ready":true,"extension_registered":true,"extension_path":"/fixture/extension","model_bytes":66759214,"cache_bytes":0,"diagnostic_mode":"LOCAL_ONLY","max_duration_seconds":900}}
     """
+  static func localUIDebugIsolationChecks() throws {
+    let manager = FileManager.default
+    let workspace = manager.temporaryDirectory.appendingPathComponent(
+      "musicmute-ui-isolation-\(UUID().uuidString)")
+    try manager.createDirectory(
+      at: workspace, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    defer { try? manager.removeItem(at: workspace) }
+    let canonical = workspace.resolvingSymlinksInPath()
+    let id = UUID().uuidString.lowercased()
+    let support = canonical.appendingPathComponent(".runtime/local-logging/macos-ui/\(id)/support")
+    try manager.createDirectory(
+      at: support.deletingLastPathComponent(), withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    try manager.createDirectory(
+      at: support, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    let bundle = "com.hatem.musicmute.local.debug.\(id)"
+    let valid = LocalUIDebugSession.validated(
+      workspace: canonical.path, session: id, root: support.path, bundleID: bundle)
+    #if DEBUG
+      try check(
+        valid?.support.path == support.path,
+        "A sealed private DEBUG session must use only its owned support root")
+      let keyFile = support.deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent("keys.json")
+      let key = "owned-synthetic-log-key-1234567890"
+      try Data("{\"keys\":{\"macos\":\"\(key)\"}}".utf8).write(to: keyFile)
+      try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyFile.path)
+      try check(valid?.loggingKey() == key, "DEBUG GUI may read its fixed private collector key")
+      try manager.setAttributes([.posixPermissions: 0o640], ofItemAtPath: keyFile.path)
+      try check(valid?.loggingKey() == nil, "Nonprivate collector key must be rejected")
+      try manager.removeItem(at: keyFile)
+      try manager.createSymbolicLink(at: keyFile, withDestinationURL: support)
+      try check(valid?.loggingKey() == nil, "Linked collector key must be rejected")
+      try manager.removeItem(at: keyFile)
+      try check(mkfifo(keyFile.path, 0o600) == 0, "Owned FIFO fixture must be created")
+      let began = ContinuousClock.now
+      try check(valid?.loggingKey() == nil, "FIFO collector key must be rejected without a writer")
+      try check(ContinuousClock.now - began < .seconds(1), "FIFO rejection must be nonblocking")
+    #else
+      try check(valid == nil, "Release must reject even valid private DEBUG session metadata")
+    #endif
+    try check(
+      LocalUIDebugSession.validated(
+        workspace: canonical.path, session: id, root: support.path,
+        bundleID: "com.hatem.musicmute.local") == nil,
+      "Installed bundle identity must never activate debug isolation")
+    try check(
+      LocalUIDebugSession.validated(
+        workspace: canonical.path, session: id, root: LocalPaths.support.path, bundleID: bundle)
+        == nil, "Real application support must never be accepted as a test root")
+    try manager.setAttributes([.posixPermissions: 0o750], ofItemAtPath: support.path)
+    try check(
+      LocalUIDebugSession.validated(
+        workspace: canonical.path, session: id, root: support.path, bundleID: bundle) == nil,
+      "Nonprivate test roots must be rejected")
+  }
   static func main() throws {
     try check(
       SystemRuntimeVerificationReceiptAuthenticator.noninteractiveContext().interactionNotAllowed,
       "Optional runtime receipts must never prompt for Keychain authentication")
+    try localUIDebugIsolationChecks()
     try parserChecks()
     try readinessChecks()
+    try automaticSetupChecks()
+    try setupCommandRecoveryChecks()
+    try setupConnectivityRecoveryChecks()
     try setupDiagnosticsChecks()
     try desktopDiagnosticsChecks()
     try identityChecks()
@@ -1273,7 +1367,8 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
         && unchecked.chrome == .notChecked && !unchecked.ready,
       "Absent status is unknown, not a confirmed setup failure")
     try check(
-      unchecked.actionLabel == "Prepare my Mac" && ReadinessState.notChecked.label == "Not checked",
+      unchecked.actionLabel == "Prepare my Mac" && unchecked.primaryCommand == .setup
+        && ReadinessState.notChecked.label == "Not checked",
       "Unchecked readiness must offer setup with an honest row value")
 
     for command in [AppCommand.status, .setup] {
@@ -1299,7 +1394,7 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     let ready = SetupPresentation(status: readyStatus, activeCommand: nil, hasFailure: false)
     try check(
       ready.ready && ready.runtime == .ready && ready.model == .ready && ready.chrome == .ready
-        && ready.actionLabel == "Check readiness",
+        && ready.actionLabel == "Check readiness" && ready.primaryCommand == .status,
       "A successful terminal result must restore verified readiness")
     let incomplete = SetupPresentation(
       status: incompleteStatus, activeCommand: nil, hasFailure: false)
@@ -1332,6 +1427,434 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
           && inspecting.chrome == .ready && inspecting.actionLabel == "Check readiness",
         "Diagnostics operations must not replace existing verified readiness with setup work")
     }
+
+    var packagedVersion = CompanionVersion(bundleVersion: "0.1.3")
+    packagedVersion.observe("0.1.0")
+    packagedVersion.observe(nil)
+    try check(
+      packagedVersion.value == "0.1.3",
+      "The running app version must stay stable through stale or cleared readiness results")
+    var unbundledVersion = CompanionVersion(bundleVersion: nil)
+    try check(unbundledVersion.value == nil, "An unknown version must not invent a release")
+    unbundledVersion.observe("0.2.7")
+    unbundledVersion.observe(nil)
+    unbundledVersion.observe("invalid\nversion")
+    try check(
+      unbundledVersion.value == "0.2.7",
+      "An unbundled host must retain its last valid reported version while status is cleared")
+  }
+  static func automaticSetupChecks() throws {
+    let ready = try ControlEvent.decode(Data(status.utf8), command: .status).status
+    func incomplete(_ field: String) throws -> CompanionStatus? {
+      let json = status.replacingOccurrences(of: "\"ready\":true", with: "\"ready\":false")
+        .replacingOccurrences(of: "\"\(field)\":true", with: "\"\(field)\":false")
+      return try ControlEvent.decode(Data(json.utf8), command: .status).status
+    }
+    var prepared = AutomaticSetupCoordinator()
+    try check(
+      prepared.beginInitialCheck() && !prepared.beginInitialCheck(),
+      "Opening another app window must not start a duplicate initial readiness check")
+    try check(
+      prepared.completed(command: .status, outcome: .success, status: ready, hasFailure: false)
+        == .none && !prepared.preparationAttempted,
+      "An already prepared Mac must keep its current page and skip automatic setup")
+
+    for field in ["runtime_ready", "model_ready", "extension_registered"] {
+      let missing = try incomplete(field)
+      var automatic = AutomaticSetupCoordinator()
+      try check(
+        automatic.completed(command: .status, outcome: .success, status: missing, hasFailure: false)
+          == .prepare,
+        "A trusted missing runtime, model or Chrome connection must automatically prepare")
+      try check(
+        automatic.completed(command: .status, outcome: .success, status: missing, hasFailure: false)
+          == .showSetup,
+        "Repeated incomplete status must not start a second automatic preparation")
+      try check(
+        automatic.completed(
+          command: .setup, outcome: .failed("MODEL_DOWNLOAD_FAILED"), status: nil,
+          hasFailure: true) == .showSetup
+          && automatic.completed(
+            command: .status, outcome: .success, status: missing,
+            hasFailure: false) == .showSetup,
+        "A setup failure must remain retryable without an automatic retry loop")
+      try check(
+        automatic.completed(command: .setup, outcome: .success, status: ready, hasFailure: false)
+          == .none
+          && automatic.completed(
+            command: .status, outcome: .success, status: missing,
+            hasFailure: false) == .prepare,
+        "Successful setup must permit a new repair cycle if installation files later go missing")
+    }
+
+    let missing = try incomplete("model_ready")
+    func toolStatus(component: String, state: String, code: String) throws -> CompanionStatus? {
+      let json = status.replacingOccurrences(
+        of: "\"max_duration_seconds\":900",
+        with:
+          "\"max_duration_seconds\":900,\"youtube_ready\":false,\"components\":[{\"component\":\"\(component)\",\"state\":\"\(state)\",\"error_code\":\"\(code)\"}]"
+      )
+      return try ControlEvent.decode(Data(json.utf8), command: .status).status
+    }
+    for (component, code) in [
+      ("downloader", "YT_DLP_IDENTITY_INVALID"), ("javascript", "DENO_MISSING"),
+      ("token_provider", "PO_TOKEN_PROVIDER_INVALID"),
+    ] {
+      let toolMissing = try toolStatus(component: component, state: "invalid", code: code)
+      var automatic = AutomaticSetupCoordinator()
+      try check(
+        automatic.completed(
+          command: .status, outcome: .success, status: toolMissing,
+          hasFailure: false) == .prepare
+          && automatic.completed(
+            command: .setup, outcome: .success, status: toolMissing,
+            hasFailure: false) == .showSetup,
+        "Missing tool metadata must start one preparation even when local processing is ready")
+      let unchecked = try toolStatus(component: component, state: "invalid", code: "SETUP_REQUIRED")
+      var installed = AutomaticSetupCoordinator()
+      try check(
+        installed.completed(
+          command: .status, outcome: .success, status: unchecked,
+          hasFailure: false) == .none,
+        "Stale execution receipts must not trigger expensive startup checks for installed tools")
+    }
+    var explicitMissingTool = AutomaticSetupCoordinator()
+    let explicitMissingStatus = try toolStatus(
+      component: "javascript", state: "missing", code: "JAVASCRIPT_RUNTIME_UNAVAILABLE")
+    try check(
+      explicitMissingTool.completed(
+        command: .status, outcome: .success, status: explicitMissingStatus, hasFailure: false)
+        == .prepare,
+      "A confirmed missing tool state must prepare without depending on one specific error code")
+    for code in ["PO_TOKEN_PROVIDER_UNAVAILABLE", "TOOL_TIMEOUT"] {
+      var transient = AutomaticSetupCoordinator()
+      let transientStatus = try toolStatus(
+        component: "token_provider", state: "invalid", code: code)
+      try check(
+        transient.completed(
+          command: .status, outcome: .success, status: transientStatus,
+          hasFailure: false) == .none,
+        "Transient tool execution failures must not become automatic installation audits")
+    }
+    var observedModelFailure = AutomaticSetupCoordinator()
+    try check(
+      observedModelFailure.completed(
+        command: .status, outcome: .success, status: ready,
+        hasFailure: false, executionFailure: .service("MODEL_INVALID")) == .prepare
+        && observedModelFailure.completed(
+          command: .status, outcome: .success, status: missing,
+          hasFailure: false) == .showSetup,
+      "A trusted status after model execution failure must start one verified repair without replaying media"
+    )
+    try check(
+      observedModelFailure.completed(
+        command: .status, outcome: .success, status: ready,
+        hasFailure: false) == .showModelRepair,
+      "Repeated cheap checks must retain a known model failure until verified preparation succeeds")
+    for outcome in [ProcessOutcome.failed("MODEL_DOWNLOAD_FAILED"), .cancelled] {
+      var interruptedRepair = AutomaticSetupCoordinator()
+      try check(
+        interruptedRepair.completed(
+          command: .status, outcome: .success, status: ready,
+          hasFailure: false, executionFailure: .service("MODEL_INVALID")) == .prepare
+          && interruptedRepair.completed(
+            command: .setup, outcome: outcome, status: nil,
+            hasFailure: false) == .showSetup
+          && interruptedRepair.completed(
+            command: .status, outcome: .success, status: ready,
+            hasFailure: false) == .showModelRepair,
+        "Failed or cancelled automatic model repair must retain false readiness without starting another repair"
+      )
+    }
+    try check(
+      observedModelFailure.completed(
+        command: .setup, outcome: .success, status: ready,
+        hasFailure: false) == .none
+        && observedModelFailure.completed(
+          command: .status, outcome: .success, status: ready,
+          hasFailure: false) == .none,
+      "Only verified successful setup may clear the observed model execution failure")
+    for code in ["MODEL_CACHE_INVALID", "LOCAL_DIRECTORY_NOT_PRIVATE", "UNSAFE_EXTENSION_BUNDLE"] {
+      var unsafeRepair = AutomaticSetupCoordinator()
+      _ = unsafeRepair.completed(
+        command: .status, outcome: .success, status: ready,
+        hasFailure: false, executionFailure: .service("MODEL_INVALID"))
+      try check(
+        unsafeRepair.completed(
+          command: .setup, outcome: .failed(code), status: nil,
+          hasFailure: true) == .showSetup
+          && unsafeRepair.completed(
+            command: .status, outcome: .success, status: ready,
+            hasFailure: false) == .showModelRepair,
+        "Foreign or unsafe model repair failures must remain terminal and cannot turn metadata into Ready"
+      )
+    }
+    var observedAppFailure = AutomaticSetupCoordinator()
+    try check(
+      observedAppFailure.completed(
+        command: .status, outcome: .success, status: ready,
+        hasFailure: false, executionFailure: .service("DESKTOP_RUNTIME_UNAVAILABLE"))
+        == .showAppRepair
+        && observedAppFailure.completed(
+          command: .status, outcome: .success, status: ready,
+          hasFailure: false) == .showAppRepair,
+      "Cheap status success must not erase a missing desktop entrypoint or display Ready")
+    try check(
+      observedAppFailure.completed(
+        command: .setup, outcome: .failed("APP_RESOURCES_INCOMPLETE"),
+        status: nil, hasFailure: true) == .showSetup
+        && observedAppFailure.completed(
+          command: .status, outcome: .success, status: ready,
+          hasFailure: false) == .showAppRepair,
+      "A failed preparation must retain app reinstall guidance through later cheap checks")
+    try check(
+      observedAppFailure.completed(
+        command: .setup, outcome: .success, status: ready,
+        hasFailure: false) == .none
+        && observedAppFailure.completed(
+          command: .status, outcome: .success, status: ready,
+          hasFailure: false) == .none,
+      "Successful verified preparation may clear an observed missing app entrypoint")
+    let missingRuntime = try incomplete("runtime_ready")
+    var observedMissingRuntime = AutomaticSetupCoordinator()
+    try check(
+      observedMissingRuntime.completed(
+        command: .status, outcome: .success, status: missingRuntime,
+        hasFailure: false, executionFailure: .service("DESKTOP_RUNTIME_UNAVAILABLE")) == .prepare,
+      "A desktop launch failure confirmed as missing runtime must retain automatic runtime setup")
+    var observedMissingModel = AutomaticSetupCoordinator()
+    try check(
+      observedMissingModel.completed(
+        command: .status, outcome: .success, status: missing,
+        hasFailure: false, executionFailure: .service("MODEL_INVALID")) == .prepare,
+      "A model execution failure confirmed as missing must automatically prepare the model")
+    for command in [AppCommand.status, .setup] {
+      var cancelled = AutomaticSetupCoordinator()
+      if command == .setup { cancelled.preparationStarted() }
+      try check(
+        cancelled.completed(command: command, outcome: .cancelled, status: nil, hasFailure: false)
+          == .showSetup
+          && cancelled.completed(
+            command: .status, outcome: .success, status: missing,
+            hasFailure: false) == .showSetup,
+        "Cancelling an initial check or preparation must preserve the user's stop request")
+    }
+    var manual = AutomaticSetupCoordinator()
+    manual.preparationStarted()
+    try check(
+      manual.completed(command: .setup, outcome: .success, status: missing, hasFailure: false)
+        == .showSetup,
+      "Partial setup completion must show the remaining work without starting setup again")
+    for outcome in [ProcessOutcome.failed("RUNTIME_ACTIVE_INVALID"), .success] {
+      var failed = AutomaticSetupCoordinator()
+      try check(
+        failed.completed(command: .status, outcome: outcome, status: nil, hasFailure: false)
+          == .showSetup && failed.preparationAttempted,
+        "Failed or absent status must show Setup without inventing a safe download decision")
+    }
+    let unsupportedJSON = status.replacingOccurrences(
+      of: "\"arch\":\"arm64\"", with: "\"arch\":\"x64\"")
+    let unsupported = try ControlEvent.decode(Data(unsupportedJSON.utf8), command: .status).status
+    var unsupportedSetup = AutomaticSetupCoordinator()
+    try check(
+      unsupportedSetup.completed(
+        command: .status, outcome: .success, status: unsupported,
+        hasFailure: false) == .showSetup,
+      "Unsupported platforms must never begin automatic preparation")
+    var diagnostic = AutomaticSetupCoordinator()
+    try check(
+      diagnostic.completed(
+        command: .snapshot, outcome: .failed("APP_PROCESS_EXITED"), status: nil,
+        hasFailure: true) == .none && !diagnostic.preparationAttempted,
+      "Diagnostics failure must not start or suppress installation preparation")
+  }
+  static func setupCommandRecoveryChecks() throws {
+    let ready = try ControlEvent.decode(Data(status.utf8), command: .status).status
+    var locks = SetupCommandRecovery()
+    let firstGeneration = locks.begin()
+    var now: TimeInterval = 100
+    var waits: [TimeInterval] = []
+    for _ in 0..<100 {
+      guard
+        let delay = locks.nextDelay(
+          command: .status, outcome: .failed("RUNTIME_SETUP_BUSY"), status: nil,
+          receivedFailureCode: nil, now: now)
+      else { break }
+      waits.append(delay)
+      now += delay
+    }
+    try check(
+      Array(waits.prefix(5)) == [1, 2, 4, 8, 15] && waits.count < 24 && now - 100 <= 300,
+      "Local setup contention must use capped backoff and stop within a five-minute wait")
+    try check(
+      locks.nextDelay(
+        command: .status, outcome: .success, status: ready,
+        receivedFailureCode: nil, now: now) == nil,
+      "A successful normal status must not schedule another status check or integrity audit")
+
+    var wrapped = SetupCommandRecovery()
+    _ = wrapped.begin()
+    try check(
+      wrapped.nextDelay(
+        command: .setup, outcome: .failed("APP_PROCESS_EXITED"), status: nil,
+        receivedFailureCode: "SETUP_BUSY", now: 1) == 1,
+      "The actual sanitized error must take precedence over the subprocess exit wrapper")
+    try check(
+      wrapped.nextDelay(
+        command: .setup, outcome: .failed("APP_CONTROL_INVALID"), status: nil,
+        receivedFailureCode: "SETUP_BUSY", now: 2) == nil,
+      "A malformed completion must not be hidden by an earlier retryable error frame")
+    for code in ["RUNTIME_SETUP_BUSY", "SETUP_BUSY", "APP_OPERATION_BUSY"] {
+      var contention = SetupCommandRecovery()
+      _ = contention.begin()
+      try check(
+        contention.nextDelay(
+          command: .setup, outcome: .failed(code), status: nil,
+          receivedFailureCode: nil, now: 1) == 1,
+        "Each supported local contention code must retry the same setup command")
+    }
+
+    for code in ["TOOL_TIMEOUT", "PO_TOKEN_PROVIDER_UNAVAILABLE"] {
+      var probes = SetupCommandRecovery()
+      _ = probes.begin()
+      try check(
+        probes.nextDelay(
+          command: .setup, outcome: .failed("APP_PROCESS_EXITED"), status: nil,
+          receivedFailureCode: code, now: 1) == 1
+          && probes.nextDelay(
+            command: .setup, outcome: .failed("APP_PROCESS_EXITED"), status: nil,
+            receivedFailureCode: code, now: 2) == 3
+          && probes.nextDelay(
+            command: .setup, outcome: .failed("APP_PROCESS_EXITED"), status: nil,
+            receivedFailureCode: code, now: 5) == nil,
+        "Transient setup probes must have three total attempts with one- and three-second waits")
+    }
+    let partialJSON = status.replacingOccurrences(
+      of: "\"max_duration_seconds\":900",
+      with:
+        "\"max_duration_seconds\":900,\"youtube_ready\":false,\"components\":[{\"component\":\"token_provider\",\"state\":\"invalid\",\"error_code\":\"PO_TOKEN_PROVIDER_UNAVAILABLE\"}]"
+    )
+    let partial = try ControlEvent.decode(Data(partialJSON.utf8), command: .setup).status
+    var partialSetup = SetupCommandRecovery()
+    _ = partialSetup.begin()
+    try check(
+      partialSetup.nextDelay(
+        command: .setup, outcome: .success, status: partial,
+        receivedFailureCode: nil, now: 1) == 1
+        && partialSetup.nextDelay(
+          command: .setup, outcome: .success, status: partial,
+          receivedFailureCode: nil, now: 2) == 3
+        && partialSetup.nextDelay(
+          command: .setup, outcome: .success, status: partial,
+          receivedFailureCode: nil, now: 5) == nil,
+      "A successful setup with a transient unfinished probe must recover within the same bounded budget"
+    )
+    var ordinaryStatus = SetupCommandRecovery()
+    _ = ordinaryStatus.begin()
+    try check(
+      ordinaryStatus.nextDelay(
+        command: .status, outcome: .success, status: partial,
+        receivedFailureCode: nil, now: 1) == nil,
+      "Saved transient probe evidence must not turn ordinary status into repeated setup audits")
+
+    locks.cancel()
+    try check(
+      !locks.isCurrent(firstGeneration)
+        && locks.nextDelay(
+          command: .status, outcome: .failed("APP_PROCESS_EXITED"), status: nil,
+          receivedFailureCode: "RUNTIME_SETUP_BUSY", now: now) == nil,
+      "Cancel must invalidate the waiting generation before a queued recoverable failure can restart it"
+    )
+    let nextGeneration = locks.begin()
+    try check(
+      nextGeneration != firstGeneration && !locks.isCurrent(firstGeneration)
+        && locks.isCurrent(nextGeneration)
+        && locks.nextDelay(
+          command: .setup, outcome: .failed("TOOL_TIMEOUT"), status: nil,
+          receivedFailureCode: nil, now: now) == 1,
+      "Manual Retry must start a fresh budget while stale completion generations remain rejected")
+    locks.cancel()
+    try check(
+      !locks.isCurrent(nextGeneration)
+        && locks.nextDelay(
+          command: .setup, outcome: .cancelled, status: nil,
+          receivedFailureCode: "TOOL_TIMEOUT", now: now) == nil,
+      "Cancelling a queued probe retry must remain terminal even if a transient error was already received"
+    )
+
+    for code in [
+      "RUNTIME_DOWNLOAD_FAILED", "MODEL_DOWNLOAD_FAILED", "MODEL_DOWNLOAD_TIMEOUT",
+      "RUNTIME_SIGNATURE_INVALID", "RUNTIME_ARCHIVE_INVALID", "RUNTIME_DOWNLOAD_UNSAFE",
+      "MODEL_CHECKSUM_INVALID", "MODEL_CACHE_INVALID", "RUNTIME_MANIFEST_INVALID",
+      "LOCAL_DIRECTORY_NOT_PRIVATE", "FOREIGN_NATIVE_REGISTRATION_EXISTS", "DISK_SPACE_LOW",
+      "MEMORY_LOW", "UNSUPPORTED_PLATFORM", "APP_RESOURCES_INCOMPLETE", "WORKER_LOCAL_STOPPED",
+      "WORKER_MACHINE_REVOKED", "APP_CONTROL_INVALID", "APP_PROCESS_EXITED",
+    ] {
+      var terminal = SetupCommandRecovery()
+      _ = terminal.begin()
+      try check(
+        terminal.nextDelay(
+          command: .setup, outcome: .failed(code), status: nil,
+          receivedFailureCode: nil, now: 1) == nil,
+        "Exhausted downloads, explicit Stop, security, corruption and resource errors must not multiply retries"
+      )
+    }
+    var diagnostics = SetupCommandRecovery()
+    _ = diagnostics.begin()
+    try check(
+      diagnostics.nextDelay(
+        command: .snapshot, outcome: .failed("APP_OPERATION_BUSY"), status: nil,
+        receivedFailureCode: nil, now: 1) == nil,
+      "Setup recovery must not restart unrelated diagnostics commands")
+  }
+  static func setupConnectivityRecoveryChecks() throws {
+    var online = SetupConnectivityRecovery()
+    try check(
+      online.beginWait() && online.pathChanged(.satisfied) == .stop && !online.beginWait(),
+      "Already-online downloader exhaustion must keep its terminal error without another download cycle"
+    )
+    for initial in [
+      SetupConnectivityRecovery.PathState.unsatisfied, .requiresConnection,
+    ] {
+      var reconnecting = SetupConnectivityRecovery()
+      try check(
+        reconnecting.beginWait() && reconnecting.pathChanged(initial) == .wait
+          && reconnecting.pathChanged(.unsatisfied) == .wait
+          && reconnecting.pathChanged(.satisfied) == .resume,
+        "An offline initial path may resume setup once after a real connection-restoration event")
+      try check(
+        reconnecting.pathChanged(.unsatisfied) == .ignore
+          && reconnecting.pathChanged(.satisfied) == .ignore && !reconnecting.beginWait(),
+        "Flapping and late path callbacks must not create endless downloader recovery cycles")
+      reconnecting.beginCycle()
+      try check(
+        reconnecting.beginWait() && reconnecting.pathChanged(.requiresConnection) == .wait
+          && reconnecting.pathChanged(.satisfied) == .resume,
+        "Manual Retry must reset the single connectivity-restoration allowance")
+    }
+    var generation = SetupCommandRecovery()
+    let stoppedGeneration = generation.begin()
+    var cancelled = SetupConnectivityRecovery()
+    try check(
+      cancelled.beginWait(), "A fresh setup cycle may observe connectivity after exhaustion")
+    _ = cancelled.pathChanged(.unsatisfied)
+    generation.cancel()
+    cancelled.cancel()
+    try check(
+      !generation.isCurrent(stoppedGeneration)
+        && cancelled.pathChanged(.satisfied) == .ignore && !cancelled.beginWait(),
+      "Cancel must close connectivity observation and reject a queued restoration event")
+    let manualGeneration = generation.begin()
+    cancelled.beginCycle()
+    try check(
+      manualGeneration != stoppedGeneration && !generation.isCurrent(stoppedGeneration)
+        && generation.isCurrent(manualGeneration) && cancelled.beginWait(),
+      "A manual retry must accept only its fresh generation and fresh path observation")
+    _ = cancelled.pathChanged(.unsatisfied)
+    try check(
+      cancelled.expire() == .stop && cancelled.pathChanged(.satisfied) == .ignore
+        && !cancelled.beginWait(),
+      "A bounded offline wait must return to Retry and close late path callbacks after expiry")
   }
   static func parserChecks() throws {
     let result = try ControlEvent.decode(Data(status.utf8), command: .status)
@@ -1724,8 +2247,9 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       "An app update invalidates tool checks without implying missing tools or blocking local audio"
     )
     try check(
-      unchecked.actionLabel == "Check YouTube tools" && unchecked.needsYouTubeRepair,
-      "Installed unchecked tools must offer the explicit tool check")
+      unchecked.actionLabel == "Prepare local tools" && unchecked.needsYouTubeRepair
+        && unchecked.primaryCommand == .setup,
+      "Renewing unchecked tool evidence must disclose its preparation command")
     for command in [AppCommand.status, .setup] {
       let running = SetupPresentation(
         status: uncheckedStatus, activeCommand: command, hasFailure: false)
@@ -1749,8 +2273,9 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       presentation.javascript == .needsSetup && presentation.tokenProvider == .needsSetup,
       "The failed setup components must remain actionable")
     try check(
-      presentation.needsYouTubeRepair && presentation.actionLabel == "Check YouTube tools",
-      "Partial readiness must offer a tool check without disabling local work")
+      presentation.needsYouTubeRepair && presentation.actionLabel == "Prepare local tools"
+        && presentation.primaryCommand == .setup,
+      "Partial tool readiness must disclose preparation without disabling local work")
     try check(
       presentation.completionMessage
         == "Local processing is ready. Some YouTube tools need attention; review the setup checks.",
@@ -1915,12 +2440,20 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
       return headers
     }
     func download(
-      partial: URL, manifest: RuntimeBootstrapManifest
+      partial: URL, manifest: RuntimeBootstrapManifest, context: String? = nil,
+      progress: @escaping @Sendable (Double, String) -> Void = { _, _ in }
     ) throws {
-      try RuntimeDownloadDelegate(
-        file: partial, manifest: manifest, configuration: downloadConfiguration,
-        progress: { _, _ in }
-      ).download(manifest.archiveURL!)
+      do {
+        try RuntimeDownloadDelegate(
+          file: partial, manifest: manifest, configuration: downloadConfiguration,
+          retryDelays: [0, 0],
+          progress: progress
+        ).download(manifest.archiveURL!)
+      } catch {
+        guard let context else { throw error }
+        let code = (error as? RuntimeBootstrapFailure)?.errorCode ?? "UNEXPECTED_FAILURE"
+        throw TestFailure.failed("\(context): \(code)")
+      }
     }
     func seedResume(
       partial: URL, manifest: RuntimeBootstrapManifest, bytes: Data, etag: String
@@ -2028,6 +2561,200 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
         && resumedRequests[0].value(forHTTPHeaderField: "If-Range") == "\"resume-v1\"",
       "A validated cross-run partial must use an exact Range and If-Range validator")
     try RuntimeDownloadResumeState.discard(partial: resumedPartial)
+
+    for status in [408, 425, 429, 500, 503, 504] {
+      let partial = try transportPartial("transient-\(status)", manifest: transportDocument)
+      RuntimeDownloadFixtureProtocol.store.configure([
+        .init(status: status, headers: responseHeaders(bytes: 0)),
+        .init(
+          headers: responseHeaders(bytes: transportBytes.count, etag: "\"recovered-v1\""),
+          chunks: [transportBytes]),
+      ])
+      try download(
+        partial: partial, manifest: transportDocument, context: "Transient HTTP \(status) recovery")
+      let downloaded = try Data(contentsOf: partial)
+      try check(
+        downloaded == transportBytes && RuntimeDownloadFixtureProtocol.store.snapshot().count == 2,
+        "A temporary HTTP \(status) must recover within this component's download")
+      try RuntimeDownloadResumeState.discard(partial: partial)
+    }
+
+    for error in [URLError.Code.networkConnectionLost, .timedOut, .notConnectedToInternet] {
+      let partial = try transportPartial("network-\(error.rawValue)", manifest: transportDocument)
+      RuntimeDownloadFixtureProtocol.store.configure([
+        .init(
+          headers: responseHeaders(bytes: transportBytes.count, etag: "\"network-v1\""),
+          chunks: [prefix], error: error),
+        .init(
+          headers: responseHeaders(bytes: transportBytes.count, etag: "\"network-v1\""),
+          rangeBody: transportBytes),
+      ])
+      try download(
+        partial: partial, manifest: transportDocument,
+        context: "Transient network \(error.rawValue) recovery")
+      let downloaded = try Data(contentsOf: partial)
+      let requests = RuntimeDownloadFixtureProtocol.store.snapshot()
+      try check(
+        downloaded == transportBytes && requests.count == 2
+          && (requests[1].value(forHTTPHeaderField: "Range") == nil
+            || (requests[1].value(forHTTPHeaderField: "Range") == "bytes=\(prefixCount)-"
+              && requests[1].value(forHTTPHeaderField: "If-Range") == "\"network-v1\"")),
+        "An interrupted transport must replace a transparently replayed full body or safely resume")
+      try RuntimeDownloadResumeState.discard(partial: partial)
+    }
+
+    // Use real stream-sized chunks; tiny mocked 206 bodies may be buffered until completion.
+    let rangeBody = Data(repeating: 0x61, count: 1024 * 1024)
+    let rangeManifest = try transportManifest(rangeBody, runtimeID: "macos-arm64-range-stream")
+    let initialRangeCount = 128 * 1024
+    let initialRangePrefix = Data(rangeBody.prefix(initialRangeCount))
+    let rangeSuffix = Data(rangeBody.dropFirst(initialRangeCount))
+    let replayedRangePartial = try transportPartial("range-replay", manifest: rangeManifest)
+    try seedResume(
+      partial: replayedRangePartial, manifest: rangeManifest, bytes: initialRangePrefix,
+      etag: "\"range-replay-v1\"")
+    let replayedPrefix = Data(rangeSuffix.prefix(512 * 1024))
+    let rangePrefixWritten = DispatchSemaphore(value: 0)
+    RuntimeDownloadFixtureProtocol.store.configure([
+      .init(
+        status: 206,
+        headers: responseHeaders(
+          bytes: rangeSuffix.count, etag: "\"range-replay-v1\"",
+          range: "bytes \(initialRangeCount)-\(rangeBody.count - 1)/\(rangeBody.count)"),
+        chunks: [replayedPrefix], error: .networkConnectionLost, finishAfter: rangePrefixWritten),
+      .init(
+        headers: responseHeaders(bytes: rangeBody.count, etag: "\"range-replay-v1\""),
+        rangeBody: rangeBody),
+      .init(
+        headers: responseHeaders(bytes: rangeBody.count, etag: "\"range-replay-v1\""),
+        rangeBody: rangeBody),
+    ])
+    try download(
+      partial: replayedRangePartial, manifest: rangeManifest,
+      context: "Replayed Range recovery",
+      progress: { _, _ in rangePrefixWritten.signal() }
+    )
+    let replayedRangeBytes = try Data(contentsOf: replayedRangePartial)
+    let replayedRangeRequests = RuntimeDownloadFixtureProtocol.store.snapshot()
+    let replayedRanges = replayedRangeRequests.map {
+      $0.value(forHTTPHeaderField: "Range") ?? "NONE"
+    }.joined(separator: ",")
+    try check(
+      replayedRangeBytes == rangeBody && (2...3).contains(replayedRangeRequests.count)
+        && replayedRangeRequests.last?.value(forHTTPHeaderField: "Range")
+          == "bytes=\(initialRangeCount + replayedPrefix.count)-",
+      "A replayed original Range must not duplicate bytes and must request only its verified remainder (\(replayedRangeBytes.count) bytes, \(replayedRanges))"
+    )
+    try RuntimeDownloadResumeState.discard(partial: replayedRangePartial)
+
+    let readOnlyPartial = try transportPartial("read-only", manifest: transportDocument)
+    let readOnlyDirectory = readOnlyPartial.deletingLastPathComponent()
+    RuntimeDownloadFixtureProtocol.store.configure([])
+    guard chmod(readOnlyDirectory.path, 0o500) == 0 else {
+      throw TestFailure.failed("Could not protect local write-failure fixture")
+    }
+    do {
+      defer { _ = chmod(readOnlyDirectory.path, 0o700) }
+      do {
+        try download(partial: readOnlyPartial, manifest: transportDocument)
+        throw TestFailure.failed("A read-only download directory was accepted")
+      } catch RuntimeBootstrapFailure.code("LOCAL_DIRECTORY_NOT_PRIVATE") {}
+    }
+    try check(
+      RuntimeDownloadFixtureProtocol.store.snapshot().isEmpty,
+      "A local permission failure must not become a network retry or connectivity wait")
+    try check(
+      RuntimeDownloadDelegate.storageFailureCode(
+        NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError)) == "DISK_SPACE_LOW"
+        && RuntimeDownloadDelegate.storageFailureCode(
+          NSError(
+            domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+            userInfo: [
+              NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))
+            ])) == "DISK_SPACE_LOW"
+        && RuntimeDownloadDelegate.storageFailureCode(
+          NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))) == "RUNTIME_INSTALL_FAILED",
+      "Disk exhaustion and local I/O failures must remain distinct terminal storage errors")
+
+    let truncatedPartial = try transportPartial("truncated", manifest: transportDocument)
+    RuntimeDownloadFixtureProtocol.store.configure([
+      .init(headers: responseHeaders(bytes: transportBytes.count), chunks: [prefix]),
+      .init(headers: responseHeaders(bytes: transportBytes.count), chunks: [transportBytes]),
+    ])
+    try download(
+      partial: truncatedPartial, manifest: transportDocument, context: "Truncated transfer recovery"
+    )
+    let truncatedRequests = RuntimeDownloadFixtureProtocol.store.snapshot()
+    try check(
+      truncatedRequests.count == 2
+        && truncatedRequests[1].value(forHTTPHeaderField: "Range") == nil,
+      "A truncated response without a validator must safely restart this component")
+    try RuntimeDownloadResumeState.discard(partial: truncatedPartial)
+
+    let unavailablePartial = try transportPartial("unavailable", manifest: transportDocument)
+    RuntimeDownloadFixtureProtocol.store.configure(
+      (0..<4).map { _ in .init(status: 503, headers: responseHeaders(bytes: 0)) })
+    do {
+      try download(partial: unavailablePartial, manifest: transportDocument)
+      throw TestFailure.failed("Persistent server failure was accepted")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") {}
+    try check(
+      RuntimeDownloadFixtureProtocol.store.snapshot().count == 3,
+      "Runtime transfer retries must stop after three total transport attempts")
+
+    for status in [400, 401, 403, 404] {
+      let partial = try transportPartial("terminal-\(status)", manifest: transportDocument)
+      RuntimeDownloadFixtureProtocol.store.configure([
+        .init(status: status, headers: responseHeaders(bytes: 0))
+      ])
+      do {
+        try download(partial: partial, manifest: transportDocument)
+        throw TestFailure.failed("Terminal HTTP response was accepted")
+      } catch RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") {}
+      try check(
+        RuntimeDownloadFixtureProtocol.store.snapshot().count == 1,
+        "Authorization and missing-source responses must not be retried")
+    }
+
+    let certificatePartial = try transportPartial("certificate", manifest: transportDocument)
+    RuntimeDownloadFixtureProtocol.store.configure([
+      .init(
+        headers: responseHeaders(bytes: transportBytes.count),
+        error: .serverCertificateUntrusted)
+    ])
+    do {
+      try download(partial: certificatePartial, manifest: transportDocument)
+      throw TestFailure.failed("Certificate failure was accepted")
+    } catch RuntimeBootstrapFailure.code("RUNTIME_DOWNLOAD_FAILED") {}
+    try check(
+      RuntimeDownloadFixtureProtocol.store.snapshot().count == 1,
+      "A certificate failure must remain terminal rather than using a fallback source")
+
+    let cancelledRetryPartial = try transportPartial("cancel-backoff", manifest: transportDocument)
+    RuntimeDownloadFixtureProtocol.store.configure([
+      .init(status: 503, headers: responseHeaders(bytes: 0)),
+      .init(headers: responseHeaders(bytes: transportBytes.count), chunks: [transportBytes]),
+    ])
+    let retryDelegate = RuntimeDownloadDelegate(
+      file: cancelledRetryPartial, manifest: transportDocument,
+      configuration: downloadConfiguration, retryDelays: [30, 30], progress: { _, _ in })
+    let cancelledRetry = RuntimeDownloadInvocation()
+    let retryStarted = ProcessInfo.processInfo.systemUptime
+    DispatchQueue.global().async {
+      do {
+        try retryDelegate.download(transportDocument.archiveURL!)
+        cancelledRetry.complete(nil)
+      } catch { cancelledRetry.complete(error) }
+    }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { retryDelegate.cancel() }
+    try check(
+      cancelledRetry.finished.wait(timeout: .now() + 3) == .success,
+      "Cancelling a retry wait must wake the download immediately")
+    try check(
+      (cancelledRetry.error as? RuntimeBootstrapFailure) == .cancelled
+        && ProcessInfo.processInfo.systemUptime - retryStarted < 2
+        && RuntimeDownloadFixtureProtocol.store.snapshot().count == 1,
+      "Cancellation during backoff must not issue a queued retry")
 
     for (name, etag) in [("missing-etag", nil), ("weak-etag", "W/\"weak\"")] {
       let partial = try transportPartial(name, manifest: transportDocument)
@@ -2614,6 +3341,8 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
         headers: responseHeaders(bytes: componentBytes[0].count, etag: "\"part-first\""),
         chunks: [componentBytes[0]]),
       .init(status: 503, headers: responseHeaders(bytes: 0), chunks: []),
+      .init(status: 503, headers: responseHeaders(bytes: 0), chunks: []),
+      .init(status: 503, headers: responseHeaders(bytes: 0), chunks: []),
     ])
     do {
       _ = try RuntimeBootstrapInstaller(
@@ -2630,11 +3359,15 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     let failedStageEntries = try FileManager.default.contentsOfDirectory(
       atPath:
         failedComponentSupport.appendingPathComponent("runtime/staging").path)
+    let failedComponentRequests = RuntimeDownloadFixtureProtocol.store.snapshot()
     try check(
       failedComponentProgress.valid(stages: 1)
         && RuntimeInstallationResolver.activeDocument(support: failedComponentSupport) == nil
-        && failedStageEntries.isEmpty && RuntimeDownloadFixtureProtocol.store.snapshot().count == 2,
-      "A later-stage failure must preserve prior ZIP cleanup and discard the incomplete staging tree"
+        && failedStageEntries.isEmpty && failedComponentRequests.count == 4
+        && failedComponentRequests.dropFirst().allSatisfy {
+          $0.url?.absoluteString == componentDocument.runtime.downloadManifests[1].url
+        },
+      "A later-stage failure must retry only its component, preserve prior ZIP cleanup and discard incomplete staging"
     )
 
     let corruptSupport = root.appendingPathComponent("CorruptSupport", isDirectory: true)
@@ -3958,6 +4691,43 @@ private final class RuntimeDownloadCancellation: @unchecked Sendable {
     try check(
       missing.events.first?.status?.runtimeReady == false,
       "Thin app status must report the absent runtime without launching bundled tools")
+
+    let partialSupport = root.appendingPathComponent("PartiallyMissingSupport", isDirectory: true)
+    let partialRuntime = partialSupport.appendingPathComponent(
+      "runtime/releases/\(document.runtime.id)/runtime", isDirectory: true)
+    try RuntimeFileSecurity.ensurePrivateDirectory(partialRuntime)
+    let partialActive = partialSupport.appendingPathComponent("runtime/active.json")
+    try RuntimeFileSecurity.atomicWrite(
+      JSONEncoder().encode(RuntimeActiveDocument(runtime: document.runtime)), to: partialActive)
+    let partialLock = partialSupport.appendingPathComponent("runtime/bootstrap.lock")
+    try RuntimeFileSecurity.atomicWrite(Data(), to: partialLock, mode: 0o600)
+    let criticalExecutables = [
+      "runtime/node/bin/node", "runtime/python/bin/python3", "runtime/bin/ffmpeg",
+      "runtime/bin/ffprobe", "tools/youtube/bin/deno",
+    ]
+    for executable in criticalExecutables {
+      let file = partialRuntime.appendingPathComponent(executable)
+      try RuntimeFileSecurity.ensurePrivateDirectory(file.deletingLastPathComponent())
+      try RuntimeFileSecurity.atomicWrite(Data("#!/bin/sh\nexit 42\n".utf8), to: file, mode: 0o700)
+    }
+    let partialCoordinator = RuntimeVerificationCoordinator()
+    for executable in criticalExecutables {
+      let file = partialRuntime.appendingPathComponent(executable)
+      let contents = try Data(contentsOf: file)
+      try FileManager.default.removeItem(at: file)
+      let status = try run(
+        missingResources, command: .status,
+        bridge: ProcessBridge(support: partialSupport, verificationCoordinator: partialCoordinator))
+      if case .success? = status.outcome {
+      } else {
+        throw TestFailure.failed("A missing installed executable must request automatic setup")
+      }
+      try check(
+        status.events.first?.status?.runtimeReady == false
+          && partialCoordinator.verificationRunCount == 0,
+        "Missing \(executable) must produce incomplete setup through only cheap executable checks")
+      try RuntimeFileSecurity.atomicWrite(contents, to: file, mode: 0o700)
+    }
   }
 
   static func fixture(script: String?) throws -> URL {

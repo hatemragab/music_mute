@@ -1,10 +1,18 @@
+import { useState } from "react";
+import { countries, countryCodes, countryName } from "./countries";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { AccountPolicyValues } from "@/api/contracts";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { LinkImportUserPicker } from "./link-import-user-picker";
 
 export interface AccountPolicyDraft {
+  linkImportEnabled: boolean;
+  linkImportDisabledCountries: string[];
+  linkImportDisabledUserIds: string[];
   acceptNewJobs: boolean;
   maintenanceMessageEn: string;
   maintenanceMessageAr: string | null;
@@ -129,6 +137,24 @@ export const validateAccountPolicy = (value: AccountPolicyDraft) => {
     errors.push(
       "An English maintenance message is required while admissions are paused.",
     );
+  if (typeof value.linkImportEnabled !== "boolean")
+    errors.push("Link import visibility must be a boolean.");
+  const codes = value.linkImportDisabledCountries;
+  if (
+    codes.length > 250 ||
+    new Set(codes).size !== codes.length ||
+    codes.some((code) => !countryCodes.includes(code))
+  )
+    errors.push("Choose unique ISO country codes for link import visibility.");
+  const userIds = value.linkImportDisabledUserIds;
+  if (
+    userIds.length > 1_000 ||
+    new Set(userIds).size !== userIds.length ||
+    userIds.some((id) => id.length !== 24 || !/^[a-f\d]{24}$/.test(id))
+  )
+    errors.push(
+      "Choose up to 1,000 unique account IDs for link import visibility.",
+    );
   return errors;
 };
 
@@ -136,14 +162,24 @@ export function AccountPolicyForm({
   value,
   onChange,
   disabled,
+  linkImportForcedOff = false,
+  canReadUsers = false,
 }: {
   value: AccountPolicyDraft;
   onChange(value: AccountPolicyDraft): void;
   disabled?: boolean;
+  linkImportForcedOff?: boolean;
+  canReadUsers?: boolean;
 }) {
+  const [countrySearch, setCountrySearch] = useState("");
+  const matchingCountries = countries.filter(({ code, name }) =>
+    `${name} ${code}`
+      .toLowerCase()
+      .includes(countrySearch.trim().toLowerCase()),
+  );
   const errors = validateAccountPolicy(value);
   return (
-    <fieldset disabled={disabled} className="space-y-6">
+    <fieldset className="space-y-6">
       <div className="flex items-start justify-between gap-4 rounded-xl border p-4">
         <div>
           <Label htmlFor="accept-new-jobs" className="font-medium">
@@ -157,11 +193,127 @@ export function AccountPolicyForm({
         <Switch
           id="accept-new-jobs"
           checked={value.acceptNewJobs}
+          disabled={disabled}
           onCheckedChange={(acceptNewJobs) =>
             onChange({ ...value, acceptNewJobs })
           }
         />
       </div>
+
+      <section
+        className="space-y-4 rounded-xl border p-4"
+        aria-label="Native link import visibility"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Label htmlFor="link-import-enabled">Show import from link</Label>
+            <p className="mt-1 text-sm text-muted-foreground">
+              File import stays available on Android, iOS, Mac, and Windows. Off
+              hides their paste-link controls. Web and existing work are
+              unaffected.
+            </p>
+          </div>
+          <Switch
+            id="link-import-enabled"
+            checked={value.linkImportEnabled}
+            disabled={disabled}
+            onCheckedChange={(linkImportEnabled) =>
+              onChange({ ...value, linkImportEnabled })
+            }
+          />
+        </div>
+        {linkImportForcedOff && (
+          <p role="status" className="text-sm text-muted-foreground">
+            The API process flag keeps native link import hidden, even when this
+            switch is on.
+          </p>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="link-import-countries">
+            Hide link import in these countries
+          </Label>
+          {!value.linkImportEnabled && (
+            <p className="text-sm text-muted-foreground">
+              Link import is hidden in all three native apps. Selected countries
+              remain hidden after the switch is turned on.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2" aria-label="Selected countries">
+            {value.linkImportDisabledCountries.map((code) => (
+              <Button
+                key={code}
+                type="button"
+                variant="secondary"
+                size="sm"
+                aria-label={`Remove ${countryName(code)} (${code})`}
+                disabled={disabled}
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    linkImportDisabledCountries:
+                      value.linkImportDisabledCountries.filter(
+                        (selected) => selected !== code,
+                      ),
+                  })
+                }
+              >
+                {countryName(code)} ({code}) ×
+              </Button>
+            ))}
+          </div>
+          <Input
+            id="link-import-countries"
+            placeholder="Search countries by name or code"
+            value={countrySearch}
+            disabled={disabled}
+            onChange={(event) => setCountrySearch(event.target.value)}
+          />
+          <div
+            className="max-h-48 overflow-y-auto rounded-lg border p-3"
+            role="group"
+            aria-label="Country choices"
+          >
+            {matchingCountries.map(({ code, name }) => (
+              <label
+                key={code}
+                className="flex items-center gap-3 rounded p-2 hover:bg-muted/30"
+              >
+                <Checkbox
+                  checked={value.linkImportDisabledCountries.includes(code)}
+                  disabled={disabled}
+                  onCheckedChange={(checked) =>
+                    onChange({
+                      ...value,
+                      linkImportDisabledCountries: (checked
+                        ? [...value.linkImportDisabledCountries, code]
+                        : value.linkImportDisabledCountries.filter(
+                            (selected) => selected !== code,
+                          )
+                      ).sort(),
+                    })
+                  }
+                />
+                <span>
+                  {name} ({code})
+                </span>
+              </label>
+            ))}
+            {!matchingCountries.length && (
+              <p className="text-sm text-muted-foreground">
+                No countries match.
+              </p>
+            )}
+          </div>
+        </div>
+        <LinkImportUserPicker
+          value={value.linkImportDisabledUserIds}
+          onChange={(linkImportDisabledUserIds) =>
+            onChange({ ...value, linkImportDisabledUserIds })
+          }
+          disabled={disabled}
+          canReadUsers={canReadUsers}
+        />
+      </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {numericFields.map((field) => (
@@ -174,6 +326,7 @@ export function AccountPolicyForm({
               max={field.max}
               step="1"
               value={value.values[field.key]}
+              disabled={disabled}
               onChange={(event) =>
                 onChange({
                   ...value,
@@ -195,6 +348,7 @@ export function AccountPolicyForm({
           <Textarea
             id="maintenance-en"
             value={value.maintenanceMessageEn}
+            disabled={disabled}
             onChange={(event) =>
               onChange({ ...value, maintenanceMessageEn: event.target.value })
             }
@@ -208,6 +362,7 @@ export function AccountPolicyForm({
             id="maintenance-ar"
             dir="rtl"
             value={value.maintenanceMessageAr ?? ""}
+            disabled={disabled}
             onChange={(event) =>
               onChange({
                 ...value,

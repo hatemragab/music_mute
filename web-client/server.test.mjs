@@ -1,5 +1,6 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { request as httpRequest } from "node:http";
 import { JSDOM } from "jsdom";
 import { createWebServer, publicConfig } from "./server.mjs";
 
@@ -283,6 +284,24 @@ test("CSP permits only the explicit storage origin", async () => {
   assert.ok(!policy.includes("*."));
   assert.ok(!policy.includes("amazonaws"));
 });
+
+test("CSP permits the exact public YouTube thumbnail origin without a wildcard", async () => {
+  const response = await fetch(`${origin}/healthz`);
+  const sources = response.headers
+    .get("content-security-policy")
+    .split("; ")
+    .find((directive) => directive.startsWith("img-src "))
+    .split(" ");
+  assert.deepEqual(sources, [
+    "img-src",
+    "'self'",
+    "data:",
+    "https://www.gstatic.com",
+    "https://accounts.google.com",
+    "https://i.ytimg.com",
+  ]);
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+});
 test("requires a safe explicit media origin", () => {
   for (const value of [
     undefined,
@@ -308,4 +327,330 @@ test("deployment checks return uncached HTML with a build version", async () => 
     await response.text(),
     /name="musicmute-build" content="[a-f0-9-]{36}"/,
   );
+});
+
+async function startAuthServer(t, authFetch, options = {}) {
+  const helperServer = createWebServer({
+    env: { ...env, PUBLIC_FIREBASE_AUTH_DOMAIN: "app.music-mute.com" },
+    authFetch,
+    ...options,
+  });
+  await new Promise((resolve) => helperServer.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => helperServer.close(resolve)));
+  return `http://127.0.0.1:${helperServer.address().port}`;
+}
+
+function rawRequest(origin, path, options = {}) {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(origin, { path, ...options }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () =>
+        resolve({
+          status: response.statusCode,
+          headers: response.headers,
+          body: Buffer.concat(chunks).toString(),
+        }),
+      );
+    });
+    request.on("error", reject);
+    request.end(options.body);
+  });
+}
+
+test("Firebase helper forwards the exact query only to the configured project", async (t) => {
+  const calls = [];
+  const helperOrigin = await startAuthServer(t, async (...args) => {
+    calls.push(args);
+    return new Response('<script src="handler.js"></script>', {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  });
+  const query =
+    "?apiKey=public-key&redirectUrl=https%3A%2F%2Fapp.music-mute.com%2F&eventId=one%2Btwo&target=https://attacker.example";
+  const response = await fetch(`${helperOrigin}/__/auth/handler${query}`, {
+    headers: {
+      Cookie: "application-session=private",
+      Authorization: "Bearer private",
+      "X-Forwarded-Host": "attacker.example",
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), '<script src="handler.js"></script>');
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0][0],
+    `https://example.firebaseapp.com/__/auth/handler${query}`,
+  );
+  assert.equal(calls[0][1].redirect, "manual");
+  assert.equal(calls[0][1].headers.cookie, undefined);
+  assert.equal(calls[0][1].headers.authorization, undefined);
+  assert.equal(calls[0][1].headers["x-forwarded-host"], undefined);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow");
+});
+
+test("Firebase OAuth callbacks preserve POST bytes and content type", async (t) => {
+  const body = "state=one%2Btwo&credential=fixture-token";
+  let forwarded;
+  const helperOrigin = await startAuthServer(t, async (url, options) => {
+    forwarded = { url, options };
+    return new Response("callback", {
+      headers: { "Content-Type": "text/html" },
+    });
+  });
+  const response = await fetch(
+    `${helperOrigin}/__/auth/handler?eventId=fixture`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(forwarded.options.method, "POST");
+  assert.equal(forwarded.options.body.toString(), body);
+  assert.equal(
+    forwarded.options.headers["content-type"],
+    "application/x-www-form-urlencoded",
+  );
+});
+
+test("Firebase helper preserves upstream status and provider redirect headers", async (t) => {
+  const helperOrigin = await startAuthServer(t, async (url) => {
+    return url.endsWith("handler")
+      ? new Response(null, {
+          status: 302,
+          headers: { Location: "https://accounts.google.com/o/oauth2/auth" },
+        })
+      : new Response("Firebase is unavailable", {
+          status: 503,
+          headers: {
+            "Content-Type": "text/plain",
+            "Retry-After": "5",
+            "Set-Cookie": "unrelated=private",
+            "Content-Encoding": "gzip",
+          },
+        });
+  });
+  const redirect = await fetch(`${helperOrigin}/__/auth/handler`, {
+    redirect: "manual",
+  });
+  assert.equal(redirect.status, 302);
+  assert.equal(
+    redirect.headers.get("location"),
+    "https://accounts.google.com/o/oauth2/auth",
+  );
+  const unavailable = await fetch(`${helperOrigin}/__/auth/iframe.js`);
+  assert.equal(unavailable.status, 503);
+  assert.equal(await unavailable.text(), "Firebase is unavailable");
+  assert.equal(unavailable.headers.get("content-type"), "text/plain");
+  assert.equal(unavailable.headers.get("retry-after"), "5");
+  assert.equal(unavailable.headers.get("set-cookie"), null);
+  assert.equal(unavailable.headers.get("content-encoding"), null);
+});
+
+test("Firebase helper CSP and framing are scoped without changing app policy", async (t) => {
+  const helperOrigin = await startAuthServer(
+    t,
+    async () =>
+      new Response("helper", { headers: { "Content-Type": "text/html" } }),
+  );
+  const handler = await fetch(`${helperOrigin}/__/auth/handler`);
+  assert.equal(handler.headers.get("content-security-policy"), null);
+  assert.equal(handler.headers.get("x-frame-options"), "DENY");
+  const iframe = await fetch(`${helperOrigin}/__/auth/iframe?apiKey=fixture`);
+  assert.equal(iframe.headers.get("content-security-policy"), null);
+  assert.equal(iframe.headers.get("x-frame-options"), "SAMEORIGIN");
+  const app = await fetch(`${helperOrigin}/healthz`);
+  assert.match(
+    app.headers.get("content-security-policy"),
+    /frame-ancestors 'none'/,
+  );
+  assert.match(
+    app.headers.get("content-security-policy"),
+    /frame-src https:\/\/app\.music-mute\.com /,
+  );
+  assert.equal(app.headers.get("x-frame-options"), "DENY");
+});
+
+test("Firebase's own helper CSP is retained when upstream supplies one", async (t) => {
+  const policy = "script-src 'nonce-firebase-auth-helper'; object-src 'none'";
+  const helperOrigin = await startAuthServer(
+    t,
+    async () =>
+      new Response("helper", {
+        headers: { "Content-Security-Policy": policy },
+      }),
+  );
+  const response = await fetch(`${helperOrigin}/__/auth/handler`);
+  assert.equal(response.headers.get("content-security-policy"), policy);
+});
+
+test("Firebase helper allows only exact known paths and GET/HEAD/POST methods", async (t) => {
+  let calls = 0;
+  const helperOrigin = await startAuthServer(t, async (url, options) => {
+    calls++;
+    return new Response(options.method === "HEAD" ? null : "helper", {
+      headers: { "Content-Type": "text/javascript" },
+    });
+  });
+  for (const path of [
+    "/__/auth/handler.js",
+    "/__/auth/experiments.js",
+    "/__/auth/iframe.js",
+    "/__/auth/links",
+    "/__/auth/links.js",
+  ]) {
+    assert.equal((await fetch(`${helperOrigin}${path}`)).status, 200);
+  }
+  const head = await fetch(`${helperOrigin}/__/auth/iframe`, {
+    method: "HEAD",
+  });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  const expectedCalls = calls;
+  for (const path of [
+    "/__/auth/unknown",
+    "/__/auth/handler/",
+    "/__/auth/%68andler",
+    "/__%2fauth/handler",
+    "/__/auth/../auth/handler",
+    "/__/auth/%2e%2e/auth/handler",
+  ]) {
+    assert.equal((await rawRequest(helperOrigin, path)).status, 404, path);
+  }
+  for (const method of ["PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    const response = await fetch(`${helperOrigin}/__/auth/handler`, { method });
+    assert.equal(response.status, 405);
+    assert.equal(response.headers.get("allow"), "GET, HEAD, POST");
+  }
+  assert.equal(calls, expectedCalls);
+  assert.equal(
+    (await fetch(`${helperOrigin}/healthz`, { method: "POST" })).status,
+    405,
+  );
+});
+
+test("Firebase init config uses current public runtime settings without an upstream request", async (t) => {
+  const helperOrigin = await startAuthServer(t, () => {
+    throw new Error("Init configuration must not fetch upstream.");
+  });
+  const response = await fetch(`${helperOrigin}/__/firebase/init.json`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.match(response.headers.get("content-type"), /application\/json/);
+  assert.deepEqual(await response.json(), {
+    ...publicConfig(env).firebase,
+    authDomain: "app.music-mute.com",
+  });
+  assert.equal(
+    (
+      await fetch(`${helperOrigin}/__/firebase/init.json`, {
+        method: "POST",
+        body: "fixture",
+      })
+    ).status,
+    405,
+  );
+});
+
+test("unsafe Firebase project identifiers cannot create an arbitrary upstream host", () => {
+  for (const projectId of [
+    "attacker.example/",
+    "example.firebaseapp.com",
+    "../example",
+    "example@attacker.example",
+    "example?target=other",
+    "example\r\nheader:value",
+  ]) {
+    assert.throws(
+      () =>
+        createWebServer({
+          env: { ...env, PUBLIC_FIREBASE_PROJECT_ID: projectId },
+        }),
+      /PUBLIC_FIREBASE_PROJECT_ID/,
+    );
+  }
+});
+
+test("Firebase helper rejects oversized incoming OAuth bodies before forwarding", async (t) => {
+  let calls = 0;
+  const helperOrigin = await startAuthServer(t, async () => {
+    calls++;
+    return new Response("helper");
+  });
+  const response = await fetch(`${helperOrigin}/__/auth/handler`, {
+    method: "POST",
+    body: "x".repeat(1024 * 1024 + 1),
+  });
+  assert.equal(response.status, 413);
+  assert.equal(await response.text(), "Authentication is unavailable.");
+  assert.equal(calls, 0);
+});
+
+test("Firebase helper bounds upstream responses and keeps failure details private", async (t) => {
+  const helperOrigin = await startAuthServer(t, async (url) => {
+    if (url.endsWith("handler")) throw new Error("secret upstream token");
+    return new Response("x".repeat(2 * 1024 * 1024 + 1));
+  });
+  for (const path of ["handler", "iframe.js"]) {
+    const response = await fetch(`${helperOrigin}/__/auth/${path}`);
+    assert.equal(response.status, 502);
+    assert.equal(await response.text(), "Authentication is unavailable.");
+  }
+});
+
+test("Firebase helper also bounds OAuth bodies without Content-Length", async (t) => {
+  let calls = 0;
+  const helperOrigin = await startAuthServer(t, async () => {
+    calls++;
+    return new Response("helper");
+  });
+  const response = await rawRequest(helperOrigin, "/__/auth/handler", {
+    method: "POST",
+    headers: { "Transfer-Encoding": "chunked" },
+    body: "x".repeat(1024 * 1024 + 1),
+  });
+  assert.equal(response.status, 413);
+  assert.equal(calls, 0);
+});
+
+test("Firebase helper aborts stalled upstream requests within its deadline", async (t) => {
+  let aborted = false;
+  const helperOrigin = await startAuthServer(
+    t,
+    (url, { signal }) =>
+      new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(signal.reason);
+        });
+      }),
+    { authTimeoutMs: 20 },
+  );
+  const response = await fetch(`${helperOrigin}/__/auth/handler`);
+  assert.equal(response.status, 504);
+  assert.equal(await response.text(), "Authentication is unavailable.");
+  assert.equal(aborted, true);
+});
+
+test("Firebase helper deadline covers a stalled response body", async (t) => {
+  const helperOrigin = await startAuthServer(
+    t,
+    async (url, { signal }) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            signal.addEventListener("abort", () =>
+              controller.error(signal.reason),
+            );
+          },
+        }),
+      ),
+    { authTimeoutMs: 20 },
+  );
+  const response = await fetch(`${helperOrigin}/__/auth/iframe.js`);
+  assert.equal(response.status, 504);
+  assert.equal(await response.text(), "Authentication is unavailable.");
 });

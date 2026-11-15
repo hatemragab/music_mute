@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { delimiter, isAbsolute } from "node:path";
+import { delimiter, isAbsolute, win32 } from "node:path";
 import {
   ChildFrameDecoder,
   ChildProtocolError,
@@ -21,6 +21,10 @@ import {
   parseChildProgress,
   type ChildProgress,
 } from "./ipc/child-progress.js";
+import { sanitizeDiagnostic } from "./diagnostic-redaction.js";
+export { sanitizeDiagnostic } from "./diagnostic-redaction.js";
+import { ChildCommandError } from "./ipc/child-command-error.js";
+export { ChildCommandError } from "./ipc/child-command-error.js";
 
 // Native provider startup includes verified model loading and one warm-up pass.
 // A cold MPS launch can exceed ten seconds even though steady-state jobs are
@@ -41,7 +45,71 @@ export interface ChildProcessOptions {
   requestTimeoutMs?: number;
   stopTimeoutMs?: number;
   windowsJobObject?: boolean;
+  /** Trusted retained consumer mode: omit console hosts while preserving the Windows Job chain. */
+  windowsDetachedConsole?: true;
+  /** Verified consumer release engine root; embedded Python does not use cwd imports. */
+  windowsEngineModuleRoot?: string;
   onStartupStage?: (stage: "loading" | "warming") => void;
+}
+
+export function windowsGuardianArguments(
+  engineRoot: string | undefined,
+  parentPid: number,
+  arguments_: readonly string[],
+  detachedConsole = false,
+): string[] {
+  if (
+    !Number.isSafeInteger(parentPid) ||
+    parentPid < 1 ||
+    typeof detachedConsole !== "boolean" ||
+    (detachedConsole && engineRoot === undefined) ||
+    (engineRoot !== undefined &&
+      (!win32.isAbsolute(engineRoot) || engineRoot.includes("\0")))
+  )
+    throw new Error("Windows engine guardian configuration is invalid");
+  return [
+    ...(engineRoot
+      ? [
+          "-I",
+          "-B",
+          "-c",
+          "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('musicmute_engine.windows_guardian',run_name='__main__')",
+          engineRoot,
+        ]
+      : ["-B", "-m", "musicmute_engine.windows_guardian"]),
+    "--parent-pid",
+    String(parentPid),
+    ...(detachedConsole ? ["--detached-console"] : []),
+    "--",
+    ...arguments_,
+  ];
+}
+
+/** Console isolation is valid only for the verified Windows guardian-owned Job mode. */
+export function workerChildDetached(
+  options: Pick<
+    ChildProcessOptions,
+    "windowsDetachedConsole" | "windowsJobObject" | "windowsEngineModuleRoot"
+  >,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (options.windowsDetachedConsole !== undefined) {
+    if (
+      options.windowsDetachedConsole !== true ||
+      platform !== "win32" ||
+      options.windowsJobObject !== true ||
+      !options.windowsEngineModuleRoot ||
+      !win32.isAbsolute(options.windowsEngineModuleRoot) ||
+      options.windowsEngineModuleRoot.includes("\0")
+    )
+      throw new TypeError(
+        "Detached Windows console requires a verified guardian-owned Job",
+      );
+    // Node's pinned libuv uses DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    // it does not set CREATE_BREAKAWAY_FROM_JOB and the child remains referenced.
+    return true;
+  }
+  return platform !== "win32";
 }
 
 interface PendingRequest {
@@ -50,20 +118,6 @@ interface PendingRequest {
   timeout: NodeJS.Timeout;
   onProgress?: (progress: ChildProgress) => void;
   lastProgress?: ChildProgress;
-}
-
-export class ChildCommandError extends Error {
-  constructor(
-    readonly code: string,
-    readonly summary?: string,
-  ) {
-    super(
-      summary
-        ? `Worker child command failed: ${code} (${summary})`
-        : `Worker child command failed: ${code}`,
-    );
-    this.name = "ChildCommandError";
-  }
 }
 
 const CHILD_STOP_MESSAGES = {
@@ -132,6 +186,11 @@ export class WorkerChildProcess {
     return this.currentIncarnation;
   }
 
+  /** Exact spawned guardian PID; it is not an exit or descendant-idle proof. */
+  getPid(): number | undefined {
+    return this.isAlive() ? this.child?.pid : undefined;
+  }
+
   isAlive(): boolean {
     return (
       this.child !== null &&
@@ -144,6 +203,7 @@ export class WorkerChildProcess {
   async start(): Promise<ChildResponse> {
     if (this.child || this.ready)
       throw new Error("Worker child has already been started");
+    const detached = workerChildDetached(this.options);
     await this.confirmProcessGroupExit();
     this.currentIncarnation = randomUUID();
     this.decoder = new ChildFrameDecoder();
@@ -162,7 +222,7 @@ export class WorkerChildProcess {
       windowsHide: true,
       // Give the POSIX worker its own process group so cancellation also
       // terminates media decoders, not just the Python parent.
-      detached: process.platform !== "win32",
+      detached,
     };
     const arguments_ = [
       ...this.options.args,
@@ -182,15 +242,12 @@ export class WorkerChildProcess {
         ? spawn(
             this.options.command,
             this.options.windowsJobObject
-              ? [
-                  "-B",
-                  "-m",
-                  "musicmute_engine.windows_guardian",
-                  "--parent-pid",
-                  String(process.pid),
-                  "--",
-                  ...arguments_,
-                ]
+              ? windowsGuardianArguments(
+                  this.options.windowsEngineModuleRoot,
+                  process.pid,
+                  arguments_,
+                  this.options.windowsDetachedConsole === true,
+                )
               : arguments_,
             spawnOptions,
           )
@@ -313,10 +370,17 @@ export class WorkerChildProcess {
           if (this.processGroupPid === pid) this.processGroupPid = undefined;
           return;
         }
-        throw new ChildStopError(
-          "PROCESS_GROUP_EXIT_UNCONFIRMED",
-          (error as NodeJS.ErrnoException).code,
-        );
+        const errno = (error as NodeJS.ErrnoException).code;
+        // Allow a transient denied/interrupted probe to settle during shutdown.
+        // Retry within the existing deadline; only ESRCH releases the fence.
+        if (
+          (errno === "EPERM" || errno === "EINTR") &&
+          performance.now() < deadline
+        ) {
+          await delay(10);
+          continue;
+        }
+        throw new ChildStopError("PROCESS_GROUP_EXIT_UNCONFIRMED", errno);
       }
       // Guardian exit alone cannot prove native inference/decoder descendants
       // have exited after a forced kill. Keep the GPU fence until the OS agrees.
@@ -560,16 +624,4 @@ function childEnvironment(
     if (value !== undefined) env[name] = value;
   }
   return env;
-}
-
-export function sanitizeDiagnostic(value: string): string {
-  return value
-    .replace(/https?:\/\/\S+/giu, "[REDACTED_URL]")
-    .replace(/Bearer\s+\S+/giu, "Bearer [REDACTED]")
-    .replace(
-      /\b(token|secret|password|credential|authorization)\s*[=:]\s*\S+/giu,
-      "$1=[REDACTED]",
-    )
-    .replace(/\/Users\/[^/\s]+/gu, "/Users/[REDACTED]")
-    .replace(/C:\\Users\\[^\\\s]+/giu, "C:\\Users\\[REDACTED]");
 }

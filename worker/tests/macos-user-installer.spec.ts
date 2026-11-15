@@ -6,6 +6,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   symlink,
@@ -18,15 +19,18 @@ import { writeMacReleaseManifest } from "../src/platform/macos/release-manifest.
 import {
   buildMacUserRuntimeConfig,
   installMacUserWorker,
+  inspectPendingMacUserEnrollment,
   PRODUCTION_BACKEND_BASE_URL,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
   resumeMacUserInstallation,
   resetPendingMacUserEnrollment,
+  type MacUserInstallationOptions,
 } from "../src/platform/macos/user-installer.js";
 import {
   createMacUserDirectories,
   createMacUserLayout,
+  type MacUserLayout,
 } from "../src/platform/macos/user-paths.js";
 import { loadRuntimeConfig } from "../src/runtime/runtime-config.js";
 import { MAC_RECIPE_IDS } from "../src/platform/macos/runtime-recipes.js";
@@ -41,6 +45,7 @@ import { writeConfirmedUnpairReceipt } from "../src/platform/shared/unpair-recei
 import { writeLocalRuntimeStatus } from "../src/runtime/local-runtime-status.js";
 import { DiagnosticSpool } from "../src/runtime/diagnostic-spool.js";
 import { DiagnosticForwarder } from "../src/runtime/diagnostic-forwarder.js";
+import { WorkerEnrollmentError } from "../src/enrollment/enrollment-client.js";
 import {
   setLocalLifecycleIntent,
   loadLocalLifecycle,
@@ -393,6 +398,107 @@ describe.skipIf(process.platform !== "darwin")(
       });
     });
 
+    it.each([false, "output", "workspace"] as const)(
+      "reuses exact qualification after enrollment interruption (accepted report=%s)",
+      async (accepted) => {
+        const f = await qualificationRetryFixture();
+        await expect(installMacUserWorker(f.options)).rejects.toThrow(
+          "fixture enrollment unavailable",
+        );
+        if (accepted) {
+          const state = JSON.parse(await readFile(f.statePath, "utf8"));
+          state.reportRevision = 1;
+          await writeFile(f.statePath, JSON.stringify(state), { mode: 0o600 });
+          if (accepted === "workspace")
+            await rm(dirname(f.outputPath), { recursive: true });
+          else await rm(f.outputPath);
+        }
+        await expect(installMacUserWorker(f.options)).resolves.toMatchObject({
+          machineId,
+          serviceLoaded: true,
+        });
+        expect(f.qualify).toHaveBeenCalledTimes(1);
+        expect(f.enroll).toHaveBeenCalledTimes(2);
+        expect(f.enroll.mock.calls[0]![0]).toEqual(f.enroll.mock.calls[1]![0]);
+        expect(await readFile(f.options.layout.credentialPath, "utf8")).toBe(
+          `${"m".repeat(43)}\n`,
+        );
+      },
+    );
+
+    it.each(["dangling-output", "dangling-ancestor", "writable-ancestor"])(
+      "rejects %s even when enrollment already accepted the report",
+      async (target) => {
+        const f = await qualificationRetryFixture();
+        await expect(installMacUserWorker(f.options)).rejects.toThrow(
+          "fixture enrollment unavailable",
+        );
+        const state = JSON.parse(await readFile(f.statePath, "utf8"));
+        state.reportRevision = 1;
+        await writeFile(f.statePath, JSON.stringify(state), { mode: 0o600 });
+        await rm(f.outputPath);
+        if (target === "dangling-output")
+          await symlink(
+            join(dirname(f.outputPath), "absent-result"),
+            f.outputPath,
+          );
+        if (target === "dangling-ancestor") {
+          await rm(dirname(f.outputPath), { recursive: true });
+          await symlink(
+            join(f.options.layout.workRoot, "absent-workspace"),
+            dirname(f.outputPath),
+          );
+        }
+        if (target === "writable-ancestor")
+          await chmod(dirname(f.outputPath), 0o777);
+        await expect(installMacUserWorker(f.options)).rejects.toThrow();
+        expect(f.enroll).toHaveBeenCalledTimes(1);
+        expect(f.qualify).toHaveBeenCalledTimes(1);
+        await expect(lstat(f.options.layout.configPath)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      },
+    );
+
+    it.each([
+      "report",
+      "output",
+      "installation",
+      "release",
+      "fixture",
+      "symlink",
+    ])(
+      "rejects swapped or tampered %s instead of reusing qualification",
+      async (target) => {
+        const f = await qualificationRetryFixture();
+        await expect(installMacUserWorker(f.options)).rejects.toThrow(
+          "fixture enrollment unavailable",
+        );
+        if (target === "report")
+          await writeFile(
+            f.reportPath,
+            `${await readFile(f.reportPath, "utf8")}\n`,
+            { mode: 0o600 },
+          );
+        if (target === "output")
+          await writeFile(f.outputPath, "changed output", { mode: 0o600 });
+        if (target === "installation") f.setInstallationId(randomUUID());
+        if (target === "release") await f.changeRelease();
+        if (target === "fixture")
+          await writeFile(f.fixturePath, "changed fixture", { mode: 0o600 });
+        if (target === "symlink") {
+          await rm(f.reportPath);
+          await symlink(f.outputPath, f.reportPath);
+        }
+        await expect(installMacUserWorker(f.options)).rejects.toThrow();
+        expect(f.qualify).toHaveBeenCalledTimes(1);
+        expect(f.enroll).toHaveBeenCalledTimes(1);
+        await expect(lstat(f.options.layout.configPath)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      },
+    );
+
     it("reactivates a preserved verified release without enrollment", async () => {
       const root = await temporaryRoot();
       const home = join(root, "home");
@@ -520,8 +626,286 @@ describe.skipIf(process.platform !== "darwin")(
         `${"p".repeat(43)}\n`,
       );
     });
+
+    it("archives a confirmed expired unactivated transaction without removing prepared data", async () => {
+      const f = await expiredEnrollmentFixture();
+      await expect(
+        inspectPendingMacUserEnrollment(f.layout, f.stopped),
+      ).resolves.toEqual({
+        replacement: "expired-unactivated",
+      });
+      await resetPendingMacUserEnrollment(f.layout, {
+        launchAgent: f.service,
+        confirmExpiredInstallation: f.expired,
+      });
+      expect(f.expired).toHaveBeenCalledWith(
+        f.state.installationId,
+        f.state.installationCredential,
+      );
+      await expect(lstat(f.transaction)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      const archives = (await readdir(f.layout.transactionRoot)).filter(
+        (name) => name.startsWith("expired-install-"),
+      );
+      expect(archives).toHaveLength(1);
+      const archive = join(f.layout.transactionRoot, archives[0]!);
+      expect((await lstat(archive)).mode & 0o777).toBe(0o700);
+      expect(
+        await readFile(join(archive, ".enrollment-state.json"), "utf8"),
+      ).toBe(JSON.stringify(f.state));
+      expect(
+        await readFile(join(archive, "enrollment.credential"), "utf8"),
+      ).toBe(`${"p".repeat(43)}\n`);
+      expect(
+        await readFile(
+          join(archive, "installation-artifacts", "fixture.wav"),
+          "utf8",
+        ),
+      ).toBe("fixture");
+      expect(
+        await readFile(join(f.layout.stateRoot, "qualification.json"), "utf8"),
+      ).toBe("retained PASS report");
+      expect(await readFile(f.outputPath, "utf8")).toBe(
+        "retained qualification output",
+      );
+      expect(await readFile(f.modelPath, "utf8")).toBe("model");
+      expect((await lstat(f.releaseRoot)).isDirectory()).toBe(true);
+    });
+
+    it.each(["reportRevision", "machineId", "credentialRevision"])(
+      "preserves activation-ambiguous state containing %s",
+      async (field) => {
+        const f = await expiredEnrollmentFixture();
+        await writeFile(
+          join(f.transaction, ".enrollment-state.json"),
+          JSON.stringify({
+            ...f.state,
+            [field]: field === "machineId" ? machineId : 1,
+          }),
+        );
+        await expect(
+          inspectPendingMacUserEnrollment(f.layout, f.stopped),
+        ).resolves.toEqual({ replacement: null });
+        await expect(
+          resetPendingMacUserEnrollment(f.layout, {
+            launchAgent: f.service,
+            confirmExpiredInstallation: f.expired,
+          }),
+        ).rejects.toThrow("cannot be safely excluded");
+        expect(f.expired).not.toHaveBeenCalled();
+        expect((await lstat(f.transaction)).isDirectory()).toBe(true);
+      },
+    );
+
+    it.each([
+      new WorkerEnrollmentError("WORKER_UNAUTHENTICATED", 401, false),
+      new WorkerEnrollmentError("WORKER_EXPIRED", 401, false),
+      new WorkerEnrollmentError("NETWORK_UNAVAILABLE", 0, true),
+      new Error("network unavailable"),
+    ])(
+      "preserves the transaction when expiry is not confirmed: %s",
+      async (error) => {
+        const f = await expiredEnrollmentFixture();
+        const confirm = vi.fn(async () => {
+          throw error;
+        });
+        await expect(
+          resetPendingMacUserEnrollment(f.layout, {
+            launchAgent: f.service,
+            confirmExpiredInstallation: confirm,
+          }),
+        ).rejects.toBe(error);
+        expect((await lstat(f.transaction)).isDirectory()).toBe(true);
+        expect(
+          (await readdir(f.layout.transactionRoot)).some((name) =>
+            name.startsWith("expired-install-"),
+          ),
+        ).toBe(false);
+      },
+    );
+
+    it("refuses a loaded service and a successful nonexpired backend response", async () => {
+      const f = await expiredEnrollmentFixture();
+      f.service.status.mockResolvedValue({ loaded: true, running: false });
+      await expect(
+        inspectPendingMacUserEnrollment(f.layout, {
+          loaded: true,
+          running: false,
+        }),
+      ).resolves.toEqual({ replacement: null });
+      await expect(
+        resetPendingMacUserEnrollment(f.layout, {
+          launchAgent: f.service,
+          confirmExpiredInstallation: f.expired,
+        }),
+      ).rejects.toThrow("Stop the worker");
+      expect(f.expired).not.toHaveBeenCalled();
+      f.service.status.mockResolvedValue(f.stopped);
+      await expect(
+        resetPendingMacUserEnrollment(f.layout, {
+          launchAgent: f.service,
+          confirmExpiredInstallation: async () => ({}),
+        }),
+      ).rejects.toThrow("has not expired");
+      expect((await lstat(f.transaction)).isDirectory()).toBe(true);
+    });
+
+    it.each([
+      "machine.json",
+      "finalization.json",
+      "unrecognized.json",
+      "symlink",
+      "config",
+      "credential",
+    ])("preserves unsafe or already installed state: %s", async (entry) => {
+      const f = await expiredEnrollmentFixture();
+      if (entry === "symlink")
+        await symlink(
+          f.modelPath,
+          join(f.transaction, "installation-artifacts", "linked.wav"),
+        );
+      else
+        await writeFile(
+          entry === "config"
+            ? f.layout.configPath
+            : entry === "credential"
+              ? f.layout.credentialPath
+              : join(f.transaction, entry),
+          "{}",
+          { mode: 0o600 },
+        );
+      await expect(
+        inspectPendingMacUserEnrollment(f.layout, f.stopped),
+      ).resolves.toEqual({ replacement: null });
+      await expect(
+        resetPendingMacUserEnrollment(f.layout, {
+          launchAgent: f.service,
+          confirmExpiredInstallation: f.expired,
+        }),
+      ).rejects.toThrow();
+      expect(f.expired).not.toHaveBeenCalled();
+      expect((await lstat(f.transaction)).isDirectory()).toBe(true);
+    });
+
+    it("rechecks transaction and service identity after expiry confirmation", async () => {
+      const f = await expiredEnrollmentFixture();
+      const confirm = async () => {
+        await writeFile(
+          join(f.transaction, ".enrollment-state.json"),
+          JSON.stringify({ ...f.state, workerId: randomUUID() }),
+        );
+        throw new WorkerEnrollmentError("WORKER_EXPIRED", 410, false);
+      };
+      await expect(
+        resetPendingMacUserEnrollment(f.layout, {
+          launchAgent: f.service,
+          confirmExpiredInstallation: confirm,
+        }),
+      ).rejects.toThrow();
+      expect((await lstat(f.transaction)).isDirectory()).toBe(true);
+      const next = await expiredEnrollmentFixture();
+      next.service.status
+        .mockResolvedValueOnce(next.stopped)
+        .mockResolvedValueOnce({ loaded: true, running: true });
+      await expect(
+        resetPendingMacUserEnrollment(next.layout, {
+          launchAgent: next.service,
+          confirmExpiredInstallation: next.expired,
+        }),
+      ).rejects.toThrow("changed during expiry confirmation");
+      expect((await lstat(next.transaction)).isDirectory()).toBe(true);
+    });
   },
 );
+
+async function expiredEnrollmentFixture() {
+  const root = await temporaryRoot();
+  const home = join(root, "home");
+  await mkdir(home, { mode: 0o700 });
+  const layout = createMacUserLayout(home);
+  await createMacUserDirectories(layout);
+  const transaction = join(layout.transactionRoot, "install");
+  const artifactRoot = join(transaction, "installation-artifacts");
+  await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
+  const releaseRoot = join(layout.releasesRoot, "app-fixture");
+  await mkdir(releaseRoot, { mode: 0o700 });
+  const modelPath = join(layout.modelRoot, "model.onnx");
+  const outputPath = join(layout.workRoot, "qualification-output.mp3");
+  await writeFile(modelPath, "model", { mode: 0o600 });
+  await writeFile(outputPath, "retained qualification output", { mode: 0o600 });
+  await writeFile(
+    join(layout.stateRoot, "qualification.json"),
+    "retained PASS report",
+    { mode: 0o600 },
+  );
+  await writeFile(join(artifactRoot, "fixture.wav"), "fixture", {
+    mode: 0o600,
+  });
+  const state = {
+    schemaVersion: 1,
+    exchangeRequestId: randomUUID(),
+    reportRequestId: randomUUID(),
+    activationRequestId: randomUUID(),
+    qualificationGrantRequestId: randomUUID(),
+    qualificationConfirmRequestId: randomUUID(),
+    installationId: randomUUID(),
+    installationCredential: "i".repeat(43),
+    machineCredential: "m".repeat(43),
+    workerId: randomUUID(),
+  };
+  await writeFile(
+    join(transaction, "enrollment.credential"),
+    `${"p".repeat(43)}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(transaction, ".enrollment-state.json"),
+    JSON.stringify(state),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(transaction, "machine.credential"),
+    `${state.machineCredential}\n`,
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(transaction, "installation-artifacts.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      installationId: state.installationId,
+      releaseVersion: "app-fixture",
+      release: { releaseRoot },
+      model: { path: modelPath, bytes: 5, sha256: "a".repeat(64) },
+      fixture: {
+        path: join(artifactRoot, "fixture.wav"),
+        sha256: "b".repeat(64),
+      },
+    }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    join(transaction, ".qualification-receipt.json"),
+    JSON.stringify({ installationId: state.installationId }),
+    { mode: 0o600 },
+  );
+  const stopped = { loaded: false, running: false };
+  const service = { status: vi.fn(async () => stopped) };
+  const expired = vi.fn(async () => {
+    throw new WorkerEnrollmentError("WORKER_EXPIRED", 410, false);
+  });
+  return {
+    layout,
+    transaction,
+    state,
+    stopped,
+    service,
+    expired,
+    releaseRoot,
+    modelPath,
+    outputPath,
+  };
+}
 
 describe.skipIf(process.platform !== "darwin")(
   "deleted machine registration cleanup",
@@ -907,6 +1291,167 @@ async function releaseFixture(root: string, version: string): Promise<void> {
     await writeFile(absolute, value);
   }
   await writeMacReleaseManifest(root, version);
+}
+
+async function qualificationRetryFixture() {
+  const root = await temporaryRoot();
+  const home = join(root, "home");
+  await mkdir(home, { mode: 0o700 });
+  const layout = createMacUserLayout(home);
+  const sourceRelease = join(root, "release");
+  await releaseFixture(sourceRelease, "0.1.0");
+  const modelPath = join(root, "model.onnx");
+  const fixturePath = join(root, "fixture.wav");
+  await writeFile(modelPath, "model", { mode: 0o600 });
+  await writeFile(fixturePath, "fixture", { mode: 0o600 });
+  const modelDigest = createHash("sha256").update("model").digest("hex");
+  const fixtureDigest = createHash("sha256").update("fixture").digest("hex");
+  const transaction = join(layout.transactionRoot, "install");
+  const statePath = join(transaction, ".enrollment-state.json");
+  const reportPath = join(layout.stateRoot, "qualification.json");
+  const outputPath = join(
+    layout.workRoot,
+    `qualification-${randomUUID()}`,
+    "vocals.mp3",
+  );
+  let installationId: string = randomUUID();
+  let releaseVersion = "0.1.0";
+  const seed = {
+    schemaVersion: 1,
+    installationId,
+    installationCredential: "i".repeat(43),
+    machineCredential: "m".repeat(43),
+    workerId,
+    exchangeRequestId: randomUUID(),
+    reportRequestId: randomUUID(),
+    activationRequestId: randomUUID(),
+    qualificationGrantRequestId: randomUUID(),
+    qualificationConfirmRequestId: randomUUID(),
+  };
+  const prepare = vi.fn(async (args: string[]) => {
+    const output = args[args.indexOf("--output") + 1]!;
+    await writeFile(
+      join(output, "installation-artifacts.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        installationId,
+        platform: "darwin-arm64",
+        releaseVersion,
+        release: { releaseRoot: sourceRelease },
+        model: { path: modelPath, bytes: 5, sha256: modelDigest },
+        fixture: { path: fixturePath, sha256: fixtureDigest },
+      }),
+      { mode: 0o600 },
+    );
+    try {
+      await lstat(statePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await writeFile(statePath, JSON.stringify(seed), { mode: 0o600 });
+    }
+  });
+  const qualify = vi.fn(async (_layout: MacUserLayout, releaseRoot: string) => {
+    await mkdir(dirname(outputPath), { recursive: true, mode: 0o700 });
+    await writeFile(outputPath, "qualified output", { mode: 0o600 });
+    const outputDigest = createHash("sha256")
+      .update("qualified output")
+      .digest("hex");
+    await writeFile(
+      reportPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        status: "PASS",
+        platform: "darwin-arm64",
+        provider: "mps",
+        gpuId: "gpu0",
+        directmlDeviceId: 0,
+        serviceIdentity: "tester",
+        releaseManifestDigest: createHash("sha256")
+          .update(await readFile(join(releaseRoot, "release-manifest.json")))
+          .digest("hex"),
+        modelDigest,
+        fixtureDigest,
+        providerDispatch: {
+          expectedProvider: "MPS",
+          profileCount: 0,
+          acceleratedNodeEvents: 2,
+          cpuNodeEvents: 0,
+          proven: true,
+        },
+        recipes: MAC_RECIPE_IDS.map((recipeId) => ({
+          recipeId,
+          recipeDigest: "c".repeat(64),
+          resultDigest: outputDigest,
+          resultBytes: 16,
+          sourceDurationSeconds: 6,
+          outputDurationSeconds: 6,
+          endToEndSeconds: 1,
+        })),
+        uploadCandidate: {
+          path: outputPath,
+          resultDigest: outputDigest,
+          resultBytes: 16,
+          contentType: "audio/mpeg",
+        },
+        totalSeconds: 2,
+      }),
+      { mode: 0o600 },
+    );
+    return reportPath;
+  });
+  const enroll = vi.fn(async (_args: string[]) => {
+    if (enroll.mock.calls.length === 1)
+      throw new Error("fixture enrollment unavailable");
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    await writeFile(
+      statePath,
+      JSON.stringify({ ...state, machineId, workerId }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(transaction, "machine.credential"),
+      `${"m".repeat(43)}\n`,
+      { mode: 0o600 },
+    );
+  });
+  let loaded = false;
+  const launchAgent = {
+    status: vi.fn(async () => ({ loaded, running: loaded })),
+    bootstrap: vi.fn(async () => {
+      loaded = true;
+    }),
+    bootout: vi.fn(async () => {
+      loaded = false;
+    }),
+  };
+  const options: MacUserInstallationOptions = {
+    layout,
+    uid: process.getuid!(),
+    label: "Retry Mac",
+    enrollmentCredential: "x".repeat(43),
+    prepare,
+    qualify,
+    enroll,
+    launchAgent,
+    inspectRuntime: async () => compatibleRuntime,
+  };
+  return {
+    options,
+    qualify,
+    enroll,
+    statePath,
+    reportPath,
+    outputPath,
+    fixturePath,
+    setInstallationId: (value: string) => {
+      installationId = value;
+    },
+    changeRelease: async () => {
+      releaseVersion = "0.1.1";
+      await rm(join(sourceRelease, "release-manifest.json"));
+      await writeMacReleaseManifest(sourceRelease, releaseVersion);
+    },
+  };
 }
 
 async function temporaryRoot(): Promise<string> {

@@ -14,14 +14,12 @@ Install JDK 17 and Android SDK platform 36. Configure `JAVA_HOME` and
 `ANDROID_HOME`, then open this `android/` folder in Android Studio or run:
 
 ```sh
-./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
-  :app:lintDirectDebug :app:lintPlayDebug \
-  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
+./gradlew :app:assemblePlayDebug :app:lintPlayDebug :app:testPlayDebugUnitTest
 ```
 
 The checked-in Gradle 8.13 wrapper verifies its distribution checksum. The APK is
-`app/build/outputs/apk/direct/debug/app-direct-debug.apk` for direct distribution
-and `app/build/outputs/apk/play/debug/app-play-debug.apk` for Play distribution.
+`app/build/outputs/apk/play/debug/app-play-debug.apk`. Production distribution
+uses the Play release App Bundle.
 Reports are in `app/build/reports/`.
 Machine-specific configuration and build output are ignored.
 
@@ -30,6 +28,21 @@ Home, Library, Player and Settings share the same foreground connection; history
 subscriptions survive tab switches. Reselecting the active tab does not navigate
 or refresh. Backgrounding the Activity or signing out closes the connection.
 Rejected sessions stay stopped until a new session is bound.
+
+The native link-import UI starts hidden and follows `link_import_visible` from
+`GET /processing-policy?schema_version=2` on each foreground/session open, followed
+by the existing owner `policy` snapshots on the same socket. Signed-in checkout
+uses the account token so global, country and selected-user hiding share the same
+resolved visibility. Guest and per-owner payloads are cached separately in
+installation-private no-backup storage for offline reopen. Switching accounts
+restores only the matching cache; an uncached owner starts hidden. Missing
+fields remain compatible with older media-limit responses and mean hidden. Home
+keeps its file picker; link selection, paste/submit, rights confirmation, and the
+launcher link shortcut are presented only when visible. Signed-out opens use the
+public guest checkout; the policy socket remains authenticated. Android disables the
+previous static shortcut on upgrade; a user-pinned copy can only be removed by
+that user. Visibility changes do not
+cancel work or restrict history, retries, uploads, downloads, or API calls.
 
 The production `app/google-services.json` is also local-only and ignored. Download
 it before Debug or Release builds using the repository-root Firebase command in
@@ -76,9 +89,9 @@ registered before its Debug APK can use Google sign-in.
 
 `node android/e2e/server.mjs` starts disposable MongoDB, Redis, Firebase Auth
 Emulator, and the compiled backend, then prints the owned ports. Build with
-`./gradlew :app:assembleDirectAuthE2e`, forward device ports `48080` and `49099` to the
+`./gradlew :app:assemblePlayAuthE2e`, forward device ports `48080` and `49099` to the
 printed API and Auth Emulator ports, and install
-`app/build/outputs/apk/direct/authE2e/app-direct-authE2e.apk` on the connected device. The separate
+`app/build/outputs/apk/play/authE2e/app-play-authE2e.apk` on the connected device. The separate
 `com.hatem.musicmute.authtest` package preserves the normal app's data.
 
 This variant uses only the `demo-musicmute` project and a picker for two synthetic
@@ -101,11 +114,10 @@ directory. Its `storeFile=upload-keystore.jks` path is resolved relative to the
 be backed up securely together. Do not regenerate this key for routine builds.
 
 ```sh
-./gradlew :app:assembleDirectRelease :app:bundlePlayRelease
+./gradlew :app:bundlePlayRelease
 ```
 
-Outputs: `app/build/outputs/apk/direct/release/app-direct-release.apk` and
-`app/build/outputs/bundle/playRelease/app-play-release.aab`. Missing signing credentials
+Output: `app/build/outputs/bundle/playRelease/app-play-release.aab`. Missing signing credentials
 cause release signing validation to fail; releases do not use the debug key.
 Debug builds continue to use the normal Android debug certificate.
 
@@ -128,29 +140,34 @@ simulator or device for runtime proof.
 
 ## App updates
 
-Android has separate `direct` and `play` distribution variants with the same
-production application ID and signing configuration. Version `0.1.13` is build 14.
-The direct variant uses the built-in version dialog, download service, progress
-callbacks, FileProvider and installer-intent helper from
-[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).
-`AppUpdateDownloadClient` supplies the backend version/changelog and required
-update decision. Its `AppUpdateHttpManager` adapter retains the bounded platform
-HTTPS stream with default certificate/host verification and rejects redirects;
-the library's default HTTP implementation is never selected. Verification runs
-off the main thread and must succeed before the library receives `Done`, because
-the library can expose a completed APK in a notification even when progress
-notifications are disabled. Automatic library installation is disabled.
-Before Android's installer is opened, MusicMute obtains a fresh public download
-grant and independently verifies the complete APK size and SHA-256, package ID,
-higher build number, and signing-certificate SHA-256. The
-`REQUEST_INSTALL_PACKAGES` permission and narrowly scoped azhon provider exist
-only in the direct variant; the service and dialog activity are non-exported.
-The Activity-bound adapter releases the library singleton/listeners when an
-attempt ends, and retries obtain a new grant. The Compose gate still blocks
-required updates and handles localized errors, permission recovery, and optional
-download progress after the library dismisses its dialog. The Play variant has no self-install permission or
-direct APK dependency; its current safe fallback opens the verified MusicMute
-Play listing.
+Android uses the `play` distribution flavor. The dashboard records the version
+name and version code already available to the intended audience in Play Console;
+it never uploads an Android app file. The app installs updates with Google Play
+In-App Updates. Required updates use the immediate Play flow and accept any
+Play-offered version code meeting `minimumBuild`. Optional updates require the
+selected latest target and use the flexible flow when available, with immediate
+as the fallback. For installed build 10, minimum 12, target 15, Play-offered build
+14 is sufficient to run the required update. Admission stays blocked until the
+actual installed build changes; build 14 then has only an optional update to 15.
+
+The Activity owns the update launcher binding and releases it and the install
+listener when destroyed. Policy changes update pending Play checks before a flow
+starts, so a superseded optional decision cannot install below a newer required
+minimum. Foreground recovery resumes interrupted immediate flows and restores
+flexible download progress. A qualified downloaded update retains **Restart to
+update** across optional deferral and transient Play-check, completion, or store
+launch failures. A higher minimum or optional target invalidates an older
+ineligible download. MusicMute does not restart playback or install before the
+restart action. Unavailable updates offer a
+retry and **Open Google Play** at the validated package listing. There is no APK
+download, self-install permission, or direct distribution variant.
+
+For Google Play submission, follow [the release guide](../docs/google-play-release.md)
+and [the English/Arabic listing pack](play-listing/README.md). After building, run
+`JAVA_HOME=$(/usr/libexec/java_home -v 17) python3 scripts/check-play-release.py`
+from this directory. This establishes local bundle packaging only. Live production
+checks, Play Console declarations, and Play-installed device checks require their
+separate authorized release workflow.
 
 The app checks policy at launch, after reconnect, when a foreground check is due,
 and every 15 minutes while foregrounded. Optional updates can be deferred for 24
@@ -159,12 +176,12 @@ UI, back navigation, playback, imports, local downloads/uploads, and notificatio
 actions. Local inputs and cloud job IDs are retained; activating the gate never
 cancels or deletes an existing cloud job.
 
-The public backend policy and download-grant routes require the production
-runtime flag `APP_UPDATES_ENABLED=true`; changing the example file alone does not
-change a running deployment. Build 2 predates this in-app updater, so it cannot be
-retrofitted with the dialog. Build 4 is the reviewed bootstrap distributed
-through the existing update page; subsequent higher builds can then use the
-in-app prompt and verified download flow.
+The public backend policy route requires the production runtime flag
+`APP_UPDATES_ENABLED=true`; changing an example file does not change a running
+deployment. Raise the minimum only after the required Play build is available to
+every affected audience. Play account ownership, package/signing identity, and a
+higher version code must be verified with a real Play-installed app before release
+readiness is claimed. Local JVM and bundle checks do not establish those gates.
 
 ## Link acquisition
 
@@ -172,6 +189,20 @@ URL imports use `POST /media-imports`. A private SaaS adapter returns audio to
 NestJS for validation, temporary-file cleanup and private R2 upload. Android
 receives neither vendor credentials nor delivery URLs. See
 [provider architecture](../video_providers/README.md).
+
+Library songs, the full player, mini player and playback queue accept the nullable
+`thumbnail_url` returned with the normal job HTTP and realtime snapshots. Its
+original public YouTube image URL is retained in the existing account-scoped
+local catalog; no metadata lookup or guessed image URL is added. These rounded
+artwork cards share the bounded public-image
+transport and small memory cache. The player keeps its existing note artwork
+while loading or when a thumbnail is unavailable; Library rows keep their note
+icon and availability badge. Live metadata is matched by owner and job, so a song
+change clears the previous artwork and later thumbnail updates remain visible.
+Missing, invalid, offline, expired or undecodable thumbnails retain each surface's
+existing placeholder. Only reviewed HTTPS `i.ytimg.com` JPEG/WebP paths and bounded
+`sqp`/`rs` parameters are accepted; image requests carry no MusicMute authentication or
+installation headers. Thumbnail availability does not affect audio playback.
 
 ## App behavior
 
@@ -347,7 +378,7 @@ removed from the title. Native AAC conversion uses the decoder's actual PCM samp
 rate (including Opus sources that declare 24 kHz but decode at 48 kHz).
 
 An opt-in device regression runner is available in `src/androidTest`. Build with
-`:app:assembleDirectDebugAndroidTest` and pass `-e sourceUri <granted-uri>` to
+`:app:assemblePlayDebugAndroidTest` and pass `-e sourceUri <granted-uri>` to
 `com.hatem.musicmute.test/com.hatem.musicmute.processing.MediaPreparationTestRunner`.
 It checks audio-only output, standard limits, and preserved duration, then removes
 its own temporary output. It does not submit a processing job or run a benchmark.
@@ -470,24 +501,33 @@ integration, not a guarantee of a custom island on every Android phone. Android'
 do not accept MediaStyle or custom RemoteViews, so playback does not request
 promoted Live Updates. Processing notifications remain separate.
 
-Playback and direct-update notifications use separate channels with launcher
-badges disabled. Their new channel IDs avoid library defaults already saved with
-badges enabled, while carrying forward legacy importance, sound, vibration, light,
-lock-screen and group preferences. The direct updater also clears its library's
-completion notification before the app's verified installer handoff. Actual
-processing outcomes retain their existing alert channel and badge preferences.
+Playback notifications use a channel with launcher badges disabled. The channel
+ID avoids the library default already saved with badges enabled, while carrying
+forward legacy importance, sound, vibration, light, lock-screen and group
+preferences. Google Play owns update delivery; MusicMute has no update-download
+notification channel. Processing outcomes retain their existing alert channel
+and badge preferences.
 The opt-in instrumentation runner accepts `-e check notificationBadges` to check
 the saved channel policy; OEM launcher behavior still needs an explicitly
 authorized Android device.
 
-Local checks: `:app:testDirectDebugUnitTest`, `:app:lintDirectDebug`,
-`:app:assembleDirectDebug` and `:app:compileDirectDebugAndroidTestKotlin`.
+Local checks: `:app:testPlayDebugUnitTest`, `:app:lintPlayDebug`,
+`:app:assemblePlayDebug` and `:app:compilePlayDebugAndroidTestKotlin`.
 The existing opt-in instrumentation runner also accepts `-e check playbackCard`
 to verify metadata, bitmap decoding and distinct tap PendingIntents. That check
 requires an explicitly authorized Android device; compiling it does not execute
 it. OEM island appearance and cold/warm tap navigation need device validation.
 
 ## Playback queue editing
+
+Library's **Show starred** checkbox combines with search and every tab. **Most
+played** shows listened tracks ranked by their play counts; other tabs also offer
+that sort. Stars and listening counts stay in this device's account-scoped,
+no-backup Library metadata and are never sent to the API. A successful selected
+track/queue start and each repeat or range-loop restart add one play. Preparation,
+failed starts, pause/resume, ordinary seeks, and original/voice comparison do not.
+Older Library records start with zero plays, and snapshot refreshes preserve
+local counts. Playback still follows the currently displayed Library order.
 
 The Up next screen supports long-press drag handles with edge scrolling and
 per-track Play next, Move up, Move down and Remove actions. Move actions also
@@ -519,8 +559,9 @@ The [plan](tasks/listening-features/PLAN.md),
   `audio/*` content URIs are copied into bounded owner-private storage and enter
   the existing review/rights-confirmation flow. They never auto-submit to cloud.
 - MediaLibraryService exposes completed, visible, current-account tracks for
-  Android Auto browsing/search and Android system resumption. External media IDs
-  are resolved against the account library; external URIs are never played.
+  Android system media clients and resumption. The current source does not
+  advertise Android Auto. External media IDs are resolved against the account
+  library; external URIs are never played.
   Authentication/update restoration is awaited before returning resume media.
   Initial restoration alone does not prepare, download or autoplay the queue.
 - Player displays cached real waveform peaks for the selected original/voice
@@ -545,5 +586,52 @@ The [plan](tasks/listening-features/PLAN.md),
   Unsupported PCM encodings or decoder failures show retryable UI feedback.
 
 No overlays, accessibility-service permission, new runtime permissions or new
-package dependencies were added. Widgets/Auto/system resumption are controlled by
+package dependencies were added. Widgets and system resumption are controlled by
 Android and its host; device/host testing remains required before release.
+
+## Private local diagnostics
+
+The shared account/jobs/update/push HTTP client, raw WebSocket, file transfers,
+installation/processing stores and process lifecycle have opt-in structured
+[Vector/Logdy diagnostics](../tools/local-logging/README.md). `BuildConfig.DEBUG`
+is a mandatory gate; release builds ignore all local logging settings. No key is
+compiled into an APK. Normal production error monitoring remains separate.
+
+After installing a Debug build and starting the root collector, an explicitly
+authorized Android target can be configured from the repository root with:
+
+```sh
+python3 android/scripts/configure-local-logging.py --serial <explicit-adb-serial> --reverse
+```
+
+This helper reads private `keys.android` from `.runtime/local-logging/keys.json`
+and writes `files/local-logging.json` through `adb run-as` and stdin, with mode 0600.
+It never prints the key, installs/restarts apps or selects a device automatically.
+Close/reopen the app manually to read changed settings. `--no-payloads`,
+`--console`, `--disable`, and `--package com.hatem.musicmute.authtest` are separate
+controls. Endpoint validation accepts only
+`http://127.0.0.1:19740/ingest/android`; `--reverse` explicitly forwards that device
+loopback port to the Mac. The repository's current device-testing authorization
+permits only the named iOS simulator, so no Android device/UI verification was
+performed for this integration.
+
+The private JSON settings contain `enabled`, `payloads`, `console`, `endpoint`
+and `key`. The helper enables collector/payload capture and leaves console off
+unless requested. Release cannot activate this collector even with that file.
+HTTP debug UUID request IDs correlate with valid backend response IDs; immutable
+coroutine context captures the initiating UID and operation trace across dispatch,
+awaits and auth retries. A random process instance scopes local socket IDs.
+Realtime send records indicate client-transport acceptance only; reception and
+application processing are separate records. File transfers capture metadata and
+omit binary streams and signed URLs. Storage hooks observe existing accesses.
+
+Records are redacted before queue, console or network output; JSON/base64-JSON,
+credential keys, bearer/JWT/private-key patterns, signed URL queries and connection
+strings are covered. Payloads are limited to 16 KiB, events to 32 KiB, with bounded
+strings/arrays/depth and explicit omissions. Arbitrary error messages/stacks are
+omitted. The sender holds at most 128 pending events plus one active request and
+prefers warnings/errors during pressure. Failed attempts are counted/discarded,
+with no retry spool. `LocalDiagnostics.status()` and event `collector` metadata
+expose pending/sent/failed/dropped counters. Uncaught errors are best-effort and
+forward to Android's existing handler; process death may precede delivery. Root
+retention, viewer and read-only MCP privacy/limitations apply.

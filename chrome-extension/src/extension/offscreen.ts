@@ -1,3 +1,4 @@
+import "./local-debug";
 import { isExtensionMessage, type ExtensionMessage } from "./messages";
 import { ClockSynchronizer, STALE_CLOCK_MS } from "./sync";
 import { emitDiagnostic, installErrorCapture } from "./diagnostics";
@@ -236,6 +237,7 @@ async function follow(
     emitDiagnostic("playback_drift", undefined, {
       drift_ms: Math.round(decision.drift * 1000),
       playing: true,
+      generation,
     });
   }
   if (!element.paused || playPending) return;
@@ -272,7 +274,9 @@ async function follow(
 setInterval(() => {
   if (audio && requestedPlaying && Date.now() - lastClockAt > STALE_CLOCK_MS) {
     pausePlayback(audio);
-    emitDiagnostic("playback_suspended", "PLAYBACK_CLOCK_STALE");
+    emitDiagnostic("playback_suspended", "PLAYBACK_CLOCK_STALE", {
+      generation,
+    });
   }
 }, 250);
 

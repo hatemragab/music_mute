@@ -1,5 +1,6 @@
 package com.hatem.musicmute.processing
 
+import com.hatem.musicmute.diagnostics.LocalDiagnostics
 import com.hatem.musicmute.auth.ApiWireJson
 import com.hatem.musicmute.auth.AuthApiClient
 import com.hatem.musicmute.auth.AuthFailure
@@ -46,6 +47,7 @@ class RealtimeClient(
         subscriptions.values.forEach { it.emit(Result.failure(JobsFailure(JobsProblem.UNAUTHENTICATED))) }
         subscriptions.clear()
         owner = value
+        LocalDiagnostics.emit("realtime.owner_changed", "realtime", data = mapOf("authenticated" to (value != null), "epoch" to value?.epoch), userId = value?.uid)
         sessionRejected = false
         attempt = 0
         resume()
@@ -53,6 +55,7 @@ class RealtimeClient(
 
     fun setForeground(value: Boolean) {
         foreground = value
+        LocalDiagnostics.emit("lifecycle.foreground", "lifecycle", data = mapOf("foreground" to value), userId = owner?.uid)
         if (!value) { disconnect(); mutableState.value = if (sessionRejected) RealtimeState.SIGNED_OUT else RealtimeState.PAUSED } else resume()
     }
 
@@ -81,6 +84,7 @@ class RealtimeClient(
         if (!foreground || owner == null || sessionRejected || socket != null || connecting?.isActive == true || retry?.isActive == true) return
         val epoch = ++generation
         val session = owner
+        LocalDiagnostics.emit("realtime.connecting", "realtime", data = mapOf("generation" to epoch, "attempt" to attempt), userId = session?.uid)
         mutableState.value = if (attempt == 0) RealtimeState.CONNECTING else RealtimeState.RECONNECTING
         connecting = scope.launch {
             try {
@@ -93,10 +97,10 @@ class RealtimeClient(
                 val request = Request.Builder().url(auth.configuration.apiRoot() + "/realtime/socket")
                     .header("Sec-WebSocket-Protocol", "musicmute.realtime.v1, ticket.$ticket").build()
                 socket = openSocket(request, object : WebSocketListener() {
-                    override fun onMessage(webSocket: WebSocket, text: String) { scope.launch { if (epoch == generation) message(text) } }
+                    override fun onMessage(webSocket: WebSocket, text: String) { scope.launch { if (epoch == generation) { LocalDiagnostics.emit("realtime.received", "realtime", data = mapOf("generation" to epoch, "phase" to "client_received", "frame" to LocalDiagnostics.payload(text)), userId = session?.uid); message(text) } } }
                     override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) { scope.launch { if (epoch == generation) reconnect() } }
-                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, null); scope.launch { if (epoch == generation) reconnect() } }
-                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { scope.launch { if (epoch == generation) reconnect() } }
+                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { LocalDiagnostics.emit("realtime.closing", "realtime", data = mapOf("generation" to epoch, "code" to code), userId = session?.uid); webSocket.close(code, null); scope.launch { if (epoch == generation) reconnect() } }
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { LocalDiagnostics.emit("realtime.failed", "realtime", "warn", mapOf("generation" to epoch, "status" to response?.code, "error" to LocalDiagnostics.error(t)), userId = session?.uid); scope.launch { if (epoch == generation) reconnect() } }
                 })
                 armWatchdog(10_000)
             } catch (error: CancellationException) { throw error }
@@ -119,6 +123,7 @@ class RealtimeClient(
                 "ready" -> {
                     require(frame["protocol_version"]?.jsonPrimitive?.int == 1)
                     stream = frame.getValue("stream_id").jsonPrimitive.content
+                    LocalDiagnostics.emit("realtime.ready", "realtime", data = mapOf("streamId" to stream, "generation" to generation, "phase" to "protocol_ready"), userId = owner?.uid)
                     attempt = 0
                     armWatchdog(65_000)
                     subscriptions.values.forEach(::subscribe)
@@ -141,6 +146,7 @@ class RealtimeClient(
                     snapshotDeadlines.remove(entry.id)?.cancel()
                     entry.sequence = sequence
                     entry.emit(Result.success(ApiWireJson.response(frame.getValue("data").toString())))
+                    LocalDiagnostics.emit("realtime.snapshot_processed", "realtime", data = mapOf("streamId" to stream, "subscriptionId" to entry.id, "resource" to entry.resource, "sequence" to sequence, "phase" to "application_processed"), userId = owner?.uid)
                     if (subscriptions.values.all { it.sequence > 0 }) mutableState.value = RealtimeState.LIVE
                 }
             }
@@ -153,14 +159,20 @@ class RealtimeClient(
         snapshotDeadlines[entry.id] = scope.launch { delay(15_000); reconnect() }
         send(buildJsonObject { put("type", "subscribe"); put("subscription_id", entry.id); put("resource", entry.resource); put("params", buildJsonObject { entry.params.forEach { (key, value) -> put(key, value) } }) })
     }
-    private fun send(frame: JsonObject) { if (socket?.send(frame.toString()) == false) reconnect() }
+    private fun send(frame: JsonObject) {
+        val accepted = socket?.send(frame.toString())
+        if (accepted != null) LocalDiagnostics.emit("realtime.send", "realtime", if (accepted) "info" else "warn", mapOf("generation" to generation, "phase" to "client_transport_accepted", "result" to if (accepted) "accepted" else "rejected", "frame" to LocalDiagnostics.payload(frame.toString())), userId = owner?.uid)
+        if (accepted == false) reconnect()
+    }
     private fun armWatchdog(milliseconds: Long) { watchdog?.cancel(); watchdog = scope.launch { delay(milliseconds); reconnect() } }
     private fun reconnect() {
+        LocalDiagnostics.emit("realtime.retry", "realtime", "warn", mapOf("generation" to generation, "attempt" to attempt), userId = owner?.uid)
         disconnect()
         mutableState.value = RealtimeState.RECONNECTING
         retry = scope.launch { delay((1000L shl attempt++.coerceAtMost(5)).coerceAtMost(30_000) + Random.nextLong(250)); retry = null; resume() }
     }
     private fun disconnect() {
+        if (socket != null) LocalDiagnostics.emit("realtime.disconnected", "realtime", data = mapOf("generation" to generation), userId = owner?.uid)
         generation++
         connecting?.cancel(); connecting = null
         watchdog?.cancel(); watchdog = null

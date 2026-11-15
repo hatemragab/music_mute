@@ -15,6 +15,7 @@ import { privateDirectory } from "./app-setup.js";
 import { withCacheMutation } from "./cache-mutator.js";
 import type { LocalLibraryOwner } from "./sync-outbox.js";
 import { isVideoId, sanitizeSourceTitle } from "../shared/protocol.js";
+import { publicThumbnailUrl } from "../shared/thumbnail-url.js";
 
 const HASH = /^[0-9a-f]{64}$/;
 const UUID =
@@ -28,6 +29,7 @@ export interface DesktopCatalogEntry {
   cache_key: string;
   operation_id: string;
   source_title?: string;
+  thumbnail_url?: string | null;
   video_id?: string;
   source_kind: "file" | "url";
   vocal_path: string;
@@ -56,6 +58,7 @@ interface Manifest {
 }
 interface CachedAudio {
   source_title?: string;
+  thumbnail_url?: string | null;
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -88,6 +91,7 @@ function validEntry(value: unknown): value is StoredEntry {
           "cache_key",
           "operation_id",
           "source_title",
+          "thumbnail_url",
           "video_id",
           "source_kind",
           "duration_seconds",
@@ -112,6 +116,8 @@ function validEntry(value: unknown): value is StoredEntry {
         value.source_title.length <= 300 &&
         !/\p{Cc}/u.test(value.source_title))) &&
     (value.video_id === undefined || isVideoId(value.video_id)) &&
+    (value.thumbnail_url == null ||
+      publicThumbnailUrl(value.thumbnail_url) !== null) &&
     (value.source_kind === "file" || value.source_kind === "url") &&
     (value.source_kind !== "file" || value.video_id === undefined) &&
     typeof value.duration_seconds === "number" &&
@@ -247,6 +253,12 @@ export class DesktopCatalog {
       } finally {
         await handle.close();
       }
+      if (object(value) && Array.isArray(value.entries)) {
+        for (const entry of value.entries) {
+          if (object(entry) && entry.thumbnail_url !== undefined)
+            entry.thumbnail_url = publicThumbnailUrl(entry.thumbnail_url);
+        }
+      }
       if (
         !object(value) ||
         Object.keys(value).some(
@@ -379,7 +391,12 @@ export class DesktopCatalog {
           digest.digest("hex") === entry.sha256;
         if (!valid) return null;
         const title = sanitizeSourceTitle(raw.source_title);
-        return title ? { source_title: title } : {};
+        return {
+          ...(title ? { source_title: title } : {}),
+          ...(raw.thumbnail_url === undefined
+            ? {}
+            : { thumbnail_url: publicThumbnailUrl(raw.thumbnail_url) }),
+        };
       } finally {
         await handle.close();
       }
@@ -407,6 +424,13 @@ export class DesktopCatalog {
         entry.source_title = cached.source_title;
         changed = true;
       }
+      if (
+        entry.thumbnail_url === undefined &&
+        cached.thumbnail_url !== undefined
+      ) {
+        entry.thumbnail_url = cached.thumbnail_url;
+        changed = true;
+      }
       retained.push(entry);
     }
     if (!changed) return false;
@@ -419,7 +443,12 @@ export class DesktopCatalog {
     input: DesktopCatalogEntry,
   ): Promise<DesktopCatalogItem> {
     const uid = captureOwner(owner);
-    input = { ...input };
+    input = {
+      ...input,
+      ...(input.thumbnail_url === undefined
+        ? {}
+        : { thumbnail_url: publicThumbnailUrl(input.thumbnail_url) }),
+    };
     const { vocal_path, ...declaration } = input;
     const timestamp = Date.now();
     const entry: StoredEntry = {
@@ -455,6 +484,11 @@ export class DesktopCatalog {
           existing.source_title !== undefined
         )
           entry.source_title = existing.source_title;
+        if (
+          entry.thumbnail_url === undefined &&
+          existing.thumbnail_url !== undefined
+        )
+          entry.thumbnail_url = existing.thumbnail_url;
         manifest.entries = manifest.entries.filter(
           (item) => item.cache_key !== entry.cache_key,
         );

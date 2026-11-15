@@ -77,13 +77,18 @@ flowchart LR
     Web -->|Signed transfers| R2
 ```
 
-| Component       | Technology                             | Setup and details                   |
-| --------------- | -------------------------------------- | ----------------------------------- |
-| Android app     | Kotlin, Jetpack Compose                | [android/](android/README.md)       |
-| iOS app         | Swift, SwiftUI                         | [ios/](ios/README.md)               |
-| Web client      | React, TypeScript, Vite                | [web-client/](web-client/README.md) |
-| API             | NestJS, TypeScript, MongoDB, Redis, R2 | [backend/](backend/README.md)       |
-| Admin dashboard | React, TypeScript, Vite, Tailwind CSS  | [dashboard/](dashboard/README.md)   |
+| Component              | Technology                                      | Setup and details                                           |
+| ---------------------- | ----------------------------------------------- | ----------------------------------------------------------- |
+| Android app            | Kotlin, Jetpack Compose                         | [android/](android/README.md)                               |
+| iOS app                | Swift, SwiftUI                                  | [ios/](ios/README.md)                                       |
+| Web client             | React, TypeScript, Vite                         | [web-client/](web-client/README.md)                         |
+| API                    | NestJS, TypeScript, MongoDB, Redis, R2          | [backend/](backend/README.md)                               |
+| Admin dashboard        | React, TypeScript, Vite, Tailwind CSS           | [dashboard/](dashboard/README.md)                           |
+| Windows desktop source | Electron, React, TypeScript; native x64 helpers | [Windows source and code checks](windows-desktop/README.md) |
+
+The Windows desktop implementation targets Windows 10 22H2 and Windows 11 x64.
+Its source/code checks and [implementation tasks](docs/windows-desktop/README.md)
+are separate from connected Windows, GPU, installer and release acceptance.
 
 ## Getting started
 
@@ -247,9 +252,8 @@ With JDK 17 and Android SDK 36 configured:
 
 ```sh
 cd android
-./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
-  :app:lintDirectDebug :app:lintPlayDebug \
-  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
+./gradlew :app:assemblePlayDebug :app:lintPlayDebug \
+  :app:testPlayDebugUnitTest
 ```
 
 ## Validate iOS
@@ -314,3 +318,11 @@ secondary download flow and does not grant rights to download or process content
 This repository does not currently include a root license file. The backend
 package is marked `UNLICENSED`; this README does not grant additional permissions.
 Third-party libraries and models retain their respective licenses.
+
+## Local development logging
+
+The opt-in [Vector, Logdy and read-only logs MCP guide](docs/local-logging/README.md)
+collects debug diagnostics across the API, browser/native apps, extension, worker
+and acquisition adapters into a private local JSONL capture. Start with
+`node tools/local-logging/cli.mjs up`, then use the documented full-debug launchers.
+See [verified source coverage and limits](docs/local-logging/VERIFICATION.md).

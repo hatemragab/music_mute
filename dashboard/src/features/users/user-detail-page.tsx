@@ -28,6 +28,7 @@ import { AccountRestrictionExpiryField } from "./account-restriction-expiry-fiel
 import { restrictionExpiry } from "./processing-access-validation";
 import { ProcessingUsageSection } from "./processing-usage-panel";
 import { WorkerRegistrationSection } from "./worker-registration-section";
+import { UserDevicesSection } from "./user-devices-section";
 import {
   getAccountRestriction,
   getUser,
@@ -223,6 +224,7 @@ export function UserDetailPage() {
           </CardContent>
         </Card>
       </div>
+      <UserDevicesSection userId={id} />
       <WorkerRegistrationSection
         key={`worker-registration-${id}`}
         data={data}

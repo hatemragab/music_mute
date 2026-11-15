@@ -5,7 +5,8 @@ import react from "@vitejs/plugin-react";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  define: { __MUSICMUTE_LOCAL_DEBUG__: JSON.stringify(command === "serve") },
   plugins: [react()],
   build: {
     rollupOptions: {
@@ -25,4 +26,4 @@ export default defineConfig({
     port: 4178,
     strictPort: true,
   },
-});
+}));

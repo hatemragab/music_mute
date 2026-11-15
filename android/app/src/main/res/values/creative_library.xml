@@ -12,6 +12,8 @@
     <string name="creative_library_search">Search your audio</string>
     <string name="creative_library_all">All</string>
     <string name="creative_library_starred">Starred</string>
+    <string name="creative_library_show_starred">Show starred</string>
+    <string name="creative_library_most_played">Most played</string>
     <string name="creative_library_downloaded">Downloaded</string>
     <string name="creative_library_not_downloaded">Not downloaded</string>
     <string name="creative_library_removed">Removed</string>

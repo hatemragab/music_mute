@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MusicMute private audio acquisition router
-  version: 1.1.0
+  version: 1.2.0
   x-audience: component-internal
   description: >-
     Provider-neutral binary router. Selects one operator-configured private
@@ -84,7 +84,7 @@ paths:
             Cache-Control:
               schema: { type: string, const: no-store }
             X-Import-Extra-Data-Base64:
-              description: Optional sanitized schema-version-1 JSON metadata, base64 UTF-8, at most 4096 ASCII characters. Unknown fields, secrets and URLs removed. Invalid/absent metadata is nonfatal. Never trusted for size/duration admission.
+              description: Optional sanitized schema-version-1 JSON metadata, base64 UTF-8, at most 4096 ASCII characters. Optional thumbnail_url is preserved only for bounded HTTPS i.ytimg.com /vi/ or /vi_webp/ image URLs with an 11-character video ID and optional sqp/rs parameters. Unknown fields, secrets and every other URL are removed. No thumbnail fetching or enrichment request. Invalid/absent metadata is nonfatal. Never trusted for size/duration admission.
               schema: { type: string, maxLength: 4096 }
           content:
             application/octet-stream:

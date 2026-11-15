@@ -25,7 +25,8 @@
     <string name="creative_settings_web">MusicMute on the web</string>
     <string name="creative_settings_web_description">Open the full MusicMute app in your browser.</string>
     <string name="creative_settings_macos">MusicMute for macOS</string>
-    <string name="creative_settings_macos_description">Check the MusicMute Downloads page for future macOS availability.</string>
+    <string name="creative_settings_macos_description">macOS downloads are coming soon.</string>
+    <string name="creative_settings_coming_soon">Coming soon</string>
     <string name="creative_settings_presets">Preset colors</string>
     <string name="creative_settings_custom">Custom color</string>
     <string name="creative_settings_hex">Hex color</string>

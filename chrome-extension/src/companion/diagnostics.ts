@@ -1,3 +1,10 @@
+import { localDiagnostics } from "./local-debug.js";
+import { CLOUD_REPLY_VALIDATION_REASONS } from "./account-api.js";
+import {
+  DIAGNOSTIC_ALERT_CODES,
+  FILESYSTEM_ERRNOS,
+  isKnownDiagnosticCode,
+} from "../shared/diagnostic-codes.js";
 import { randomUUID } from "node:crypto";
 import {
   constants,
@@ -142,18 +149,21 @@ export const LOCAL_JOB_PHASES = [
   "playback",
 ] as const;
 export type LocalJobPhase = (typeof LOCAL_JOB_PHASES)[number];
-export const FILESYSTEM_ERRNOS = [
-  "ENOENT",
-  "EACCES",
-  "EPERM",
-  "ENOSPC",
-  "EDQUOT",
-  "EROFS",
-  "EMFILE",
-  "ENFILE",
-  "EIO",
+export { FILESYSTEM_ERRNOS } from "../shared/diagnostic-codes.js";
+export const DESKTOP_WARNING_STAGES = [
+  "account_owner_link",
+  "account_cache_restore",
+  "account_cache_restore_complete",
+  "account_youtube_reuse",
+  "account_file_reuse",
+  "account_shared_lookup",
+  "local_file_pair_recovery",
+  "local_file_pair_staging",
+  "local_url_capture_staging",
 ] as const;
+export type DesktopWarningStage = (typeof DESKTOP_WARNING_STAGES)[number];
 const STAGES = new Set([
+  ...DESKTOP_WARNING_STAGES,
   "player_rebound",
   "session_recovered",
   "native_io",
@@ -206,8 +216,6 @@ const STAGES = new Set([
   "output-ready",
   "cache-lookup",
   "cache-validation",
-  "account_cache_restore",
-  "account_cache_restore_complete",
   "media-grant",
   // Qualified immutable pipeline timing keys. Never accept arbitrary prefixes.
   "total",
@@ -226,6 +234,7 @@ const STAGES = new Set([
   "separator_separationCleanup",
 ]);
 const STRING_METRICS: Record<string, Set<string>> = {
+  validation_reason: new Set(CLOUD_REPLY_VALIDATION_REASONS),
   exception_kind: new Set([
     "Error",
     "TypeError",
@@ -281,219 +290,8 @@ const STRING_METRICS: Record<string, Set<string>> = {
     "kim-vocals-v2",
   ]),
 };
-const ALERT_CODES = new Set([
-  "PLAYBACK_DRIFT_SUSTAINED",
-  "JOB_STALLED",
-  "JOB_LONG_RUNNING",
-  "RESOURCE_RSS_GROWTH",
-  "RESOURCE_COUNT_HIGH",
-  "CLOCK_ADJUSTED",
-  "DIAGNOSTICS_UNAVAILABLE",
-  "DIAGNOSTIC_HISTORY_RECOVERED",
-]);
-const CODES = new Set([
-  "INSTALLATION_CHECK_BUSY",
-  "INSTALLATION_CHECK_FAILED",
-  // Fixed filesystem codes identify write failures without retaining paths or messages.
-  ...FILESYSTEM_ERRNOS,
-  "YT_DLP_EJS_MISSING",
-  "YT_DLP_IDENTITY_INVALID",
-  "MODEL_CACHE_INVALID",
-  "MODEL_DOWNLOAD_FAILED",
-  "MODEL_DOWNLOAD_TIMEOUT",
-  "MODEL_CHECKSUM_INVALID",
-  "MODEL_SOURCE_INVALID",
-  "MODEL_REDIRECT_INVALID",
-  "MODEL_SIZE_INVALID",
-  "APP_RUNTIME_MISSING",
-  "APP_RESOURCES_MISSING",
-  "APP_COMMAND_FAILED",
-  "FOREIGN_NATIVE_REGISTRATION_EXISTS",
-  "UNSAFE_EXTENSION_DIRECTORY",
-  "UNSAFE_EXTENSION_BUNDLE",
-  "FOREIGN_NATIVE_LAUNCHER_EXISTS",
-  "SETUP_BUSY",
-  "CLI_OPTION_UNSUPPORTED",
-  ...ALERT_CODES,
-  "UNKNOWN_ERROR",
-  "DEV_RUNTIME_INCOMPLETE",
-  "DEV_RUNTIME_MISSING",
-  "ENGINE_DOCTOR_INVALID",
-  "ENGINE_MISSING",
-  "ENGINE_NOT_READY",
-  "INVALID_LOCAL_CONFIG",
-  "LOCAL_DIRECTORY_NOT_PRIVATE",
-  "UNSUPPORTED_PLATFORM",
-  "YT_DLP_MISSING",
-  "YT_DLP_VERSION_INVALID",
-  "CANCELLED",
-  "DISK_SPACE_LOW",
-  "LOCAL_COMPANION_BUSY",
-  "LOCAL_COMPANION_LOCK_UNSAFE",
-  "LOCAL_COMPANION_START_FAILED",
-  "LOCAL_SYNC_STAGING_FAILED",
-  "LOCAL_SYNC_RECOVERY_FAILED",
-  "LOCAL_SYNC_FAILED",
-  "LOCAL_SYNC_EXPIRED",
-  "CATALOG_SAVE_FAILED",
-  "CATALOG_AUDIO_INVALID",
-  "CATALOG_FULL",
-  "PROVIDER_LIMIT_INVALID",
-  "ACCOUNT_STATE_UNSAFE",
-  "ACCOUNT_STATE_INVALID",
-  "ACCOUNT_STATE_CHANGED",
-  "ACCOUNT_STATE_CLOSED",
-  "FILE_INPUT_INVALID",
-  "FILE_STAGING_FULL",
-  "FILE_STAGING_UNSAFE",
-  "FILE_TYPE_UNSUPPORTED",
-  "UPLOAD_UNAVAILABLE",
-  "OFFLINE_CACHE_FULL",
-  "SOURCE_IDENTITY_INVALID",
-  "SOURCE_AUDIO_INVALID",
-  "ORIGINAL_DECLARATION_INVALID",
-  "CAPTURE_SOURCE_UNAVAILABLE",
-  "CAPTURE_SOURCE_CHANGED",
-  "CAPTURE_FAILED",
-  "CAPTURE_UNSAFE",
-  "CAPTURE_FULL",
-  "CAPTURE_BUSY",
-  "CAPTURE_TICKET_MISSING",
-  "CAPTURE_STALE_ATTEMPT",
-  "CAPTURE_RECORD_INVALID",
-  "CAPTURE_ACCOUNT_INVALID",
-  "CAPTURE_ALREADY_FINISHED",
-  "CAPTURE_CACHE_MISSING",
-  "CAPTURE_INTERRUPTED",
-  "CAPTURE_PREPARE_FAILED",
-  "CAPTURE_RECOVERY_REQUIRED",
-  "CAPTURE_REQUEST_CONFLICT",
-  "CAPTURE_SOURCE_LIMIT",
-  "OUTBOX_FULL",
-  "OUTBOX_BUSY",
-  "OUTBOX_ARTIFACT_INVALID",
-  "OUTBOX_RECOVERY_INVALID",
-  "OUTBOX_STALE_ATTEMPT",
-  "ACCOUNT_CHANGED",
-  "API_UNAVAILABLE",
-  "UPLOAD_REJECTED",
-  "ENGINE_UNAVAILABLE",
-  "ENGINE_SOCKET_UNSAFE",
-  "ENGINE_PROTOCOL_INVALID",
-  "PROCESSING_FAILED",
-  "PROVIDER_NOT_AVAILABLE",
-  "STALE_JOB",
-  "TIMELINE_MISMATCH",
-  "UNSUPPORTED_VIDEO",
-  "DOWNLOAD_INVALID",
-  "DOWNLOAD_LIMIT_EXCEEDED",
-  "DURATION_LIMIT_EXCEEDED",
-  "ENGINE_PROTOCOL_INVALID",
-  "INVALID_REQUEST",
-  "INVALID_WORK_ROOT",
-  "LIVE_NOT_SUPPORTED",
-  "OUTPUT_CHECKSUM_MISMATCH",
-  "OUTPUT_DURATION_MISMATCH",
-  "OUTPUT_INVALID",
-  "SOURCE_AUDIO_FORMAT_INVALID",
-  "SOURCE_AUDIO_TRACK_UNVERIFIED",
-  "SOURCE_AUDIO_TRACK_UNSUPPORTED",
-  "SOURCE_AUDIO_TRACK_MISMATCH",
-  "SOURCE_DURATION_INVALID",
-  "SOURCE_DURATION_MISMATCH",
-  "SOURCE_IDENTITY_MISMATCH",
-  "SOURCE_METADATA_INVALID",
-  "TIMELINE_NOT_PRESERVED",
-  "TOOL_FAILED",
-  "TOOL_OUTPUT_LIMIT",
-  "TOOL_INPUT_LIMIT",
-  "TOOL_TIMEOUT",
-  "READINESS_PROBE_FAILED",
-  "DENO_MISSING",
-  "DENO_VERSION_INVALID",
-  "PO_TOKEN_PROVIDER_MISSING",
-  "PO_TOKEN_PROVIDER_INVALID",
-  "PO_TOKEN_PROVIDER_UNAVAILABLE",
-  "APP_UPDATE_REQUIRED",
-  "CLOUD_HANDOFF_FAILED",
-  "TOOL_UNAVAILABLE",
-  "MEDIA_FORBIDDEN",
-  "MEDIA_SERVER_FAILED",
-  "MEDIA_UNAVAILABLE",
-  "METHOD_NOT_ALLOWED",
-  "ORIGIN_FORBIDDEN",
-  "RANGE_NOT_SATISFIABLE",
-  "FRAME_INVALID",
-  "FRAME_TOO_LARGE",
-  "FRAME_TRUNCATED",
-  "INVALID_COMMAND",
-  "AUDIO_CONTEXT_LOST",
-  "AUDIO_LOAD_FAILED",
-  "AUDIO_NETWORK_FAILED",
-  "AUDIO_SOURCE_REJECTED",
-  "OFFSCREEN_CREATION_FAILED",
-  "OFFSCREEN_MESSAGE_FAILED",
-  "CACHE_UNSAFE",
-  "CACHE_MISS",
-  "PROCESS_IDENTITY_UNAVAILABLE",
-  "ACCOUNT_RESTORE_UNSAFE",
-  "ACCOUNT_RESTORE_FULL",
-  "ACCOUNT_RESTORE_CONFLICT",
-  "ACCOUNT_RESTORE_UNAVAILABLE",
-  "SOURCE_AUTH_REQUIRED",
-  "SOURCE_BOT_CHALLENGE",
-  "SOURCE_AGE_RESTRICTED",
-  "SOURCE_ACCESS_RESTRICTED",
-  "SOURCE_TOKEN_REQUIRED",
-  "SOURCE_HTTP_UNAUTHORIZED",
-  "SOURCE_HTTP_FORBIDDEN",
-  "SOURCE_TRANSFER_INCOMPLETE",
-  "SOURCE_TRANSFER_EMPTY",
-  "SOURCE_TLS_FAILED",
-  "SOURCE_POSTPROCESSING_FAILED",
-  "ACQUISITION_STORAGE_FAILED",
-  "DOWNLOADER_ARGUMENTS_INVALID",
-  "DOWNLOADER_ISOLATION_REQUIRED",
-  "SOURCE_UNAVAILABLE",
-  "ACQUISITION_NETWORK_FAILED",
-  "ACQUISITION_RATE_LIMITED",
-  "ACQUISITION_COOLDOWN",
-  "ACQUISITION_BUSY",
-  "ACQUISITION_STATE_INVALID",
-  "SOURCE_AUDIO_FORMAT_UNAVAILABLE",
-  "SOURCE_CHALLENGE_FAILED",
-  "BACKGROUND_UNCAUGHT_ERROR",
-  "BACKGROUND_UNHANDLED_REJECTION",
-  "COMPANION_DISCONNECTED",
-  "COMPANION_NOT_READY",
-  "COMPANION_TIMEOUT",
-  "COMPANION_UNAVAILABLE",
-  "EXTENSION_OPERATION_FAILED",
-  "SESSION_STOPPED",
-  "PLAYBACK_SESSION_LOST",
-  "PLAYBACK_PAGE_LOST",
-  "PLAYBACK_SOURCE_CHANGED",
-  "PLAYBACK_NAVIGATION",
-  "PLAYBACK_USER_STOP",
-  "PLAYBACK_REPLACED",
-  "UNCAUGHT_ERROR",
-  "UNHANDLED_REJECTION",
-  "AUDIO_BUFFER_UNDERRUN",
-  "AUDIO_DECODE_FAILED",
-  "AUDIO_DURATION_MISMATCH",
-  "AUDIO_LOAD_TIMEOUT",
-  "AUDIO_PLAYBACK_BLOCKED",
-  "INVALID_MEDIA_SOURCE",
-  "PLAYBACK_CLOCK_STALE",
-  "RESOURCE_SAMPLE_UNAVAILABLE",
-  "MEMORY_LOW",
-  "COMPANION_CRASH",
-  "NATIVE_PIPE_CLOSED",
-  "NATIVE_PIPE_FAILED",
-  "COMPANION_REJECTION",
-  "COMMAND_FAILED",
-  "SETUP_REQUIRED",
-]);
+const ALERT_CODES = new Set<string>(DIAGNOSTIC_ALERT_CODES);
+
 const TERMINAL = new Set([
   "job_ready",
   "job_failed",
@@ -691,6 +489,12 @@ export class Diagnostics {
   private recordTrusted(input: DiagnosticInput, verified?: string): void {
     if (this.closed || this.readOnly) return;
     const safe = this.sanitize(input);
+    localDiagnostics.emit(
+      `diagnostic.${safe.event}`,
+      safe,
+      safe.severity === "warning" ? "warn" : safe.severity,
+      { operation: safe.event },
+    );
     const wall = this.now();
     const monotonic = Math.max(0, this.monotonic() - this.started);
     this.store(safe, wall, monotonic, verified);
@@ -902,8 +706,7 @@ export class Diagnostics {
         safe[key] = value.toLowerCase();
       else if (value !== undefined) this.rejectedFields++;
     }
-    if (typeof source.code === "string" && CODES.has(source.code))
-      safe.code = source.code;
+    if (isKnownDiagnosticCode(source.code)) safe.code = source.code;
     else if (source.code !== undefined) {
       safe.code = "UNKNOWN_ERROR";
       this.rejectedFields++;
@@ -924,13 +727,17 @@ export class Diagnostics {
           metrics[key] = value;
         else if (BOOLEAN_METRICS.has(key) && typeof value === "boolean")
           metrics[key] = value;
-        else if (
-          STRING_METRICS[key]?.has(String(value)) &&
-          typeof value === "string"
-        )
+        else if (typeof value === "string" && STRING_METRICS[key]?.has(value))
           metrics[key] = value;
         else this.rejectedFields++;
       }
+    }
+    if (
+      metrics.validation_reason !== undefined &&
+      (event !== "diagnostic_error" || safe.code !== "CLOUD_REPLY_INVALID")
+    ) {
+      delete metrics.validation_reason;
+      this.rejectedFields++;
     }
     if (event === "job_cancelled") {
       delete metrics.local_job_phase;

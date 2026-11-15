@@ -130,7 +130,7 @@ private object ProcessingSerializer : Serializer<ProcessingDocument> {
     @OptIn(ExperimentalSerializationApi::class)
     override suspend fun readFrom(input: InputStream): ProcessingDocument {
         return try {
-            json.decodeFromStream<ProcessingDocument>(input)
+            json.decodeFromStream<ProcessingDocument>(input).also { com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.read", "storage", data = mapOf("store" to "processing", "result" to "completed", "operations" to it.operations.size)) }
         } catch (error: SerializationException) {
             throw CorruptionException("Processing metadata is unreadable", error)
         } catch (error: IllegalArgumentException) {
@@ -141,7 +141,13 @@ private object ProcessingSerializer : Serializer<ProcessingDocument> {
     }
 
     override suspend fun writeTo(t: ProcessingDocument, output: OutputStream) {
-        output.write(json.encodeToString(t).toByteArray(Charsets.UTF_8))
+        try {
+            output.write(json.encodeToString(t).toByteArray(Charsets.UTF_8))
+            com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.write", "storage", data = mapOf("store" to "processing", "result" to "serializer_completed", "operations" to t.operations.size))
+        } catch (error: Exception) {
+            com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.failed", "storage", "warn", mapOf("store" to "processing", "operation" to "write", "error" to com.hatem.musicmute.diagnostics.LocalDiagnostics.error(error)))
+            throw error
+        }
     }
 }
 
@@ -321,6 +327,17 @@ class ProcessingStore(
         }
     }
 
+    /** Device-only, atomic listening history; never included in a job/API mutation. */
+    suspend fun incrementLibraryPlay(uid: String, jobId: String, isCurrent: () -> Boolean = { true }) {
+        store(uid).updateData { current ->
+            validateOwner(uid, current)
+            if (!isCurrent()) current else current.copy(library = mergeLibrary(current, emptyList()).map {
+                if (it.job.id != jobId) it else it.copy(playCount =
+                    if (it.playCount >= Long.MAX_VALUE) Long.MAX_VALUE else it.playCount.coerceAtLeast(0) + 1)
+            })
+        }
+    }
+
     /** Call only after authoritative deletion; page absence is never deletion evidence. */
     suspend fun removeLibraryJob(uid: String, jobId: String) {
         store(uid).updateData { current ->
@@ -343,6 +360,11 @@ class ProcessingStore(
                 if (old == null || job.updatedAt.isAfter(old.job.updatedAt) ||
                     (acceptEqual && job.updatedAt == old.job.updatedAt)) {
                     entries[job.id] = old?.copy(job = job) ?: StoredLibraryTrack(job)
+                } else if (job.updatedAt == old.job.updatedAt && job.thumbnailUrl != null &&
+                    job.thumbnailUrl != old.job.thumbnailUrl) {
+                    // Newly projected optional artwork can arrive without changing the job revision.
+                    // Preserve explicit local title mutations and all Library flags at equal timestamps.
+                    entries[job.id] = old.copy(job = old.job.copy(thumbnailUrl = job.thumbnailUrl))
                 }
             }
         }

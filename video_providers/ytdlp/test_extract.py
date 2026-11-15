@@ -53,6 +53,7 @@ class FakeYoutubeDL:
         self.options = options
         self.extractions = []
         self.downloads = []
+        self.requests = []
         self.instances.append(self)
 
     def __enter__(self):
@@ -66,6 +67,7 @@ class FakeYoutubeDL:
         return copy.deepcopy(self.fixture)
 
     def urlopen(self, url):
+        self.requests.append(url)
         itag = url.rsplit('=', 1)[-1]
         return Response(self.bodies.get(itag, b'fixture-audio'), url)
 
@@ -144,6 +146,29 @@ class ExtractionTest(unittest.TestCase):
         result = self.execute(info([audio('140', 'm4a', 'mp4a.40.2')]))
         self.assertEqual(result['filename'], 'audio.m4a')
         self.assertEqual(result['content_type'], 'audio/mp4')
+
+    def test_original_thumbnail_uses_existing_extraction_without_image_fetch(self):
+        thumbnail = 'https://i.ytimg.com/vi/' + VIDEO_ID + '/hqdefault.jpg?sqp=fixture&rs=fixture'
+        result = self.execute(info(thumbnail=thumbnail, thumbnails=[{
+            'url': 'https://i.ytimg.com/vi/' + VIDEO_ID + '/maxresdefault.jpg',
+            'width': 1280, 'height': 720,
+        }]))
+        self.assertEqual(result['metadata']['thumbnail_url'], thumbnail)
+        self.assertEqual(FakeYoutubeDL.instances[0].extractions, [(URL, False, False)])
+        self.assertEqual(len(FakeYoutubeDL.instances[0].downloads), 1)
+        self.assertEqual(FakeYoutubeDL.instances[0].requests, [audio()['url']])
+
+    def test_missing_or_unsafe_thumbnail_keeps_audio_without_guessing(self):
+        for thumbnail in (None, 'https://delivery.example/audio',
+                          'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg',
+                          'https://i.ytimg.com/vi/' + VIDEO_ID + '/fixture-password.jpg'):
+            with self.subTest(thumbnail=thumbnail):
+                result = self.execute(info(thumbnail=thumbnail, thumbnails=[{
+                    'url': 'https://i.ytimg.com/vi/' + VIDEO_ID + '/maxresdefault.jpg',
+                }]))
+                self.assertNotIn('thumbnail_url', result['metadata'])
+                self.assertEqual(result['content_type'], 'audio/webm')
+                self.assertEqual(FakeYoutubeDL.instances[-1].extractions, [(URL, False, False)])
 
     def test_unknown_webm_id_uses_native_bitrate_nearest_medium(self):
         result = self.execute(info([audio('new-high', abr=150), audio('new-medium', abr=72), audio('new-low', abr=40)]))

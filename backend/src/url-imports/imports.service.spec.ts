@@ -310,6 +310,9 @@ describe('immediate shared-result delivery', () => {
             sourceUrl: f.url,
           }),
         }),
+        undefined,
+        undefined,
+        expect.any(Types.ObjectId),
       );
       expect(f.records.countDocuments).not.toHaveBeenCalled();
       expect(f.usage.readUsage).not.toHaveBeenCalled();

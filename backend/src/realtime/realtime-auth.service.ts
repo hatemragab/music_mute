@@ -4,6 +4,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Redis } from 'ioredis';
 import type { Model } from 'mongoose';
+import { isUUID } from 'class-validator';
+import { DevicesService } from '../devices/devices.service.js';
+import { parseCloudflareLocation } from '../devices/cloudflare-location.js';
 import { AdminAccess } from '../admin/admin-access.schema.js';
 import { isAdminRole, permissionsForRole } from '../admin/admin-permissions.js';
 import type { AdminActor } from '../admin/admin.types.js';
@@ -25,6 +28,7 @@ export interface RealtimePrincipal {
   admin: AdminActor | null;
   origin: string | null;
   expiresAt: number;
+  visitorCountry?: string | null;
 }
 
 @Injectable()
@@ -35,6 +39,7 @@ export class RealtimeAuthService {
     private readonly firebase: FirebaseIdentityService,
     @InjectModel(User.name) private readonly users: Model<User>,
     @InjectModel(AdminAccess.name) private readonly admins: Model<AdminAccess>,
+    private readonly devices: DevicesService,
   ) {}
 
   async mint(req: AuthRequest, audience: RealtimePrincipal['audience']) {
@@ -52,8 +57,24 @@ export class RealtimeAuthService {
       admin: audience === 'admin' ? req.adminActor! : null,
       origin,
       expiresAt: Math.min(signed.exp * 1000, Date.now() + 15 * 60_000),
+      visitorCountry:
+        audience === 'owner'
+          ? parseCloudflareLocation(req.headers).country
+          : null,
     };
     if (principal.expiresAt <= Date.now()) throw authError('UNAUTHENTICATED');
+    const installationId = req.headers['x-installation-id'];
+    if (
+      audience === 'owner' &&
+      typeof installationId === 'string' &&
+      isUUID(installationId, '4')
+    ) {
+      await this.devices.observeLocation(
+        principal.userId!,
+        installationId,
+        parseCloudflareLocation(req.headers),
+      );
+    }
     const ticket = randomBytes(32).toString('base64url');
     const result = await this.redis.set(
       ticketKey(ticket),

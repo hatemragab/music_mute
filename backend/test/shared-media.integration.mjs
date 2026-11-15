@@ -650,6 +650,200 @@ test('shared URL media deduplicates acquisition, processing and retained objects
   );
 
   await t.test(
+    'fresh request IDs return the existing owner history without media, usage or notification duplication',
+    async () => {
+      for (const existing of [producerJob, cachedJob]) {
+        const owner = existing.userId;
+        const title = `Saved title ${existing._id}`;
+        await jobRecords.updateOne(
+          { _id: existing._id },
+          { $set: { displayName: title } },
+        );
+        const saved = await jobRecords.findById(existing._id).lean();
+        const before = await cacheSideEffects();
+        const retained = (await usage.readUsage(owner)).storage.retainedBytes;
+        let lastImportId;
+        for (const [index, url] of videoUrls.entries()) {
+          const requestId = randomUUID();
+          const delivered = await imports.create(
+            String(owner),
+            url,
+            requestId,
+            true,
+            index === 1,
+          );
+          assert.equal(delivered.status, 'submitted');
+          assert.equal(delivered.jobId, String(existing._id));
+          lastImportId = delivered.importId;
+          assert.equal(
+            (await jobRecords.findById(existing._id)).displayName,
+            title,
+          );
+          await assert.rejects(
+            imports.create(String(owner), url, requestId, false),
+            (error) => error.getResponse?.().code === 'IMPORT_REQUEST_CONFLICT',
+          );
+        }
+        // A queued follower may reach the processor after the result becomes
+        // ready. Its timing observations belong to its import, not the old job.
+        await records.updateOne(
+          { _id: lastImportId },
+          { $set: { status: 'queued', jobId: null, finishedAt: null } },
+        );
+        await processImport(await records.findById(lastImportId).lean());
+        assert.equal(
+          (await records.findById(lastImportId)).status,
+          'submitted',
+        );
+        assert.equal(
+          String((await records.findById(lastImportId)).jobId),
+          String(existing._id),
+        );
+        assert.deepEqual(await jobRecords.findById(existing._id).lean(), saved);
+        assert.equal(await jobRecords.countDocuments({ userId: owner }), 1);
+        assert.equal(
+          (await usage.readUsage(owner)).storage.retainedBytes,
+          retained,
+        );
+        const after = await cacheSideEffects();
+        for (const name of [
+          'Job',
+          'NotificationOutbox',
+          'ProcessingReservation',
+          'UploadGrantReceipt',
+          'AccountUsagePeriod',
+        ])
+          assert.deepEqual(after.persisted[name], before.persisted[name], name);
+        for (const key of [
+          'providerCalls',
+          'sourceUploads',
+          'localUploadGrants',
+          'copies',
+          'objects',
+          'uploadReservations',
+        ])
+          assert.deepEqual(after[key], before[key], key);
+      }
+    },
+  );
+
+  await t.test(
+    'concurrent fresh submissions on independent replicas create one owner job and survive expired import receipts',
+    async () => {
+      const owner = new Types.ObjectId();
+      await accountFixture(connection, [String(owner)]);
+      const replicaTransactions = new ProcessingTransactions(connection);
+      const replicaJobs = new JobsService(
+        jobRecords,
+        storage,
+        replicaTransactions,
+        accounts.access,
+        admission,
+        usage,
+        cleanup,
+      );
+      const replicaImports = new ImportsService(
+        records,
+        model('ProcessingAdmissionFence'),
+        replicaTransactions,
+        accounts.access,
+        usage,
+        config,
+        queue,
+        { assertAllowed: async () => {} },
+        shared,
+        replicaJobs,
+      );
+      const before = { providerCalls, sourceUploads, copies: copies.length };
+      const delivered = await Promise.all(
+        Array.from({ length: 6 }, (_, index) =>
+          (index % 2 ? replicaImports : imports).create(
+            String(owner),
+            videoUrls[index % videoUrls.length],
+            randomUUID(),
+            true,
+            index % 2 === 0,
+          ),
+        ),
+      );
+      const jobId = delivered[0].jobId;
+      assert.ok(
+        delivered.every(
+          (entry) => entry.status === 'submitted' && entry.jobId === jobId,
+        ),
+      );
+      assert.equal(await jobRecords.countDocuments({ userId: owner }), 1);
+      assert.equal(
+        await model('NotificationOutbox').countDocuments({ userId: owner }),
+        1,
+      );
+      assert.equal(
+        (await usage.readUsage(owner)).storage.retainedBytes,
+        source.inputObject.bytes + sharedOutput.bytes,
+      );
+      // Mongo TTL removes import receipts while the permanent history remains.
+      await records.deleteMany({ userId: owner });
+      const afterExpiry = await replicaImports.create(
+        String(owner),
+        videoUrls[2],
+        randomUUID(),
+        true,
+        true,
+      );
+      assert.equal(afterExpiry.jobId, jobId);
+      assert.equal(await jobRecords.countDocuments({ userId: owner }), 1);
+
+      const deletion = new JobDeletionService(
+        jobRecords,
+        model('NotificationOutbox'),
+        transactions,
+        storage,
+        usage,
+        config,
+      );
+      // Simulate a lost response after atomic job attachment, then user deletion.
+      await records.updateOne(
+        { _id: afterExpiry.importId },
+        { $set: { status: 'queued', finishedAt: null } },
+      );
+      await deletion.delete(String(owner), jobId);
+      await assert.rejects(
+        replicaImports.enqueue(afterExpiry.importId),
+        (error) => error.getResponse?.().code === 'JOB_NOT_FOUND',
+      );
+      assert.equal(
+        await jobRecords.countDocuments({ userId: owner }),
+        1,
+        'recovery cannot resurrect a deleted history job',
+      );
+      assert.equal(
+        await deletion.cleanupDue(new Date(Date.now() + 4_600_000)),
+        true,
+      );
+      assert.ok((await jobRecords.findById(jobId)).cleanupCompletedAt);
+      const replacement = await imports.create(
+        String(owner),
+        videoUrls[0],
+        randomUUID(),
+      );
+      assert.equal(replacement.status, 'submitted');
+      assert.notEqual(replacement.jobId, jobId);
+      const replacementJob = await jobRecords
+        .findById(replacement.jobId)
+        .lean();
+      assert.deepEqual(replacementJob.outputObject, sharedOutput);
+      assert.equal(
+        await jobRecords.countDocuments({ userId: owner, deletedAt: null }),
+        1,
+      );
+      assert.deepEqual(
+        { providerCalls, sourceUploads, copies: copies.length },
+        before,
+      );
+    },
+  );
+
+  await t.test(
     'a cache-only recipe miss leaves the ready source and catalog untouched',
     async () => {
       const before = await cacheSideEffects();
@@ -2444,9 +2638,30 @@ test('shared URL media deduplicates acquisition, processing and retained objects
         true,
       );
       assert.equal(trimmedAgain.status, 'submitted');
+      assert.notEqual(trimmedAgain.jobId, full.jobId);
       assert.deepEqual(
         (await jobRecords.findById(trimmedAgain.jobId).lean()).outputObject,
         trimmedJob.outputObject,
+      );
+      const fullAgain = await guestImports.create(
+        String(guestOwners[0]),
+        urls[1],
+        randomUUID(),
+        false,
+        true,
+      );
+      assert.equal(fullAgain.jobId, full.jobId);
+      const sameTrimmed = await guestImports.create(
+        String(guestOwners[0]),
+        urls[1],
+        randomUUID(),
+        true,
+        true,
+      );
+      assert.equal(sameTrimmed.jobId, trimmedAgain.jobId);
+      assert.equal(
+        await jobRecords.countDocuments({ userId: guestOwners[0] }),
+        2,
       );
       assert.equal(derivations, 1);
       assert.equal(renditionUploads, 1);
@@ -2854,6 +3069,15 @@ test('shared URL media deduplicates acquisition, processing and retained objects
             retained,
           );
           assert.equal(derivations, beforeDsp + 1);
+          const existingRendition = await guestImports.create(
+            String(owner),
+            cloudUrl,
+            randomUUID(),
+            true,
+            true,
+          );
+          assert.equal(existingRendition.jobId, String(cloudJob._id));
+          assert.equal(await jobRecords.countDocuments({ userId: owner }), 1);
           // Cancellation racing a cached rendition cannot commit a private output or receipt.
           const cancellation = await jobs.createForSharedInput(
             String(cancelledOwner),

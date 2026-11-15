@@ -228,6 +228,7 @@ export interface AccountRecoveryQueueSummary {
 
 export type ReleasePlatform = "android" | "ios";
 export type ReleaseSource = "direct_apk" | "google_play" | "app_store";
+export type ReleaseWriteSource = Exclude<ReleaseSource, "direct_apk">;
 
 export interface ReleaseSummary {
   id: string;
@@ -253,6 +254,12 @@ export interface ReleaseDetail extends ReleaseSummary {
   publishedBy: string | null;
 }
 
+export interface ReleaseUploadStatus {
+  artifactState: string;
+  code?: string;
+  checkedAt?: string;
+}
+
 export interface ReleaseProposal {
   platform: ReleasePlatform;
   source: ReleaseSource;
@@ -264,14 +271,19 @@ export interface UpdatePolicy {
   revision: number;
   android: {
     minimumBuild: number | null;
-    source: "direct_apk" | "google_play";
-    directReleaseId: string | null;
+    source: "google_play";
+    directReleaseId: null;
     storeReleaseId: string | null;
   };
   ios: {
     minimumBuild: number | null;
     storeReleaseId: string | null;
   };
+}
+export interface DesktopUpdatePolicy {
+  revision: number;
+  macos: { minimumBuild: number | null };
+  windows: { minimumBuild: number | null };
 }
 
 export interface AccountPolicyValues {
@@ -294,6 +306,10 @@ export interface AccountPolicyValues {
 }
 
 export interface AccountPolicy {
+  linkImportEnabled?: boolean;
+  linkImportDisabledCountries?: string[];
+  linkImportDisabledUserIds?: string[];
+  linkImportForcedOff?: boolean;
   plan: "standard";
   revision: number;
   acceptNewJobs: boolean;

@@ -105,8 +105,19 @@ test(
         }),
         (error) => error?.response?.code === 'REVISION_CONFLICT',
       );
+      await assert.rejects(
+        drafts.create(actor, {
+          ...request,
+          source: 'direct_apk',
+          storeUrl: null,
+          operationId: randomUUID(),
+        }),
+        (error) => error.response?.code === 'INVALID_REQUEST',
+      );
       const draft = await drafts.create(actor, request);
       assert.equal(draft.state, 'draft');
+      assert.equal(draft.artifactState, null);
+      assert.equal(draft.bytes, null);
       assert.deepEqual(
         await drafts.proposal({
           platform: 'android',
@@ -142,6 +153,34 @@ test(
           reason: 'Stale edit',
           changelogEn: 'Stale',
         }),
+      );
+      const historical = await releases.create({
+        platform: 'android',
+        source: 'direct_apk',
+        versionName: '0.9',
+        buildNumber: 9,
+        changelogEn: 'Historical notes',
+        storeUrl: null,
+        createdBy: actor.uid,
+      });
+      const historicalBefore = await releases.findById(historical._id).lean();
+      await assert.rejects(
+        drafts.edit(actor, historical._id.toString(), {
+          expectedRevision: 0,
+          operationId: randomUUID(),
+          reason: 'Retired rows are read-only',
+          changelogEn: 'Changed',
+          storeUrl: request.storeUrl,
+        }),
+        (error) => error.response?.code === 'INVALID_REQUEST',
+      );
+      assert.deepEqual(
+        await releases.findById(historical._id).lean(),
+        historicalBefore,
+      );
+      assert.equal(
+        (await drafts.detail(historical._id.toString())).source,
+        'direct_apk',
       );
       await releases.updateOne(
         { _id: draft.id },

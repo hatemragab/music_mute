@@ -1,10 +1,12 @@
 import {
   chmod,
   link,
+  lstat,
   mkdtemp,
   mkdir,
   open,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
@@ -16,6 +18,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeResourceProbe } from "../../worker/src/runtime/resource-limits.js";
 import {
@@ -45,6 +48,15 @@ import { VERSION } from "../src/shared/protocol.js";
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return { ...actual, createReadStream: vi.fn(actual.createReadStream) };
+});
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    link: vi.fn(actual.link),
+    open: vi.fn(actual.open),
+    lstat: vi.fn(actual.lstat),
+  };
 });
 vi.mock("node:crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:crypto")>();
@@ -85,10 +97,20 @@ const adequateResources: RuntimeResourceProbe = {
 };
 afterEach(async () => {
   vi.restoreAllMocks();
+  // A spy created after useFakeTimers restores that fake function. Restore
+  // spies first so switching to real timers cannot be undone for the next test.
+  vi.useRealTimers();
   vi.mocked(fs.createReadStream).mockClear();
   const crypto =
     await vi.importActual<typeof import("node:crypto")>("node:crypto");
   vi.mocked(createHash).mockReset().mockImplementation(crypto.createHash);
+  const promises =
+    await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+  vi.mocked(fsPromises.link).mockReset().mockImplementation(promises.link);
+  vi.mocked(fsPromises.open).mockReset().mockImplementation(promises.open);
+  vi.mocked(fsPromises.lstat).mockReset().mockImplementation(promises.lstat);
   const os = await vi.importActual<typeof import("node:os")>("node:os");
   vi.mocked(homedir).mockReset().mockImplementation(os.homedir);
   vi.unstubAllGlobals();
@@ -96,6 +118,51 @@ afterEach(async () => {
     roots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
+
+// Stream one pinned-size synthetic model without allocating the entire model in memory.
+function modelResponse(onComplete?: () => void | Promise<void>): Response {
+  let remaining: number = MODEL.bytes;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (remaining === 0) {
+          await onComplete?.();
+          controller.close();
+          return;
+        }
+        const size = Math.min(64 * 1024, remaining);
+        remaining -= size;
+        controller.enqueue(new Uint8Array(size));
+      },
+    }),
+    { headers: { "content-length": String(MODEL.bytes) } },
+  );
+}
+async function trustSyntheticModel(): Promise<void> {
+  const crypto =
+    await vi.importActual<typeof import("node:crypto")>("node:crypto");
+  const fixtureHash = crypto.createHash("sha256");
+  let remaining: number = MODEL.bytes;
+  const bytes = new Uint8Array(64 * 1024);
+  while (remaining > 0) {
+    const size = Math.min(bytes.byteLength, remaining);
+    fixtureHash.update(bytes.subarray(0, size));
+    remaining -= size;
+  }
+  const fixtureDigest = fixtureHash.digest("hex");
+  vi.mocked(createHash).mockImplementation((...arguments_) => {
+    const hash = crypto.createHash(...arguments_);
+    const digest = hash.digest.bind(hash);
+    vi.spyOn(hash, "digest").mockImplementation((encoding) => {
+      const actual = digest(encoding);
+      return actual === fixtureDigest ? MODEL.sha256 : actual;
+    });
+    return hash;
+  });
+}
+function quarantinePath(config: LocalConfig): string {
+  return join(dirname(modelPath(config)), `.${MODEL.filename}.quarantine`);
+}
 async function fixture(
   extensionKey?: string,
 ): Promise<{ config: LocalConfig; userHome: string }> {
@@ -538,13 +605,21 @@ describe("standalone app setup", () => {
     const { config } = await metadataReadyFixture();
     const check = vi.spyOn(configModule, "inspectLocalReadiness");
     vi.mocked(fs.createReadStream).mockClear();
+    const fetcher = vi
+      .fn()
+      .mockImplementation(() => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetcher);
 
     await expect(
       setupApp(config, new AbortController().signal, () => {}),
-    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    ).rejects.toMatchObject({ code: "MODEL_DOWNLOAD_FAILED" });
 
     expect(fs.createReadStream).toHaveBeenCalledWith(modelPath(config));
     expect(check).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledOnce();
+    await expect(stat(quarantinePath(config))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("runs full readiness during Prepare once and reuses its recorded result for status", async () => {
@@ -1047,10 +1122,11 @@ describe("standalone app setup", () => {
       code: "ENOENT",
     });
   });
-  it("rejects wrong bytes and preserves an existing invalid model for review", async () => {
+  it("restarts wrong bytes once and preserves the existing model until replacement is verified", async () => {
     const { config } = await fixture();
     await privateDirectory(config.root);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("corrupt")));
+    const fetcher = vi.fn().mockImplementation(() => new Response("corrupt"));
+    vi.stubGlobal("fetch", fetcher);
     await expect(
       downloadModel(
         config,
@@ -1070,8 +1146,822 @@ describe("standalone app setup", () => {
         () => {},
         adequateResources,
       ),
-    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    ).rejects.toMatchObject({ code: "MODEL_CHECKSUM_INVALID" });
     expect(await readFile(modelPath(config), "utf8")).toBe("foreign bytes");
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(await readdir(dirname(modelPath(config)))).toEqual([MODEL.filename]);
+  });
+  it.each([408, 425, 429, 500, 503])(
+    "retries transient HTTP %i and publishes only verified bytes",
+    async (status) => {
+      const { config } = await fixture();
+      await trustSyntheticModel();
+      const fetcher = vi
+        .fn()
+        .mockImplementationOnce(() => new Response(null, { status }))
+        .mockImplementation(() => modelResponse());
+      vi.stubGlobal("fetch", fetcher);
+      await downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      );
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+        MODEL.url,
+        MODEL.url,
+      ]);
+      expect((await stat(modelPath(config))).size).toBe(MODEL.bytes);
+      expect((await stat(modelPath(config))).nlink).toBe(1);
+      expect(await readdir(dirname(modelPath(config)))).toEqual([
+        MODEL.filename,
+      ]);
+    },
+  );
+  it("retries transport failures at most three times and cleans every failed partial", async () => {
+    const { config } = await fixture();
+    const fetcher = vi
+      .fn()
+      .mockRejectedValue(new TypeError("private transport detail"));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_DOWNLOAD_FAILED" });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+  });
+  it.each([400, 401, 403, 404])(
+    "does not retry terminal HTTP %i",
+    async (status) => {
+      const { config } = await fixture();
+      const fetcher = vi
+        .fn()
+        .mockImplementation(() => new Response(null, { status }));
+      vi.stubGlobal("fetch", fetcher);
+      await expect(
+        downloadModel(
+          config,
+          new AbortController().signal,
+          () => {},
+          adequateResources,
+        ),
+      ).rejects.toMatchObject({ code: "MODEL_DOWNLOAD_FAILED" });
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+  it("cancels immediately during bounded Retry-After backoff", async () => {
+    const { config } = await fixture();
+    const controller = new AbortController();
+    const fetcher = vi.fn().mockImplementation(
+      () =>
+        new Response(null, {
+          status: 429,
+          headers: { "retry-after": "999999" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const pending = downloadModel(
+      config,
+      controller.signal,
+      () => {},
+      adequateResources,
+    );
+    const failure = expect(pending).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    controller.abort();
+    await failure;
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+  });
+  it("caps server-requested backoff at 30 seconds without resetting the total budget", async () => {
+    const { config } = await fixture();
+    vi.useFakeTimers();
+    const originalTimeout = globalThis.setTimeout;
+    let retryAt: number | undefined;
+    const timeout = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((...args: Parameters<typeof setTimeout>) => {
+        if (args[1] === 30_000) retryAt = Date.now() + args[1];
+        return originalTimeout(...args);
+      });
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Response(null, {
+            status: 429,
+            headers: { "retry-after": "999999" },
+          }),
+      )
+      .mockImplementation(() => new Response(null, { status: 404 }));
+    vi.stubGlobal("fetch", fetcher);
+    const pending = downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    const failure = pending.catch((error: unknown) => error);
+    await vi.waitFor(() => {
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(2);
+      expect(retryAt).toBeDefined();
+    });
+    // waitFor advances fake time while real descriptor cleanup finishes. Anchor
+    // the boundary to the actual registered retry, not the observer's return.
+    const remaining = retryAt! - Date.now();
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThanOrEqual(30_000);
+    await vi.advanceTimersByTimeAsync(remaining - 1);
+    expect(fetcher).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await failure).toMatchObject({ code: "MODEL_DOWNLOAD_FAILED" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(
+      timeout.mock.calls.filter((call) => call[1] === 20 * 60 * 1000),
+    ).toHaveLength(1);
+  });
+  it("bounds a continuously progressing body to one 20-minute budget", async () => {
+    const { config } = await fixture();
+    vi.useFakeTimers();
+    const cancelled = vi.fn();
+    const fetcher = vi.fn().mockImplementation(() => {
+      let interval: ReturnType<typeof setInterval>;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            interval = setInterval(
+              () => controller.enqueue(new Uint8Array(1_000_000)),
+              20_000,
+            );
+          },
+          cancel() {
+            clearInterval(interval);
+            cancelled();
+          },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const pending = downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    const failure = expect(pending).rejects.toMatchObject({
+      code: "MODEL_DOWNLOAD_TIMEOUT",
+    });
+    let partial = "";
+    await vi.waitFor(async () => {
+      partial =
+        (await readdir(dirname(modelPath(config)))).find((name) =>
+          name.startsWith(".download-"),
+        ) ?? "";
+      expect(partial).not.toBe("");
+    });
+    for (let chunk = 1; chunk <= 59; chunk++) {
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(async () => {
+        expect(
+          (await stat(join(dirname(modelPath(config)), partial))).size,
+        ).toBeGreaterThanOrEqual(chunk * 1_000_000);
+      });
+    }
+    await vi.advanceTimersByTimeAsync(20_000);
+    await failure;
+    expect(cancelled).toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+  }, 30_000);
+  it("does not let empty chunks keep a stalled attempt alive", async () => {
+    const { config } = await fixture();
+    await trustSyntheticModel();
+    vi.useFakeTimers();
+    const cancelled = vi.fn();
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(0));
+              },
+              cancel: cancelled,
+            }),
+          ),
+      )
+      .mockImplementation(() => modelResponse());
+    vi.stubGlobal("fetch", fetcher);
+    const pending = downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(500);
+    // Cleanup closes the partial file before backoff starts; wait for that async transition.
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    await pending;
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect((await stat(modelPath(config))).size).toBe(MODEL.bytes);
+  });
+  it("cleans an interrupted body and retries the approved source", async () => {
+    const { config } = await fixture();
+    await trustSyntheticModel();
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new TypeError("connection lost"));
+              },
+            }),
+          ),
+      )
+      .mockImplementation(() => modelResponse());
+    vi.stubGlobal("fetch", fetcher);
+    await downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await readdir(dirname(modelPath(config)))).toEqual([MODEL.filename]);
+  });
+  it("makes one clean restart after a truncated transfer", async () => {
+    const { config } = await fixture();
+    await trustSyntheticModel();
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(() => new Response("short"))
+      .mockImplementation(() => modelResponse());
+    vi.stubGlobal("fetch", fetcher);
+    await downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect((await stat(modelPath(config))).size).toBe(MODEL.bytes);
+  });
+  it("repairs a private incomplete model only after verification and preserves its bytes", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    await writeFile(modelPath(config), "damaged original", { mode: 0o600 });
+    const original = await lstat(modelPath(config));
+    await trustSyntheticModel();
+    const fetcher = vi.fn().mockImplementation(() => modelResponse());
+    vi.stubGlobal("fetch", fetcher);
+    await downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    expect(await readFile(quarantinePath(config), "utf8")).toBe(
+      "damaged original",
+    );
+    expect((await lstat(quarantinePath(config))).ino).toBe(original.ino);
+    expect((await lstat(quarantinePath(config))).nlink).toBe(1);
+    expect((await lstat(modelPath(config))).ino).not.toBe(original.ino);
+    expect((await stat(modelPath(config))).size).toBe(MODEL.bytes);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect((await readdir(dirname(modelPath(config)))).sort()).toEqual(
+      [MODEL.filename, `.${MODEL.filename}.quarantine`].sort(),
+    );
+  });
+  it("repairs a same-size model whose actual checksum is wrong", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    const original = await open(modelPath(config), "wx", 0o600);
+    await original.truncate(MODEL.bytes);
+    await original.write(new Uint8Array([1]), 0, 1, 0);
+    await original.close();
+    await trustSyntheticModel();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => modelResponse()),
+    );
+    await downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    const preserved = await open(quarantinePath(config), "r");
+    const first = new Uint8Array(1);
+    await preserved.read(first, 0, 1, 0);
+    await preserved.close();
+    expect(first[0]).toBe(1);
+    expect((await stat(quarantinePath(config))).size).toBe(MODEL.bytes);
+    expect(await verifyModel(config)).toBe(true);
+  });
+  it("preserves a model owned by another user before hashing or downloading", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    const model = await open(modelPath(config), "wx", 0o600);
+    await model.truncate(MODEL.bytes);
+    await model.close();
+    const before = await lstat(modelPath(config));
+    const promises =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    vi.mocked(fsPromises.lstat).mockImplementation(async (...arguments_) => {
+      const info = await promises.lstat(...arguments_);
+      if (arguments_[0] === modelPath(config))
+        info.uid = typeof info.uid === "number" ? info.uid + 1 : info.uid + 1n;
+      return info;
+    });
+    vi.mocked(fs.createReadStream).mockClear();
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    expect((await lstat(modelPath(config))).ino).toBe(before.ino);
+    expect(fs.createReadStream).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("keeps the old model untouched when cancelled before replacement verification", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    await writeFile(modelPath(config), "damaged original", { mode: 0o600 });
+    const before = await lstat(modelPath(config));
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => modelResponse()),
+    );
+    await expect(
+      downloadModel(
+        config,
+        controller.signal,
+        () => controller.abort(),
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(await readFile(modelPath(config), "utf8")).toBe("damaged original");
+    expect((await lstat(modelPath(config))).ino).toBe(before.ino);
+    expect(await readdir(dirname(modelPath(config)))).toEqual([MODEL.filename]);
+  });
+  it.each(["symlink", "hardlink", "public", "directory"])(
+    "preserves unsafe %s model entries without downloading",
+    async (kind) => {
+      const { config } = await fixture();
+      await privateDirectory(config.models_root);
+      await privateDirectory(dirname(modelPath(config)));
+      const destination = modelPath(config);
+      if (kind === "directory") await mkdir(destination, { mode: 0o700 });
+      else if (kind === "symlink") {
+        await writeFile(`${destination}.personal`, "personal bytes", {
+          mode: 0o600,
+        });
+        await symlink(`${destination}.personal`, destination);
+      } else {
+        await writeFile(destination, "personal bytes", {
+          mode: kind === "public" ? 0o644 : 0o600,
+        });
+        if (kind === "hardlink")
+          await link(destination, `${destination}.personal`);
+      }
+      const before = await lstat(destination);
+      const fetcher = vi.fn();
+      vi.stubGlobal("fetch", fetcher);
+      await expect(
+        downloadModel(
+          config,
+          new AbortController().signal,
+          () => {},
+          adequateResources,
+        ),
+      ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+      expect((await lstat(destination)).ino).toBe(before.ino);
+      expect(fetcher).not.toHaveBeenCalled();
+      await expect(stat(quarantinePath(config))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+  it("does not overwrite a reserved quarantine slot", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    await writeFile(modelPath(config), "current damaged model", {
+      mode: 0o600,
+    });
+    await writeFile(quarantinePath(config), "previous preserved model", {
+      mode: 0o600,
+    });
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    expect(await readFile(modelPath(config), "utf8")).toBe(
+      "current damaged model",
+    );
+    expect(await readFile(quarantinePath(config), "utf8")).toBe(
+      "previous preserved model",
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("restores the original model when verified replacement publication fails", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    await writeFile(modelPath(config), "damaged original", { mode: 0o600 });
+    const original = await lstat(modelPath(config));
+    await trustSyntheticModel();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => modelResponse()),
+    );
+    const promises =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    vi.mocked(fsPromises.link).mockImplementation(async (from, to) => {
+      if (String(from).includes(".download-") && to === modelPath(config))
+        throw Object.assign(new Error("publication failed"), { code: "EIO" });
+      await promises.link(from, to);
+    });
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    expect(await readFile(modelPath(config), "utf8")).toBe("damaged original");
+    expect((await lstat(modelPath(config))).ino).toBe(original.ino);
+    expect((await lstat(modelPath(config))).nlink).toBe(1);
+    expect(await readdir(dirname(modelPath(config)))).toEqual([MODEL.filename]);
+  });
+  it("preserves a concurrently replaced invalid model rather than quarantining it", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    await writeFile(modelPath(config), "original invalid", { mode: 0o600 });
+    await trustSyntheticModel();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        modelResponse(async () => {
+          await unlink(modelPath(config));
+          await writeFile(modelPath(config), "concurrent personal bytes", {
+            mode: 0o600,
+          });
+        }),
+      ),
+    );
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    expect(await readFile(modelPath(config), "utf8")).toBe(
+      "concurrent personal bytes",
+    );
+    expect(await readdir(dirname(modelPath(config)))).toEqual([MODEL.filename]);
+  });
+  it("reuses a concurrently published valid model without overwriting its inode", async () => {
+    const { config } = await fixture();
+    await trustSyntheticModel();
+    let publishedInode = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        modelResponse(async () => {
+          const file = await open(modelPath(config), "wx", 0o600);
+          await file.truncate(MODEL.bytes);
+          await file.close();
+          publishedInode = (await lstat(modelPath(config))).ino;
+        }),
+      ),
+    );
+    await downloadModel(
+      config,
+      new AbortController().signal,
+      () => {},
+      adequateResources,
+    );
+    expect((await lstat(modelPath(config))).ino).toBe(publishedInode);
+    expect((await lstat(modelPath(config))).nlink).toBe(1);
+    expect(await readdir(dirname(modelPath(config)))).toEqual([MODEL.filename]);
+  });
+  it("preserves changed canonical and quarantine inodes when another publisher wins the link race", async () => {
+    const { config } = await fixture();
+    await privateDirectory(config.models_root);
+    await privateDirectory(dirname(modelPath(config)));
+    await writeFile(modelPath(config), "original invalid", { mode: 0o600 });
+    await trustSyntheticModel();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => modelResponse()),
+    );
+    const promises =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    let publishedInode = 0;
+    vi.mocked(fsPromises.link).mockImplementation(async (from, to) => {
+      if (from === modelPath(config) && to === quarantinePath(config)) {
+        await unlink(modelPath(config));
+        const file = await open(modelPath(config), "wx", 0o600);
+        await file.truncate(MODEL.bytes);
+        await file.close();
+        publishedInode = (await lstat(modelPath(config))).ino;
+      }
+      await promises.link(from, to);
+    });
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    expect((await lstat(modelPath(config))).ino).toBe(publishedInode);
+    expect((await lstat(modelPath(config))).nlink).toBe(2);
+    expect((await lstat(quarantinePath(config))).ino).toBe(publishedInode);
+    expect((await readdir(dirname(modelPath(config)))).sort()).toEqual(
+      [MODEL.filename, `.${MODEL.filename}.quarantine`].sort(),
+    );
+  });
+  it.each([
+    ["ENOSPC", "DISK_SPACE_LOW"],
+    ["EDQUOT", "DISK_SPACE_LOW"],
+    ["EACCES", "LOCAL_DIRECTORY_NOT_PRIVATE"],
+    ["EPERM", "LOCAL_DIRECTORY_NOT_PRIVATE"],
+    ["EROFS", "LOCAL_DIRECTORY_NOT_PRIVATE"],
+    ["EIO", "MODEL_CACHE_INVALID"],
+  ])(
+    "reports local write failure %s as terminal %s",
+    async (code, expectedCode) => {
+      const { config } = await fixture();
+      const fetcher = vi.fn().mockImplementation(() => modelResponse());
+      vi.stubGlobal("fetch", fetcher);
+      const promises =
+        await vi.importActual<typeof import("node:fs/promises")>(
+          "node:fs/promises",
+        );
+      vi.mocked(fsPromises.open).mockImplementation(async (...arguments_) => {
+        const file = await promises.open(...arguments_);
+        if (String(arguments_[0]).includes(".download-"))
+          vi.spyOn(file, "write").mockRejectedValue(
+            Object.assign(new Error("private save details"), { code }),
+          );
+        return file;
+      });
+      await expect(
+        downloadModel(
+          config,
+          new AbortController().signal,
+          () => {},
+          adequateResources,
+        ),
+      ).rejects.toMatchObject({ code: expectedCode });
+      expect(["MODEL_DOWNLOAD_FAILED", "MODEL_DOWNLOAD_TIMEOUT"]).not.toContain(
+        expectedCode,
+      );
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+    },
+  );
+  it.each([
+    "CERT_HAS_EXPIRED",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "CERT_CHAIN_TOO_LONG",
+  ])("does not retry certificate failure %s wrapped by fetch", async (code) => {
+    const { config } = await fixture();
+    const fetcher = vi.fn().mockRejectedValue(
+      new TypeError("fetch failed", {
+        cause: Object.assign(new Error("private certificate details"), {
+          code,
+        }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_SOURCE_INVALID" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+  });
+  it.each(["sync", "close"] as const)(
+    "cleans its partial model and reports a terminal %s failure",
+    async (operation) => {
+      const { config } = await fixture();
+      await trustSyntheticModel();
+      const fetcher = vi.fn().mockImplementation(() => modelResponse());
+      vi.stubGlobal("fetch", fetcher);
+      const promises =
+        await vi.importActual<typeof import("node:fs/promises")>(
+          "node:fs/promises",
+        );
+      vi.mocked(fsPromises.open).mockImplementation(async (...arguments_) => {
+        const file = await promises.open(...arguments_);
+        if (String(arguments_[0]).includes(".download-")) {
+          const failure = Object.assign(new Error("private save details"), {
+            code: "EIO",
+          });
+          if (operation === "sync")
+            vi.spyOn(file, "sync").mockRejectedValue(failure);
+          else {
+            const close = file.close.bind(file);
+            vi.spyOn(file, "close").mockImplementation(async () => {
+              await close();
+              throw failure;
+            });
+          }
+        }
+        return file;
+      });
+      await expect(
+        downloadModel(
+          config,
+          new AbortController().signal,
+          () => {},
+          adequateResources,
+        ),
+      ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+    },
+  );
+  it.each(["validation", "publication"])(
+    "leaves a replaced quarantine inode untouched after %s failure",
+    async (phase) => {
+      const { config } = await fixture();
+      await privateDirectory(config.models_root);
+      await privateDirectory(dirname(modelPath(config)));
+      await writeFile(modelPath(config), "original invalid", { mode: 0o600 });
+      const originalInode = (await lstat(modelPath(config))).ino;
+      await trustSyntheticModel();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation(() => modelResponse()),
+      );
+      const promises =
+        await vi.importActual<typeof import("node:fs/promises")>(
+          "node:fs/promises",
+        );
+      let foreignInode = 0;
+      const replaceBackup = async (): Promise<void> => {
+        await unlink(quarantinePath(config));
+        await writeFile(quarantinePath(config), "foreign quarantine bytes", {
+          mode: 0o600,
+        });
+        foreignInode = (await lstat(quarantinePath(config))).ino;
+      };
+      vi.mocked(fsPromises.link).mockImplementation(async (from, to) => {
+        if (
+          phase === "publication" &&
+          String(from).includes(".download-") &&
+          to === modelPath(config)
+        ) {
+          await replaceBackup();
+          throw Object.assign(new Error("publication failed"), { code: "EIO" });
+        }
+        await promises.link(from, to);
+        if (
+          phase === "validation" &&
+          from === modelPath(config) &&
+          to === quarantinePath(config)
+        )
+          await replaceBackup();
+      });
+      await expect(
+        downloadModel(
+          config,
+          new AbortController().signal,
+          () => {},
+          adequateResources,
+        ),
+      ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+      expect(await readFile(quarantinePath(config), "utf8")).toBe(
+        "foreign quarantine bytes",
+      );
+      expect((await lstat(quarantinePath(config))).ino).toBe(foreignInode);
+      if (phase === "publication") {
+        await expect(lstat(modelPath(config))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+        expect(
+          vi
+            .mocked(fsPromises.link)
+            .mock.calls.some(
+              ([from, to]) =>
+                from === quarantinePath(config) && to === modelPath(config),
+            ),
+        ).toBe(false);
+      } else {
+        expect(await readFile(modelPath(config), "utf8")).toBe(
+          "original invalid",
+        );
+        expect((await lstat(modelPath(config))).ino).toBe(originalInode);
+      }
+    },
+  );
+  it("does not retry a filesystem permission failure", async () => {
+    const { config } = await fixture();
+    const fetcher = vi.fn().mockImplementation(() => modelResponse());
+    vi.stubGlobal("fetch", fetcher);
+    const promises =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    vi.mocked(fsPromises.open).mockImplementation(async (...arguments_) => {
+      if (String(arguments_[0]).includes(".download-"))
+        throw Object.assign(new Error("permission failure"), {
+          code: "EACCES",
+        });
+      return promises.open(...arguments_);
+    });
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "LOCAL_DIRECTORY_NOT_PRIVATE" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await readdir(dirname(modelPath(config)))).toEqual([]);
+  });
+  it("fails zero-progress writes without retrying or leaving partial data", async () => {
+    const { config } = await fixture();
+    await trustSyntheticModel();
+    const fetcher = vi.fn().mockImplementation(() => modelResponse());
+    vi.stubGlobal("fetch", fetcher);
+    const promises =
+      await vi.importActual<typeof import("node:fs/promises")>(
+        "node:fs/promises",
+      );
+    vi.mocked(fsPromises.open).mockImplementation(async (...arguments_) => {
+      const file = await promises.open(...arguments_);
+      if (String(arguments_[0]).includes(".download-"))
+        vi.spyOn(file, "write").mockResolvedValue({
+          bytesWritten: 0,
+          buffer: "",
+        });
+      return file;
+    });
+    await expect(
+      downloadModel(
+        config,
+        new AbortController().signal,
+        () => {},
+        adequateResources,
+      ),
+    ).rejects.toMatchObject({ code: "MODEL_CACHE_INVALID" });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await readdir(dirname(modelPath(config)))).toEqual([]);
   });
   it("honors cancelled setup without publishing a model", async () => {
     const { config } = await fixture();

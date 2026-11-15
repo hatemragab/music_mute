@@ -1,3 +1,4 @@
+import { localDiagnostics } from "./local-debug.js";
 import { desktopRecord } from "../shared/desktop-protocol.js";
 import {
   DesktopApiError,
@@ -10,7 +11,14 @@ export type AccountTransport = Pick<
   AccountApiClient,
   "origin" | "request" | "assertCurrent"
 >;
-export type AccountResource = "jobs" | "job" | "import" | "usage" | "policy";
+export type AccountResource =
+  | "jobs"
+  | "job"
+  | "import"
+  | "local_media_sync"
+  | "worker_registration"
+  | "usage"
+  | "policy";
 export type AccountConnectionState =
   "connecting" | "live" | "reconnecting" | "stopped";
 export type AccountSnapshot =
@@ -206,7 +214,8 @@ export class AccountRealtimeClient {
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       const socket = (
         this.options.socket ??
-        ((address, protocols) => new WebSocket(address, protocols))
+        ((address, protocols) =>
+          localDiagnostics.observeSocket(new WebSocket(address, protocols)))
       )(url.href, [grant.protocol, `ticket.${grant.ticket}`]);
       this.socket = socket;
       this.armWatchdog(10_000);
@@ -452,7 +461,15 @@ function validateParams(
   params: Record<string, string>,
 ): void {
   if (
-    !["jobs", "job", "import", "usage", "policy"].includes(resource) ||
+    ![
+      "jobs",
+      "job",
+      "import",
+      "local_media_sync",
+      "worker_registration",
+      "usage",
+      "policy",
+    ].includes(resource) ||
     !desktopRecord(params) ||
     Object.values(params).some(
       (value) => typeof value !== "string" || value.length > 512,
@@ -463,15 +480,20 @@ function validateParams(
   const allowed =
     resource === "jobs"
       ? ["limit", "cursor", "status"]
-      : resource === "job" || resource === "import"
+      : resource === "job" ||
+          resource === "import" ||
+          resource === "local_media_sync"
         ? ["id"]
         : resource === "policy"
           ? ["schema_version"]
           : [];
   if (
     Object.keys(params).some((key) => !allowed.includes(key)) ||
-    ((resource === "job" || resource === "import") &&
+    ((resource === "job" ||
+      resource === "import" ||
+      resource === "local_media_sync") &&
       !/^[a-f0-9]{24}$/.test(params.id ?? ""))
   )
     throw new DesktopApiError("REALTIME_PARAMS_INVALID");
 }
+export { validateParams as validateAccountRealtimeParams };

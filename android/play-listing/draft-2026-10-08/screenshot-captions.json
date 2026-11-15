@@ -1,0 +1,73 @@
+{
+  "en-US": [
+    {
+      "screen": "Home with file import",
+      "caption": "Start with your own audio",
+      "alt_text": "MusicMute Home with the audio file import control.",
+      "evidence_needed": "Real Android capture showing the current file import control, with link import hidden when current policy hides it."
+    },
+    {
+      "screen": "Prepared audio review",
+      "caption": "Review before processing",
+      "alt_text": "Prepared audio review with recording details and permission confirmation before cloud processing.",
+      "evidence_needed": "Real Android capture of a rights-cleared audio file at the review step."
+    },
+    {
+      "screen": "Player original and voice comparison",
+      "caption": "Compare original and voice",
+      "alt_text": "MusicMute Player with Original audio and Voice only comparison controls.",
+      "evidence_needed": "Real Android capture of a completed, rights-cleared processing job."
+    },
+    {
+      "screen": "Library",
+      "caption": "Keep recordings together",
+      "alt_text": "MusicMute Library showing completed recordings and their playback controls.",
+      "evidence_needed": "Real Android capture containing only nonpersonal, rights-cleared completed recordings."
+    },
+    {
+      "screen": "Listening tools",
+      "caption": "Set a sleep timer",
+      "alt_text": "MusicMute listening tools with sleep timer and passage controls.",
+      "evidence_needed": "Real Android capture of the implemented listening controls."
+    }
+  ],
+  "ar": [
+    {
+      "screen": "Home with file import",
+      "caption": "ابدأ بملفك الصوتي",
+      "alt_text": "الشاشة الرئيسية في MusicMute مع زر استيراد ملف صوتي."
+    },
+    {
+      "screen": "Prepared audio review",
+      "caption": "راجع الملف قبل المعالجة",
+      "alt_text": "مراجعة الملف الصوتي مع تفاصيل التسجيل وتأكيد الإذن باستخدامه قبل المعالجة السحابية."
+    },
+    {
+      "screen": "Player original and voice comparison",
+      "caption": "قارن الأصل بالصوت المعزول",
+      "alt_text": "مشغّل MusicMute مع عناصر التبديل بين الصوت الأصلي والصوت المعزول."
+    },
+    {
+      "screen": "Library",
+      "caption": "تسجيلاتك في مكان واحد",
+      "alt_text": "مكتبة MusicMute تعرض تسجيلات مكتملة وعناصر التحكم بتشغيلها."
+    },
+    {
+      "screen": "Listening tools",
+      "caption": "اضبط مؤقّت النوم",
+      "alt_text": "أدوات الاستماع في MusicMute مع مؤقّت النوم وعناصر التحكم بالمقاطع."
+    }
+  ],
+  "feature_graphic": {
+    "en-US": {
+      "headline": "Keep the voice",
+      "subheadline": "Reduce background music",
+      "alt_text": "MusicMute artwork with an isolated mint voice waveform and the words Keep the voice."
+    },
+    "ar": {
+      "headline": "احتفظ بالصوت",
+      "subheadline": "قلّل الموسيقى الخلفية",
+      "alt_text": "تصميم MusicMute بموجة صوتية بلون النعناع وعبارة احتفظ بالصوت."
+    }
+  }
+}

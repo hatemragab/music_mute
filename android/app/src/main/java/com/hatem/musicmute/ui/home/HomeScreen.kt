@@ -77,18 +77,25 @@ fun HomeScreen(
     actionBusy: Boolean = false,
     notificationsNeeded: Boolean = false,
     linkRequest: Int = 0,
+    linkImportVisible: Boolean = false,
     onDelete: (AudioTaskPresentation) -> Unit = {},
     onRetry: (AudioTaskPresentation) -> Unit = {},
     retryingImports: Set<String> = emptySet(),
 ) {
     val visibleTasks = tasks.filter { it.visibleOnHome }
     var notificationDismissed by rememberSaveable { mutableStateOf(false) }
-    var linkSource by rememberSaveable { mutableStateOf(true) }
+    var linkSource by rememberSaveable { mutableStateOf(linkImportVisible) }
     var showSites by rememberSaveable { mutableStateOf(false) }
     var showTrimInfo by rememberSaveable { mutableStateOf(false) }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(linkImportVisible) {
+        if (!linkImportVisible) {
+            linkSource = false
+            showSites = false
+        }
+    }
     LaunchedEffect(linkRequest) {
-        if (linkRequest > 0) { linkSource = true; listState.scrollToItem(0) }
+        if (linkRequest > 0 && linkImportVisible) { linkSource = true; listState.scrollToItem(0) }
     }
     val keyboard = LocalSoftwareKeyboardController.current
     val importBusy = busy || actionBusy || urlImportBusy
@@ -110,7 +117,8 @@ fun HomeScreen(
                 HomeAppBar(history.connection)
                 Spacer(Modifier.height(16.dp))
                 ImportSourceCard(
-                    linkSource = linkSource,
+                    linkSource = linkImportVisible && linkSource,
+                    linkImportVisible = linkImportVisible,
                     importBusy = importBusy,
                     busy = busy,
                     urlImportBusy = urlImportBusy,
@@ -128,6 +136,7 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(12.dp))
                 ImportUtilitiesCard(
+                    linkImportVisible = linkImportVisible,
                     trimEnabled = trimEnabled,
                     enabled = !importBusy,
                     onShowSites = { showSites = true },
@@ -187,7 +196,7 @@ fun HomeScreen(
         }
         miniPlayer()
     }
-    if (showSites) CreativeSheet(onDismiss = { showSites = false }) {
+    if (showSites && linkImportVisible) CreativeSheet(onDismiss = { showSites = false }) {
         Text(stringResource(R.string.listener_supported_sites), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.url_import_supported, com.hatem.musicmute.processing.SupportedAudioSites.names.joinToString(", ")),
             style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -272,6 +281,7 @@ private fun HomeLiveStatus(connection: RealtimeState) {
 @Composable
 private fun ImportSourceCard(
     linkSource: Boolean,
+    linkImportVisible: Boolean,
     importBusy: Boolean,
     busy: Boolean,
     urlImportBusy: Boolean,
@@ -285,7 +295,7 @@ private fun ImportSourceCard(
     onImport: () -> Unit,
 ) {
     CreativeCard(contentPadding = 16.dp, contentGap = 12.dp, shape = RoundedCornerShape(20.dp)) {
-        SourceChoice(linkSource, enabled = !importBusy, onLink = onLink, onFile = onFile)
+        if (linkImportVisible) SourceChoice(linkSource, enabled = !importBusy, onLink = onLink, onFile = onFile)
         if (linkSource) {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 CompactUrlImportField(
@@ -349,6 +359,7 @@ private fun ProcessingLimit(icon: androidx.compose.ui.graphics.vector.ImageVecto
 
 @Composable
 private fun ImportUtilitiesCard(
+    linkImportVisible: Boolean,
     trimEnabled: Boolean,
     enabled: Boolean,
     onShowSites: () -> Unit,
@@ -360,19 +371,21 @@ private fun ImportUtilitiesCard(
             Modifier.fillMaxWidth().heightIn(min = 56.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(
-                onClick = onShowSites,
-                enabled = enabled,
-                modifier = Modifier.weight(1f).heightIn(min = 56.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Icon(Icons.Outlined.Info, null, Modifier.size(CreativeTokens.SmallIcon))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.listener_supported_sites), Modifier.weight(1f),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(16.dp))
+            if (linkImportVisible) {
+                TextButton(
+                    onClick = onShowSites,
+                    enabled = enabled,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Icon(Icons.Outlined.Info, null, Modifier.size(CreativeTokens.SmallIcon))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.listener_supported_sites), Modifier.weight(1f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(16.dp))
+                }
+                VerticalDivider(Modifier.height(32.dp), color = MaterialTheme.colorScheme.outlineVariant)
             }
-            VerticalDivider(Modifier.height(32.dp), color = MaterialTheme.colorScheme.outlineVariant)
             Row(
                 Modifier.weight(1f).heightIn(min = 56.dp),
                 verticalAlignment = Alignment.CenterVertically,

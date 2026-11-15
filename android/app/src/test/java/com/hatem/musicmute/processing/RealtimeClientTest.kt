@@ -3,6 +3,7 @@ package com.hatem.musicmute.processing
 import com.hatem.musicmute.auth.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.*
 import okhttp3.*
 import okio.ByteString
@@ -10,6 +11,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.Assert.*
+import kotlinx.serialization.json.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RealtimeClientTest {
@@ -139,6 +141,56 @@ class RealtimeClientTest {
         assertEquals(RealtimeState.SIGNED_OUT, client.state.value)
         assertEquals(1, tickets)
         client.bindSession(null)
+    }
+
+    @Test fun nativePolicyUpdatesShareImportSocketWithoutInterruptingExistingWork() = runTest(dispatcher) {
+        var tickets = 0
+        val sockets = mutableListOf<Socket>()
+        val auth = AuthApiClient(AuthConfiguration("https://api.example.test", false), { "owner" }, { "fixture-token" },
+            AuthHttpTransport { _, _, _, _ ->
+                tickets++
+                AuthHttpResponse(201, """{"ticket":"${"a".repeat(43)}","path":"/realtime/socket","protocol":"musicmute.realtime.v1"}""")
+            })
+        val client = RealtimeClient(auth, backgroundScope, { "installation" },
+            openSocket = { request, listener -> Socket(request, listener).also { sockets.add(it) } })
+        val cache = object : ProcessingPolicyCache {
+            var value: ProcessingMediaPolicy? = null
+            override suspend fun read(ownerUid: String?) = value
+            override suspend fun write(value: ProcessingMediaPolicy, ownerUid: String?) { this.value = value }
+        }
+        val policy = ProcessingPolicyRepository(backgroundScope, cache,
+            { ProcessingMediaPolicy.parse(ApiWireJson.response(processingPolicyFixture)) },
+            { client.watch("policy", mapOf("schema_version" to "2")).map { ProcessingMediaPolicy.parse(it) } })
+        val owner = ProcessingSession("owner", 1)
+        client.bindSession(owner)
+        client.setForeground(true)
+        policy.bindSession(owner)
+        policy.setForeground(true)
+        val imports = mutableListOf<String>()
+        backgroundScope.launch { client.watch("import", mapOf("id" to "in-flight")).collect { imports.add(it) } }
+        runCurrent()
+        val socket = sockets.single()
+        socket.frame("""{"type":"ready","protocol_version":1,"stream_id":"native-policy"}""")
+        runCurrent()
+        fun subscription(resource: String) = socket.sent.map { Json.parseToJsonElement(it).jsonObject }
+            .single { it["resource"]?.jsonPrimitive?.content == resource }.getValue("subscription_id").jsonPrimitive.content
+        fun snapshot(resource: String, sequence: Int, data: String) =
+            """{"type":"snapshot","protocol_version":1,"stream_id":"native-policy","subscription_id":"${subscription(resource)}","sequence":$sequence,"data":$data}"""
+        fun visibility(visible: Boolean) = processingPolicyFixture.replace("\"revision\":1",
+            "\"revision\":1,\"link_import_visible\":$visible,\"link_import_policy_revision\":1")
+        socket.frame(snapshot("import", 1, """{"status":"acquiring"}"""))
+        socket.frame(snapshot("policy", 1, visibility(true)))
+        runCurrent()
+        assertTrue(policy.policy.value.linkImportVisible)
+        socket.frame(snapshot("policy", 2, visibility(false)))
+        socket.frame(snapshot("import", 2, """{"status":"submitted"}"""))
+        runCurrent()
+        assertFalse(policy.policy.value.linkImportVisible)
+        assertEquals(2, imports.size)
+        assertTrue(imports.last().contains("submitted"))
+        assertFalse(socket.cancelled)
+        assertEquals(1, tickets)
+        assertEquals(1, sockets.size)
     }
 
 }

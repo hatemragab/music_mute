@@ -33,6 +33,7 @@ export class WorkerMachineLifecycleController {
       request.workerPrincipal!,
       dto.platform,
       dto.download === true,
+      dto.installationProfile,
     );
   }
 

@@ -468,15 +468,31 @@ import Foundation
     var quietIdentity = stat()
     precondition(lstat(quietBundleURL.path, &quietIdentity) == 0)
     let quietBroker = Process()
+    guard
+      let fixtureHelper = ProcessInfo.processInfo.environment[
+        "MUSICMUTE_INSTALL_HELPER_FIXTURE_PATH"]
+    else {
+      preconditionFailure("Deterministic guardian fixture helper is required")
+    }
+    let activitySnapshot = temporary.appendingPathComponent("sparkle-snapshot")
+    func setActivity(_ value: String) throws {
+      try Data(value.utf8).write(to: activitySnapshot)
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o600], ofItemAtPath: activitySnapshot.path)
+    }
+    try setActivity("active")
     quietBroker.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
     quietBroker.arguments = [
-      "--guardian-broker", helper.path,
+      "--guardian-broker", fixtureHelper,
       quietSupport.appendingPathComponent("update.lock").path, quietBundleURL.path,
       String(quietIdentity.st_dev), String(quietIdentity.st_ino),
     ]
     let quietOutput = Pipe()
     quietBroker.standardOutput = quietOutput
     quietBroker.standardError = FileHandle.nullDevice
+    quietBroker.environment = ProcessInfo.processInfo.environment.merging([
+      "MUSICMUTE_TEST_SPARKLE_SNAPSHOT": activitySnapshot.path
+    ]) { _, fixture in fixture }
     try quietBroker.run()
     let quietReady = try readExactly(quietOutput.fileHandleForReading, count: 6)
     precondition(quietReady == Data("READY\n".utf8))
@@ -487,6 +503,16 @@ import Foundation
       O_RDWR | O_CLOEXEC | O_NOFOLLOW)
     precondition(quietProbe >= 0)
     precondition(flock(quietProbe, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK)
+    usleep(300_000)
+    precondition(
+      flock(quietProbe, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK,
+      "An observed active installer must retain the exclusive update lock")
+    try setActivity("unknown")
+    usleep(300_000)
+    precondition(
+      flock(quietProbe, LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK,
+      "Unavailable process enumeration must retain the exclusive update lock")
+    try setActivity("quiet")
     let quietStarted = ProcessInfo.processInfo.systemUptime
     var quietReleased = false
     for _ in 0..<800 {

@@ -16,6 +16,7 @@ import {
   WORKER_RECIPE_IDS,
   type WorkerRecipeId,
 } from "../../../protocol/v1/protocol.js";
+import { isCurrentUserSid } from "../windows/consumer-native-policy.js";
 const CAPACITY_TIMEOUT_MS = 7_200_000;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
@@ -73,7 +74,7 @@ export interface RepeatedBenchmarkReport {
   recipeId: string;
   recipeDigest: string;
   provider: "mps" | "directml";
-  serviceIdentity: "S-1-5-19" | "current-user";
+  serviceIdentity: string;
   fallbackDisabled: boolean;
   providerDispatch: Record<string, unknown>;
   gpuModel: string | null;
@@ -284,6 +285,7 @@ export function summarizeRepeatedBenchmarkReport(
     warmupRuns: number;
     groupSize?: number;
     provider?: "mps" | "directml";
+    expectedUserSid?: string;
   },
 ): RepeatedBenchmarkReport {
   const report = record(value, "Repeated benchmark report");
@@ -293,7 +295,14 @@ export function summarizeRepeatedBenchmarkReport(
     report.scope !== "local-engine-only" ||
     !["mps", "directml"].includes(String(report.provider)) ||
     (context.provider !== undefined && report.provider !== context.provider) ||
-    (report.provider === "directml" && report.serviceIdentity !== "S-1-5-19") ||
+    (context.expectedUserSid !== undefined &&
+      (!isCurrentUserSid(context.expectedUserSid) ||
+        report.provider !== "directml" ||
+        report.serviceIdentity !== context.expectedUserSid ||
+        report.fallbackDisabled !== true)) ||
+    (report.provider === "directml" &&
+      context.expectedUserSid === undefined &&
+      report.serviceIdentity !== "S-1-5-19") ||
     typeof report.fallbackDisabled !== "boolean" ||
     (report.provider === "mps" && report.fallbackDisabled !== true)
   )
@@ -508,7 +517,9 @@ export function summarizeRepeatedBenchmarkReport(
   const runtime = record(report.runtime, "Benchmark runtime");
   const gpuIdentity =
     report.provider === "directml"
-      ? parseDirectmlIdentity(report.gpuIdentity)
+      ? parseDirectmlIdentity(report.gpuIdentity, {
+          allowDeviceOrdinal: context.expectedUserSid !== undefined,
+        })
       : null;
   if (gpuIdentity !== null && gpuIdentity.name !== gpuModel)
     throw new TypeError("DirectML adapter name does not match the report");
@@ -525,7 +536,9 @@ export function summarizeRepeatedBenchmarkReport(
     recipeDigest: report.recipeDigest as string,
     provider: report.provider as "mps" | "directml",
     serviceIdentity:
-      report.provider === "directml" ? "S-1-5-19" : "current-user",
+      report.provider === "directml"
+        ? (context.expectedUserSid ?? "S-1-5-19")
+        : "current-user",
     fallbackDisabled: report.fallbackDisabled,
     providerDispatch: {
       proven: true,
@@ -670,11 +683,18 @@ function parseMpsMemory(
   };
 }
 
-export function parseDirectmlIdentity(value: unknown): Record<string, unknown> {
+export function parseDirectmlIdentity(
+  value: unknown,
+  options: { allowDeviceOrdinal?: boolean } = {},
+): Record<string, unknown> {
   const adapter = record(value, "DirectML adapter identity");
   if (
     adapter.source !== "DXGI EnumAdapters1/GetDesc1" ||
-    adapter.deviceIndex !== 0 ||
+    (options.allowDeviceOrdinal
+      ? !Number.isSafeInteger(adapter.deviceIndex) ||
+        Number(adapter.deviceIndex) < 0 ||
+        Number(adapter.deviceIndex) > 15
+      : adapter.deviceIndex !== 0) ||
     typeof adapter.name !== "string" ||
     !/^[A-Za-z0-9 ._-]{1,100}$/u.test(adapter.name) ||
     typeof adapter.luid !== "string" ||
@@ -775,6 +795,7 @@ async function readBenchmarkBaseline(
 
 export function parseStoredRepeatedBenchmarkReport(
   value: unknown,
+  options: { expectedUserSid?: string } = {},
 ): RepeatedBenchmarkReport {
   const stored = record(value, "Stored benchmark report");
   const measuredRuns = stored.measuredRuns;
@@ -811,6 +832,9 @@ export function parseStoredRepeatedBenchmarkReport(
       ),
       measuredRuns: measuredRuns as number,
       warmupRuns: warmupRuns as number,
+      ...(options.expectedUserSid === undefined
+        ? {}
+        : { expectedUserSid: options.expectedUserSid }),
     },
   );
 }

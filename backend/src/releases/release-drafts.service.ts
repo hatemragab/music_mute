@@ -34,8 +34,7 @@ function releaseChannel(raw: Record<string, unknown>): ReleaseChannel {
   if (
     Object.keys(raw).sort().join(',') !== 'platform,source' ||
     !(
-      (raw.platform === 'android' &&
-        ['direct_apk', 'google_play'].includes(String(raw.source))) ||
+      (raw.platform === 'android' && raw.source === 'google_play') ||
       (raw.platform === 'ios' && raw.source === 'app_store')
     )
   )
@@ -267,6 +266,8 @@ export class ReleaseDraftsService implements OnModuleInit {
       async (session) => {
         const release = await this.releases.findById(objectId).session(session);
         if (!release) throw adminError('RESOURCE_NOT_FOUND');
+        if (release.source === 'direct_apk')
+          throw adminError('INVALID_REQUEST');
         if (
           release.state !== 'draft' ||
           release.revision !== dto.expectedRevision

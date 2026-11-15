@@ -1,7 +1,7 @@
 # MusicMute API client contract
 
-This is the HTTP contract in this repository for the Android and iOS apps, the end-user web client, the
-administrator dashboard, and the worker runtime. [OpenAPI](../../backend/openapi.yaml)
+This is the HTTP contract in this repository for the Android and iOS apps, macOS and Windows desktops, the end-user web client,
+the administrator dashboard, and the worker runtime. [OpenAPI](../../backend/openapi.yaml)
 defines the request and response schemas for each operation; the
 [route matrix](../backend-security/route-matrix.md) records authentication,
 ownership, limits, and the worker WebSocket boundary. Check those files when
@@ -109,10 +109,94 @@ REST method/header rules do not replace socket framing. Backend support must shi
 before matching clients. Source and isolated fixtures are not live registration,
 installed-Mac login, or production deployment proof.
 
-## Mac local media sync
+## Desktop platforms and Windows consumer workers
 
-The Mac desktop reports platform `macos`, with its own optional `minimum_build`
-policy. It must not impersonate `web` or use an Android/iOS release pin. Cloud
+Windows sessions and device reports use `platform: "windows"`. They retain the
+existing owner, installation, metadata-revision, account-deletion and session
+revocation fences. `policy.platforms.windows.minimum_build` is a separate optional
+desktop gate; an omitted persisted Windows policy means no minimum build. Public
+policy responses expose `windows: { "minimum_build": null }` by default. Windows
+does not use Android/iOS distribution enums or store selection. This adds no
+Windows artifact URL, publication, or implicit deployment.
+
+Desktop cloud-access gates have an independent administrator resource:
+`GET /admin/update-policy/desktop` requires `releases.read` and returns
+`{ "revision": 2, "macos": { "minimum_build": null }, "windows": { "minimum_build": 42 } }`.
+`PATCH /admin/update-policy/desktop` requires `releases.manage`, recent Google
+administrator authentication, a UUIDv4 `operation_id`, `expected_revision` and a
+printable reason of 1–500 characters. Its closed body includes `platforms` with
+one or both desktop channels; each selected channel requires `minimum_build`
+as an integer 1–2147483647 or explicit null to clear. Omitted channels are preserved.
+Android/iOS release selection, verified-email policy, signed desktop updater
+metadata and installer publication are unaffected. The shared AppPolicy revision
+prevents a concurrent mobile publication or another desktop edit being overwritten.
+
+Success is HTTP 200 with `policy`, `applied_revision`, `operation_id` and
+`replayed`, with `Cache-Control: no-store`. Operation-ID replay reads the durable
+receipt without reapplying the write; `policy.revision` may be newer than the
+original `applied_revision`. On an ambiguous response, read
+`GET /admin/operations/{operation_id}` and then the desktop resource. Do not blindly
+repeat PATCH. A revision conflict requires reading and reviewing the current state;
+dependency/auth failures retain existing Problem JSON. These source contracts are
+not deployment, configured-release or successful Windows-update proof.
+
+The Windows per-user worker reports `runtime.installation_profile: "windows-user"`
+on its installation report. The value is persisted with runtime identity and
+appears in authorized machine projections. Omission retains the existing macOS
+or Windows service profile. Consumer activation requires Windows x64 hardware,
+OS build 19045 or later, DirectML capabilities naming a reported GPU, the existing
+qualified model/recipe and a recorded qualification output. These reports are
+client declarations, not remote attestation of model execution. Existing Google
+sign-in, account approval, revision and activation fences remain required; the
+profile itself grants no additional authority.
+
+`POST /worker/installations/{id}/artifacts` and `POST /worker/updates` accept an
+optional `installation_profile: "windows-user"` only with `platform:
+"windows-amd64"`. The trusted catalog selects `releases.windows-amd64-user`,
+never the legacy `releases.windows-amd64` object. Missing consumer or signed
+metadata returns the existing dependency-unavailable error; no service fallback
+or automatic release publication occurs. Updates must match the authenticated
+machine's stored runtime profile and approved platform. A legacy service cannot
+opt into the consumer target, and a consumer cannot omit its profile to select
+a service update. The signed envelope's `metadata.installationProfile` remains
+camelCase because exact signed metadata is preserved by the wire converter.
+The surrounding request/response keys are snake_case.
+
+## Store Worker qualification data
+
+The Store Worker uses the separate `POST /worker/installations/{id}/store-qualification-artifacts`
+with an empty JSON body and its current installation bearer credential. It has
+the existing installation subject/expiry checks and transfer budget and returns
+HTTP 201 with `Cache-Control: no-store`. The closed response contains
+`schema_version: 1`, `purpose: "store-qualification-data"`,
+`platform: "windows-amd64"`, `installation_profile: "windows-user"`, `model`
+and `fixture` only. The trusted catalog may have `releases: {}`: this route needs
+no ZIP release and grants only the approved private R2 WAV fixture. The model
+descriptor retains its direct-owner-only source policy, HTTPS host/redirect
+limits and exact existing Kim checksum, filename and 66,759,214-byte size.
+The fixture is 44 bytes–64 MiB, has an immutable checksum and a temporary HTTPS
+grant. Missing, changed or unavailable inputs return the existing dependency
+error; there is no executable archive, signature or fallback descriptor.
+
+This data grant does not attest Store origin, approve a runtime or activate a
+machine. Store code authority remains the local native package proof. The actual
+protected internal release-manifest digest remains `runtime.manifest_digest`;
+an outer inventory digest is never an archive digest. Existing qualification
+inference, fixture upload/confirmation, Google/account approval, report/revision
+and activation fences remain required. Legacy artifact and update contracts
+remain compatible. Source and fixture tests do not establish deployment.
+
+API preflight: the [current Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-10-12: rules 101 (OpenAPI), 104 (security), 106 (compatibility),
+118 (snake_case JSON), 129 (paths), 148 (HTTP methods) and 151 (responses).
+The Store data response is deliberately closed to avoid admitting executable or
+authority fields; the existing extensible legacy responses remain compatible.
+
+## Desktop local media sync
+
+The Mac desktop reports platform `macos` and Windows reports `windows`, each with
+its own optional `minimum_build` policy. They must not impersonate `web` or use
+an Android/iOS release pin. Cloud
 processing still uses normal jobs/imports and their processing allowance. Local
 separation does not consume cloud processing seconds or waiting slots.
 
@@ -268,6 +352,17 @@ Source-only hits require normal compute admission. Local uploads remain private.
 URL job/account deletion removes owned records/access and retains shared audio.
 No cache hashes, producer account details or additional grant fields are exposed.
 
+A completed hit returns the existing undeleted ready job when this account
+already owns that exact shared output rendition, including when a new request
+UUID is used or the previous import receipt has expired. The normal HTTP 202
+receipt has `status: submitted` and that existing `job_id`; clients must not
+assume every accepted import creates a new history row. Its saved title, retained
+storage charge and notification are preserved. Otherwise one owned ready job is
+created referencing the same shared objects. Concurrent submissions cannot create
+duplicate ready jobs. Full/trimmed outputs remain distinct; deleted jobs and
+failed/cancelled attempts do not block a fresh delivery. Existing duplicate
+history is not merged or deleted.
+
 Completed hits are delivered directly, without BullMQ admission or acquisition
 queue capacity. They can be reused while URL acquisition is disabled or the
 outstanding import queue is full; normal account and processing policy checks
@@ -277,7 +372,8 @@ and `https://youtu.be/bZxrIoCPsOc?si=RLbbOevlM4lBmXHi` identify `bZxrIoCPsOc`.
 `POST /media-imports/cache-deliveries` accepts the same `url`, UUIDv4 `request_id`
 and optional boolean `trim_enabled`. It uses the same authenticated installation
 and account checks, returning the normal HTTP 202 import view with `Location`
-and `Cache-Control: no-store`. A ready hit creates an owned ready Library job
+and `Cache-Control: no-store`. A ready hit returns the existing matching owned
+ready Library job or creates one if absent,
 referencing the verified global original and matching vocals without another
 adapter call, worker attempt, upload grant or media copy. A transient interrupted
 delivery retains its import for normal owner-scoped realtime recovery. A miss
@@ -328,12 +424,12 @@ URLs are never returned to clients. See [provider architecture and qualification
 
 ## Authentication and ownership
 
-| Audience         | Credential and access rule                                                                                                                                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Public           | Only operations marked public in OpenAPI; for example `GET /health/live`.                                                                                                                                                                        |
-| End-user account | `Authorization: Bearer <Firebase ID token>`. Android, iOS and web bootstrap with `POST /auth/sessions`; owner routes require the active account. The server selects the owner from the authenticated identity, not a caller-supplied account ID. |
-| Administrator    | Firebase bearer token plus an active, verified Google administrator record and the permission listed for the operation. Some writes also require recent authentication, revision fences, and operation IDs.                                      |
-| Worker           | `Authorization: Bearer <worker credential>`, with enrollment, installation, or machine scope specified per operation. Machine credentials do not grant administrator access.                                                                     |
+| Audience         | Credential and access rule                                                                                                                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public           | Only operations marked public in OpenAPI; for example `GET /health/live`.                                                                                                                                                                                        |
+| End-user account | `Authorization: Bearer <Firebase ID token>`. Android, iOS, macOS, Windows and web bootstrap with `POST /auth/sessions`; owner routes require the active account. The server selects the owner from the authenticated identity, not a caller-supplied account ID. |
+| Administrator    | Firebase bearer token plus an active, verified Google administrator record and the permission listed for the operation. Some writes also require recent authentication, revision fences, and operation IDs.                                                      |
+| Worker           | `Authorization: Bearer <worker credential>`, with enrollment, installation, or machine scope specified per operation. Machine credentials do not grant administrator access.                                                                                     |
 
 For the worker hint socket, first mint a single-use ticket with authenticated
 `POST /worker/hints/tickets`. Connect to `/worker/hints/socket` with that ticket
@@ -347,7 +443,7 @@ attaching the Firebase bearer token to the R2 request.
 
 ### Desktop Google sign-in exchange
 
-Before Firebase sign-in, the native Mac app sends one public
+Before Firebase sign-in, the native macOS or Windows app sends one public
 `POST /auth/desktop-google-token-exchanges` with `authorization_code` (1–4096
 visible ASCII characters), `code_verifier` (43–128 unreserved ASCII characters)
 and `redirect_uri`. The callback must be exactly
@@ -355,6 +451,13 @@ and `redirect_uri`. The callback must be exactly
 no leading zero, alias, userinfo, query or fragment. The backend never requests
 this URL; it passes it as a Google token form value. Clients cannot supply a
 client ID, secret or token endpoint.
+
+Both desktop apps use the same installed-application public client ID as the
+backend's fixed `GOOGLE_DESKTOP_CLIENT_ID`. Keep its matching secret in backend
+configuration only and permit its audience in the Firebase Google provider.
+Windows adds no caller-selected client ID or redirect alias. The native app must
+open the system browser, bind its own loopback callback and verify OAuth state
+before sending the authorization code and original PKCE verifier.
 
 The server supplies its single configured Desktop OAuth client and contacts only
 `https://oauth2.googleapis.com/token`: one attempt, no redirects, a five-second
@@ -506,8 +609,24 @@ removes control characters and limits the title to 200 Unicode code points befor
 saving it on the import and the resulting job (`source_title` and initial
 `display_name`). Missing metadata remains nullable; previously imported titles are
 not reconstructed automatically. Metadata is saved as sanitized nullable MongoDB
-`extra_data` without extra paid requests and is not added to public job projections.
-The current provider responses do not include titles; do not promise one.
+`extra_data` without extra paid requests. The existing descriptive metadata stays
+private; job projections expose only its validated nullable `thumbnail_url`.
+The current yt-dlp adapter can include source titles; missing titles remain nullable.
+
+### Library thumbnails
+
+HTTP job list/detail responses and the same owner-scoped WebSocket snapshots
+include `thumbnail_url: string | null`. The URL is the original thumbnail already
+included in acquisition and is persisted in existing nullable job/shared-source
+`extra_data`; cached shared-source/result deliveries and job retries preserve it.
+Only bounded HTTPS `i.ytimg.com` `/vi/` or `/vi_webp/` JPG/WebP image URLs with
+an 11-character video ID and optional bounded `sqp`/`rs` parameters are accepted.
+No thumbnail image is downloaded or stored by the backend, no metadata request is
+added, and no existing records are backfilled. Jobs without valid artwork return
+null. Clients must also accept an absent field from older servers, retain their
+existing placeholder while loading and on missing/failed artwork, and never send
+account credentials to the image host. Public thumbnail availability is external;
+it must not affect audio playback or processing.
 
 Android presents acquisition and processing as one job card. Submitted imports are
 acknowledged locally once their job appears, preventing stale cards after history
@@ -540,10 +659,32 @@ backward compatible; new UIs use `server_stage_timings` for authoritative totals
 installation ID retained in that browser profile, app/build/OS metadata within
 the existing bounds, and the same account ownership and revocation rules. The
 `X-Installation-Id` processing guard still requires a current owned device.
-Web follows shared email-verification and processing policies; native APK/App
+Web follows shared email-verification and processing policies; native Google Play/App
 Store minimum-build and selected-release checks do not apply to web. Native
 release records, operator release policy shape, and native push registrations
 remain Android/iOS only. A browser must not register a native push token.
+
+## Android app updates through Google Play
+
+Android requests `GET /app-updates/policy?platform=android&distribution=play`.
+The selected target has `source: google_play`, `artifact: null`, and the exact
+MusicMute Play listing URL. Below `minimum_build`, the decision is `required`;
+between the minimum and target build it is `optional`; at or above the target it
+is `none`. A required Play In-App Update may install any offered build meeting
+the minimum, even below the target. Optional updates require an offered build
+meeting the target. Availability or consent does not clear the blocking gate;
+the actual installed build must meet the current minimum.
+
+Android release writes accept only `google_play` and the fixed listing URL.
+Policy writes retain the existing shape with `source: google_play` and
+`direct_release_id: null`. Historical `direct_apk` releases remain readable by
+administrators and cannot be edited, published or selected. Direct policy
+requests, APK upload reservation/completion, APK download grants/redirects and
+the APK landing page are retired. Processed audio grants under
+`/jobs/{id}/download-grants` remain separate. See [OpenAPI](../../backend/openapi.yaml)
+for route errors and [the Play release guide](../google-play-release.md) for
+operator availability checks. A missing Play target with a configured minimum
+remains a policy error; deployment does not publish a store release or repair it.
 
 ## Realtime processing snapshots
 
@@ -577,6 +718,84 @@ backward compatible; new UIs use `server_stage_timings` for authoritative totals
 Omitting `media_limits_version` retains 20-minute / 50-MB ceilings for installed
 native clients. Account allowances apply equally to all clients; URL imports use
 the effective account policy. Existing job admission snapshots remain authoritative.
+
+### Native link-import UI visibility (2026-10-08)
+
+`GET /processing-policy` (schema version 2, `Cache-Control: no-store`) and the
+owner `policy` snapshot add `link_import_enabled`,
+`link_import_disabled_countries`, `visitor_country`, `link_import_visible`,
+`link_import_reason`, and `link_import_policy_revision`. These fields control
+Android, iOS and macOS link-entry UI only. The web client and Chrome browser panel
+ignore them. Import endpoints, cache deliveries, file import, queued imports,
+acquisition retries, running jobs and downloads retain existing behavior.
+
+The effective switch requires both the stored standard account-policy value and
+the existing `URL_IMPORT_ENABLED` process flag. Missing saved switch/list mean
+false/empty. When off, visibility is false with `globally_hidden`. A selected
+authenticated account is then hidden with `user_hidden`. For all other accounts
+and guests, when on with no selected countries, visibility is true with `allowed`,
+including unknown country. With countries selected, missing/unassigned country (`XX`/`T1` included)
+is hidden with `unknown_country`; selected countries are hidden with
+`country_hidden`; all other countries are `allowed`. Native clients render from
+`link_import_visible`, default hidden for old/missing payloads, cache the last
+good payload separately for guests and each signed-in account, and check out
+on every open before applying subsequent owner snapshots. Signed-in checkout
+sends the existing Firebase Bearer; only its verified active account is considered.
+Omitting the Bearer keeps public guest checkout; malformed, revoked, disabled or
+unprovisioned credentials are rejected through the existing account guard.
+Clients never fall back to a guest response for a failed owner checkout.
+Offline clients retain the cache for their current account; signed-out Macs
+update at the next public checkout because they have no owner socket.
+
+HTTP country comes from that request's `CF-IPCountry`. Socket country comes from
+that connection's `POST /realtime-tickets` headers, retained in its server-side
+principal; it never comes from the account's latest device. No client body or
+query country is accepted. Cloudflare header authenticity depends on protecting
+the origin from direct access. The policy payload never includes coordinates.
+
+Existing `GET/PUT /admin/settings/account-policy` permissions, fresh auth, reason,
+operation receipt and `expected_revision` remain. Reads return stored
+`link_import_enabled`, sorted `link_import_disabled_countries`, sorted
+`link_import_disabled_user_ids` and `link_import_forced_off` (the current process flag), with no visitor country.
+Writes accept a boolean and up to 250 unique assigned uppercase ISO alpha-2 codes,
+which are stored sorted. The optional user list accepts up to 1,000 unique
+canonical lowercase 24-hex account IDs. Newly selected accounts must exist;
+previously selected deleted accounts remain removable and do not block unrelated
+policy edits. User selection uses the existing permission-gated administrator
+user directory. Clearing a user from the list restores global/country behavior,
+including remaining hidden if either still hides links. Public HTTP and owner
+snapshots never expose the selected user IDs. Legacy writes omitting these fields
+preserve current values. No production document rewrite or new settings resource is required.
+
+Device reads add nullable `location`: `country`, `continent`, `region`,
+`region_code`, `city`, `postal_code`, `metro_code`, `timezone`, decimal-string
+`latitude`/`longitude`, `source: cloudflare` and UTC `observed_at`. Only authenticated
+device sync or a realtime ticket with a current owned installation writes it.
+Sanitized changed locations or the existing five-minute last-seen cadence allow
+a write; unchanged observations within that window do not. Missing headers clear
+previous values to null in the new observation. Device report DTOs remain strict:
+client-supplied location fields are rejected. No new index or policy dependency
+on `user_devices` is added.
+
+Administrators with `users.read` can inspect
+`GET /admin/users/{id}/devices` (`Cache-Control: no-store`). The account ID must be
+a canonical lowercase Mongo ID. Query parameters are `before` (exclusive device
+record Mongo ID) and `limit` (1–50/default 20); unknown parameters are rejected.
+The response is `{items, next_cursor, as_of}`, ordered by record ID descending.
+It includes only the selected existing user's stored devices, including records
+hidden from that user's own history. Missing accounts return 404. Items reuse
+the existing device view, adding nullable UTC `last_authenticated_at` and
+`history_hidden_at`. `session_status` remains `signed_out` or `unknown`, not an
+online signal. Only the latest location and up to 20 version transitions are
+stored; no new collection, backfill or location-history tracking is added.
+The dashboard reads the same pages via `admin.user_devices` full snapshots with
+`id`, optional `before` and `limit`, using the shared realtime transport.
+
+API guideline preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+read on 2026-10-09; rules 101 (OpenAPI), 104 (security), 118/130 (snake_case),
+159 (bounded pagination) and 106/107 (compatible additions). REST method and
+status rules apply to the compatible HTTP endpoint; socket snapshots retain the
+existing resource registry, sequence and authorization protocol.
 
 ### Administrator announcement broadcasts
 

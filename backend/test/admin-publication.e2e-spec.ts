@@ -7,6 +7,7 @@ import { AdminReleasesController } from '../src/releases/admin-releases.controll
 import { AdminUpdatePolicyController } from '../src/releases/admin-update-policy.controller.js';
 import { ReleaseDraftsService } from '../src/releases/release-drafts.service.js';
 import { ReleasePublicationService } from '../src/releases/release-publication.service.js';
+import { DesktopUpdatePolicyService } from '../src/releases/desktop-policy.service.js';
 describe('publication HTTP authorization', () => {
   let harness: AdminHarness;
   afterEach(async () => harness?.close());
@@ -21,6 +22,7 @@ describe('publication HTTP authorization', () => {
       providers: [
         { provide: ReleaseDraftsService, useValue: {} },
         { provide: ReleasePublicationService, useValue: publication },
+        { provide: DesktopUpdatePolicyService, useValue: {} },
       ],
     });
     const path = `/admin/releases/${'a'.repeat(24)}/publications`;

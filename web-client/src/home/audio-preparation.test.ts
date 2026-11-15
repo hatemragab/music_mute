@@ -1,3 +1,4 @@
+import { localDiagnostics } from "../diagnostics/local-debug";
 import { afterEach, expect, test, vi } from "vitest";
 import { Blob as NodeBlob } from "node:buffer";
 import {
@@ -165,4 +166,38 @@ test("an already cancelled upload starts no transport", async () => {
     ),
   ).rejects.toMatchObject({ name: "AbortError" });
   expect(transport).not.toHaveBeenCalled();
+});
+
+test("records upload completion metadata without retaining private grants or binary bytes", async () => {
+  const emit = vi.spyOn(localDiagnostics, "emit");
+  class Upload {
+    status = 204;
+    withCredentials = false;
+    upload = {};
+    onload?: () => void;
+    open() {}
+    setRequestHeader() {}
+    send() {
+      this.onload?.();
+    }
+  }
+  vi.stubGlobal("XMLHttpRequest", Upload);
+  await uploadWithProgress(
+    grant,
+    new Blob(["abc"]),
+    declaration,
+    new AbortController().signal,
+    () => {},
+  );
+  const completed = emit.mock.calls.find(
+    ([name]) => name === "http.upload_completed",
+  );
+  expect(completed?.[3]).toMatchObject({
+    status: 204,
+    bytes: 3,
+    phase: "http_completed",
+  });
+  expect(JSON.stringify(emit.mock.calls)).not.toContain(grant.url);
+  expect(JSON.stringify(emit.mock.calls)).not.toContain("signature=fixture");
+  emit.mockRestore();
 });

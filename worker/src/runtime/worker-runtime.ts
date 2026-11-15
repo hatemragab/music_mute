@@ -1,13 +1,12 @@
+import { localDiagnostics } from "../observability/local-debug.js";
 import { StageClock } from "./stage-clock.js";
 import { DiagnosticForwarder } from "./diagnostic-forwarder.js";
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import {
-  ChildCommandError,
-  sanitizeDiagnostic,
-} from "../agent/child-process.js";
+import { ChildCommandError } from "../agent/ipc/child-command-error.js";
+import { sanitizeDiagnostic } from "../agent/diagnostic-redaction.js";
 import type { ChildResponse } from "../agent/ipc/child-protocol.js";
 import {
   ControlPlaneError,
@@ -47,7 +46,11 @@ import {
   TransferOwnershipError,
   type WorkerTransferClient,
 } from "./transfers.js";
-import { WorkspaceManager, type AttemptWorkspace } from "./workspace.js";
+import {
+  WorkspaceManager,
+  type AttemptWorkspace,
+  type RuntimeWorkspace,
+} from "./workspace.js";
 import {
   AttemptProgressReporter,
   publicAttemptProgress,
@@ -81,10 +84,14 @@ export interface WorkerRuntimeOptions {
   validatedMaxWorkersPerGpu?: 1 | 2;
   diagnostics?: RuntimeDiagnostics;
   resources?: Pick<RuntimeResourceGate, "assertAvailable">;
+  /** Internal native workspace lifecycle for Store-owned attempts. */
+  workspace?: RuntimeWorkspace;
   commandExecutor?: RuntimeCommandExecutor;
   maintenancePending?: () => Promise<boolean>;
   deferPreloadForMaintenance?: boolean;
   personalAdmission?: PersonalAdmission;
+  /** Consumer-only positive owned-role proof before failed/cancelled inference scratch cleanup. */
+  terminatedInferenceIdle?: () => Promise<boolean>;
   onEvent?: (event: RuntimeEvent) => void;
   hintClientFactory?: (onHint: () => void) => RuntimeHintClient;
 }
@@ -290,7 +297,7 @@ class AttemptDeferredError extends Error {
 export class WorkerRuntime {
   readonly sessionId = randomUUID();
   readonly incarnation = randomUUID();
-  private readonly workspace: WorkspaceManager;
+  private readonly workspace: RuntimeWorkspace;
   private readonly diagnostics: RuntimeDiagnostics;
   private readonly resources: Pick<RuntimeResourceGate, "assertAvailable">;
   private readonly busy = new Map<string, Promise<void>>();
@@ -357,7 +364,10 @@ export class WorkerRuntime {
     private readonly supervisor: RuntimeSupervisor,
   ) {
     validateOptions(options);
-    this.workspace = new WorkspaceManager(options.workRoot);
+    this.workspace =
+      options.workspace === undefined
+        ? new WorkspaceManager(options.workRoot)
+        : options.workspace;
     this.diagnostics =
       options.diagnostics ??
       new DiagnosticSpool(join(dirname(options.workRoot), "logs"));
@@ -489,7 +499,7 @@ export class WorkerRuntime {
           consecutiveFailures = 0;
         } catch (error) {
           if (this.stopping.signal.aborted) break;
-          // Preserve pending claim IDs across bounded transport recovery. Auth,
+          // Preserve pending claim IDs across transport recovery. Auth,
           // ownership and protocol failures must still fail closed.
           if (!(error instanceof ControlPlaneError) || !error.retryable)
             throw error;
@@ -499,11 +509,22 @@ export class WorkerRuntime {
             detail:
               "Control-plane unavailable; claims suspended during recovery",
           });
-          if (++consecutiveFailures >= 3) throw error;
-          await abortableDelay(
-            1_000 * 2 ** (consecutiveFailures - 1),
-            this.stopping.signal,
-          ).catch(() => undefined);
+          // An outage must not consume the service restart budget or unload a
+          // healthy model. Keep claims fenced until configuration is refreshed.
+          if (this.cachedPolicy) this.cachedPolicy.claimAllowed = false;
+          await this.publishLocalStatus();
+          const delayMs = Math.min(
+            30_000,
+            Math.max(
+              200,
+              error.retryAfterMs ??
+                1_000 * 2 ** Math.min(consecutiveFailures, 5),
+            ),
+          );
+          consecutiveFailures = Math.min(consecutiveFailures + 1, 6);
+          await abortableDelay(delayMs, this.stopping.signal).catch(
+            () => undefined,
+          );
           continue;
         }
         if (this.stopping.signal.aborted) break;
@@ -733,15 +754,22 @@ export class WorkerRuntime {
     // Await recovery/cleanup before stopping all remaining children once.
     await this.waitForIdle();
     try {
-      await this.hintClient?.stop();
-    } finally {
-      await this.supervisor.stop();
-      this.childState = "stopped";
+      const [hints, children] = await Promise.allSettled([
+        this.hintClient?.stop(),
+        this.supervisor.stop(),
+      ]);
+      this.childState =
+        children.status === "fulfilled" ? "stopped" : "unavailable";
       this.started = false;
+      await this.publishLocalStatus();
+      if (children.status === "rejected") throw children.reason;
+      if (hints.status === "rejected") throw hints.reason;
+    } finally {
       try {
-        await this.publishLocalStatus();
-      } finally {
         await this.diagnostics.flush();
+      } finally {
+        // A failed child-exit check must not leave the admission socket/timer
+        // keeping a dead supervisor alive and preventing service recovery.
         await this.options.personalAdmission?.stop();
       }
     }
@@ -875,6 +903,7 @@ export class WorkerRuntime {
     let workspace: AttemptWorkspace | null = null;
     let terminal = false;
     let childTerminated = false;
+    let consumerInferenceUnconfirmed = false;
     const lose = (reason: string) => {
       if (terminal || controller.signal.aborted) return;
       authority.lose(reason);
@@ -1266,6 +1295,30 @@ export class WorkerRuntime {
       controller.abort(new OwnershipLostError("attempt-finished"));
       this.stopping.signal.removeEventListener("abort", stopListener);
       await Promise.allSettled([watchdog, renewal]);
+      if (
+        workspace &&
+        childTerminated &&
+        this.options.terminatedInferenceIdle
+      ) {
+        let idle = false;
+        try {
+          idle = await this.options.terminatedInferenceIdle();
+        } catch {
+          /* Keep exact workspace on native query uncertainty. */
+        }
+        if (!idle) {
+          consumerInferenceUnconfirmed = true;
+          this.unavailable.add(slot.workerId);
+          this.cleanupBlocked.add(slot.workerId);
+          this.emit({
+            kind: "workspace-cleanup-failed",
+            workerId: slot.workerId,
+            jobId: claim.jobId,
+            attemptId: claim.attemptId,
+            code: "inference-stop-unconfirmed",
+          });
+        }
+      }
       if (workspace && !this.cleanupBlocked.has(slot.workerId)) {
         try {
           await this.workspace.cleanup(workspace);
@@ -1283,7 +1336,11 @@ export class WorkerRuntime {
           });
         }
       }
-      if (childTerminated && !this.stopping.signal.aborted) {
+      if (
+        childTerminated &&
+        !consumerInferenceUnconfirmed &&
+        !this.stopping.signal.aborted
+      ) {
         try {
           await this.supervisor.restart(slot.workerId, (_workerId, stage) => {
             this.childState = stage;
@@ -1708,6 +1765,20 @@ export class WorkerRuntime {
       severity: eventSeverity(event.kind),
       ...event,
     };
+    localDiagnostics.emit(
+      `worker.${record.kind}`,
+      record,
+      record.severity === "warning" ? "warn" : record.severity,
+      {
+        operation: record.kind,
+        sourceTimestamp: record.recordedAt,
+        sessionId: record.sessionId,
+        ...("jobId" in record ? { jobId: record.jobId } : {}),
+        ...("attemptId" in record ? { attemptId: record.attemptId } : {}),
+        ...("workerId" in record ? { workerId: record.workerId } : {}),
+        result: /failed|unavailable/.test(record.kind) ? "failure" : "observed",
+      },
+    );
     try {
       this.options.onEvent?.(record);
     } catch {
@@ -1749,6 +1820,16 @@ export class WorkerRuntime {
 }
 
 function validateOptions(options: WorkerRuntimeOptions): void {
+  if (
+    options.workspace !== undefined &&
+    (!options.workspace ||
+      ["initialize", "create", "cleanup"].some(
+        (name) =>
+          typeof options.workspace![name as keyof RuntimeWorkspace] !==
+          "function",
+      ))
+  )
+    throw new TypeError("Worker workspace lifecycle is invalid");
   if (options.slots.length === 0 || options.slots.length > 16)
     throw new TypeError("Worker runtime requires 1 to 16 slots");
   if (

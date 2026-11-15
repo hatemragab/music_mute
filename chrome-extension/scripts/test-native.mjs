@@ -18,6 +18,7 @@ const output = join(
 await mkdir(output, { recursive: true, mode: 0o700 });
 const sources = [
   "Models.swift",
+  "LocalUIDebugSession.swift",
   "DesktopWorker.swift",
   "DesktopWorkerView.swift",
   "DesktopCloudHandoff.swift",
@@ -36,6 +37,7 @@ const sources = [
   "MusicMuteLocal.swift",
 ].map((name) => join(root, "macos", name));
 const installHelper = join(output, "MusicMuteInstallHelper");
+const fixtureInstallHelper = join(output, "MusicMuteInstallHelperFixture");
 await exec(
   "/usr/bin/xcrun",
   [
@@ -52,6 +54,24 @@ await exec(
   ],
   { timeout: 60_000, maxBuffer: 128 * 1024 },
 );
+await exec(
+  "/usr/bin/xcrun",
+  [
+    "swiftc",
+    "-swift-version",
+    "6",
+    "-warnings-as-errors",
+    "-target",
+    "arm64-apple-macos14.0",
+    "-parse-as-library",
+    "-D",
+    "MUSICMUTE_NATIVE_TESTS",
+    join(root, "macos/InstallHelper.swift"),
+    "-o",
+    fixtureInstallHelper,
+  ],
+  { timeout: 60_000, maxBuffer: 128 * 1024 },
+);
 const suites = [
   "NativeTests",
   "DesktopTests",
@@ -60,7 +80,10 @@ const suites = [
   "WorkerTests",
   "SettingsTests",
 ];
-const requested = process.argv.slice(2);
+const localDebug = process.argv.includes("--local-debug");
+const requested = process.argv
+  .slice(2)
+  .filter((value) => value !== "--local-debug");
 assert.ok(
   requested.every((name) => suites.includes(name)),
   "UNKNOWN_NATIVE_SUITE",
@@ -79,6 +102,7 @@ for (const name of requested.length ? [...new Set(requested)] : suites) {
       "-parse-as-library",
       "-D",
       "MUSICMUTE_NATIVE_TESTS",
+      ...(localDebug ? ["-D", "DEBUG"] : []),
       "-framework",
       "SwiftUI",
       "-framework",
@@ -96,6 +120,7 @@ for (const name of requested.length ? [...new Set(requested)] : suites) {
     env: {
       ...process.env,
       MUSICMUTE_INSTALL_HELPER_TEST_PATH: installHelper,
+      MUSICMUTE_INSTALL_HELPER_FIXTURE_PATH: fixtureInstallHelper,
     },
   });
   process.stdout.write(stdout);

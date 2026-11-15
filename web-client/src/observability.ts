@@ -1,3 +1,4 @@
+import { localDiagnostics } from "./diagnostics/local-debug";
 import * as Sentry from "@sentry/react";
 import type { ErrorEvent } from "@sentry/react";
 
@@ -75,6 +76,7 @@ export function initializeMonitoring(): void {
 }
 
 export function reportBrowserFailure(error: unknown): void {
+  localDiagnostics.emit("runtime.caught", error, "error");
   try {
     Sentry.captureException(error);
   } catch {

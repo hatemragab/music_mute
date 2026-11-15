@@ -454,6 +454,7 @@ async function packageMacos() {
       "@executable_path/../Frameworks",
       ...[
         "Models.swift",
+        "LocalUIDebugSession.swift",
         "DesktopCloudHandoff.swift",
         "ProcessBridge.swift",
         "UIJournal.swift",

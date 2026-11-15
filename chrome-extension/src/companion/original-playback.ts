@@ -15,12 +15,17 @@ import { privateDirectory } from "./app-setup.js";
 import { withCacheMutation } from "./cache-mutator.js";
 import {
   parseDownloadGrant,
+  parseInputDeclaration,
   parseJobMetadata,
+  type InputDeclaration,
   type JobMetadata,
 } from "./cloud-provider.js";
 import type { LocalConfig } from "./config.js";
 import { probeDesktopAudio } from "./file-provider.js";
 import { runBounded } from "./local-provider.js";
+type OriginalJobMetadata = Omit<JobMetadata, "input"> & {
+  input: InputDeclaration;
+};
 
 const HASH = /^[a-f0-9]{64}$/;
 const JOB_ID = /^[a-f0-9]{24}$/;
@@ -70,14 +75,14 @@ function ownerNamespace(scope: AccountScope): string {
   return createHash("sha256").update(scope.firebase_uid).digest("hex");
 }
 
-function inputDigest(job: JobMetadata): string {
+function inputDigest(job: OriginalJobMetadata): string {
   const bytes = Buffer.from(job.input.sha256, "base64");
   if (bytes.length !== 32 || bytes.toString("base64") !== job.input.sha256)
     throw new DesktopApiError("ORIGINAL_AUDIO_INVALID");
   return bytes.toString("hex");
 }
 
-function cacheKey(job: JobMetadata): string {
+function cacheKey(job: OriginalJobMetadata): string {
   return createHash("sha256")
     .update(`${job.id}:${inputDigest(job)}`)
     .digest("hex");
@@ -164,7 +169,7 @@ async function readRecord(path: string): Promise<CacheRecord | null> {
 
 async function cached(
   root: string,
-  job: JobMetadata,
+  job: OriginalJobMetadata,
 ): Promise<{ path: string; record: CacheRecord } | null> {
   const key = cacheKey(job);
   const record = await readRecord(join(root, `${key}.json`));
@@ -226,13 +231,13 @@ async function writeRecord(
   }
 }
 
-function grantRequestPath(root: string, job: JobMetadata): string {
+function grantRequestPath(root: string, job: OriginalJobMetadata): string {
   return join(root, `${cacheKey(job)}.grant.json`);
 }
 
 async function readGrantRequest(
   root: string,
-  job: JobMetadata,
+  job: OriginalJobMetadata,
 ): Promise<GrantRequestRecord | null> {
   try {
     const { file } = await privateFile(grantRequestPath(root, job), 1024);
@@ -273,7 +278,7 @@ async function readGrantRequest(
 
 async function removeGrantRequest(
   root: string,
-  job: JobMetadata,
+  job: OriginalJobMetadata,
   expectedRequestId?: string,
 ): Promise<void> {
   const record = await readGrantRequest(root, job);
@@ -286,7 +291,7 @@ async function removeGrantRequest(
 async function grantRequest(
   cacheRoot: string,
   accountRoot: string,
-  job: JobMetadata,
+  job: OriginalJobMetadata,
 ): Promise<GrantRequestRecord> {
   return withCacheMutation(cacheRoot, async () => {
     const existing = await readGrantRequest(accountRoot, job);
@@ -310,7 +315,7 @@ async function downloadGrant(
   scope: AccountScope,
   cacheRoot: string,
   accountRoot: string,
-  job: JobMetadata,
+  job: OriginalJobMetadata,
   signal: AbortSignal,
 ): Promise<{ url: string; requestId: string }> {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -353,7 +358,7 @@ async function downloadGrant(
 
 async function download(
   path: string,
-  job: JobMetadata,
+  job: OriginalJobMetadata,
   grantUrl: string,
   signal: AbortSignal,
   fetcher: typeof fetch,
@@ -590,9 +595,14 @@ export async function prepareOriginalPlayback(
   cache_hit: boolean;
 }> {
   if (!JOB_ID.test(jobId)) throw new DesktopApiError("INVALID_JOB_ID");
-  const job = parseJobMetadata(
+  const metadata = parseJobMetadata(
     await api.request(scope, `/jobs/${jobId}`, "GET", undefined, signal),
   );
+  // Validate original identity before cache mutation, grant creation or transfer.
+  const job: OriginalJobMetadata = {
+    ...metadata,
+    input: parseInputDeclaration(metadata.input),
+  };
   if (
     job.id !== jobId ||
     !job.can_download_input ||

@@ -1,10 +1,17 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged, signOut, type User } from "firebase/auth";
+import {
+  getAuth,
+  getRedirectResult,
+  onAuthStateChanged,
+  signOut,
+  type User,
+} from "firebase/auth";
 import {
   createContext,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,13 +20,14 @@ import { ApiClient, ApiError } from "../api/client";
 import type { SessionView } from "../api/types";
 import { readConfig } from "../config";
 import { installationIdFor } from "./installation";
+import { googleSignInErrorCode } from "./googleSignIn";
 
 const config = readConfig();
 export const auth = getAuth(initializeApp({ ...config.firebase }));
 
 type AuthState =
   | { phase: "restoring"; step: "auth" | "session" }
-  | { phase: "signedOut" }
+  | { phase: "signedOut"; message?: string }
   | { phase: "error"; message: string }
   | { phase: "recovery"; user: User; api: ApiClient }
   | { phase: "signedIn"; user: User; session: SessionView; api: ApiClient };
@@ -37,30 +45,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     step: "auth",
   });
   const [revision, setRevision] = useState(0);
+  const redirectResult = useRef<ReturnType<typeof getRedirectResult> | null>(
+    null,
+  );
   const queryClient = useQueryClient();
   useEffect(() => {
     let active = true;
     let generation = 0;
     let timedOut = false;
+    let observedUser: User | null | undefined;
+    let authenticatedObserved = false;
+    let redirectPending = true;
+    let redirectError: string | undefined;
     let sessionController: AbortController | undefined;
     const authTimeout = window.setTimeout(() => {
-      if (active && generation === 0) {
+      if (active && !authenticatedObserved) {
         timedOut = true;
         setState({ phase: "error", message: "AUTH_RESTORE_TIMEOUT" });
       }
     }, 15_000);
+    const completeSignedOut = () => {
+      if (
+        !active ||
+        timedOut ||
+        observedUser !== null ||
+        (redirectPending && !authenticatedObserved)
+      )
+        return;
+      window.clearTimeout(authTimeout);
+      setState({
+        phase: "signedOut",
+        ...(redirectError ? { message: redirectError } : {}),
+      });
+    };
     const unsubscribe = onAuthStateChanged(
       auth,
       async (user) => {
         if (!active || timedOut) return;
         const current = ++generation;
-        window.clearTimeout(authTimeout);
+        observedUser = user;
         sessionController?.abort();
         queryClient.clear();
         if (!user) {
-          setState({ phase: "signedOut" });
+          completeSignedOut();
           return;
         }
+        authenticatedObserved = true;
+        redirectError = undefined;
+        window.clearTimeout(authTimeout);
         setState({ phase: "restoring", step: "session" });
         const controller = new AbortController();
         sessionController = controller;
@@ -123,6 +155,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           sessionController?.abort();
           setState({ phase: "error", message: error.message });
         }
+      },
+    );
+    // Firebase consumes one redirect outcome per page load. Reuse its promise
+    // across retries and StrictMode effects so cleanup cannot discard the error.
+    // An authenticated session still takes precedence over a late redirect error.
+    redirectResult.current ??= getRedirectResult(auth);
+    void redirectResult.current.then(
+      () => {
+        redirectPending = false;
+        completeSignedOut();
+      },
+      (error: unknown) => {
+        redirectPending = false;
+        if (!authenticatedObserved)
+          redirectError = googleSignInErrorCode(error);
+        completeSignedOut();
       },
     );
     return () => {

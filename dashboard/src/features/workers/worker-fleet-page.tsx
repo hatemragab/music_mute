@@ -35,16 +35,15 @@ import { WorkerPolicyPanel } from "./worker-policy-panel";
 import { WorkerFleetSummary } from "./worker-insight-panels";
 import { workerContactState } from "./worker-status";
 import {
+  workerPlatformLabel,
+  workerInstallationProfile,
+} from "./worker-platform";
+import {
   WORKER_MACHINE_STATUSES,
   type WorkerMachine,
   type WorkerMachineStatus,
   type WorkerPlatform,
 } from "./worker-types";
-
-const platformLabel: Record<WorkerPlatform, string> = {
-  "darwin-arm64": "macOS ARM64",
-  "windows-amd64": "Windows x64",
-};
 
 export function WorkerFleetPage() {
   const [activeTab, setActiveTab] = useState("machines");
@@ -80,7 +79,7 @@ export function WorkerFleetPage() {
     <div className="space-y-6">
       <PageHeader
         title="Worker fleet"
-        description="Manage registered machines, watch current work and control bounded fleet capacity. Approve new Mac registrations from user detail."
+        description="Manage registered machines, watch current work and control bounded fleet capacity. Approve new Mac and Windows registrations from user detail."
         actions={
           activeTab === "machines" ? (
             <RefreshButton
@@ -162,7 +161,7 @@ export function WorkerFleetPage() {
           ) : (
             <EmptyState
               title="No machines match"
-              description="Adjust the filters. To register a new Mac, allow worker registration on its user detail page and have MusicMute Local open and connected."
+              description="Adjust the filters. To register a Mac or Windows per-user worker, approve registration on its user detail page and use a prepared, open and connected MusicMute Local app."
             />
           )}
         </TabsContent>
@@ -236,8 +235,11 @@ function MachineTable({
                   <TableCell>
                     <p>
                       {capability
-                        ? platformLabel[capability.platform]
+                        ? workerPlatformLabel(capability.platform)
                         : "Unqualified"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {workerInstallationProfile(machine).label}
                     </p>
                     <p className="max-w-56 truncate text-xs text-muted-foreground">
                       {gpu?.name ?? capability?.provider ?? "No GPU report"}

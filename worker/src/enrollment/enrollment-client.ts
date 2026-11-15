@@ -39,6 +39,7 @@ export interface WorkerHardwareReport {
 }
 
 export interface WorkerRuntimeReport {
+  installationProfile?: "windows-user";
   workerVersion: string;
   protocolVersion: typeof WORKER_PROTOCOL_VERSION;
   manifestDigest: string;
@@ -113,11 +114,26 @@ export interface InstallationModelDescriptor {
 
 export interface InstallationArtifactsResult {
   schemaVersion: 1;
+  installationProfile?: "windows-user";
   platform: WorkerPlatform;
   release: InstallationReleaseGrant;
   model: InstallationModelDescriptor;
   fixture: InstallationArtifactGrant;
 }
+export interface StoreQualificationArtifactsResult {
+  schemaVersion: 1;
+  purpose: "store-qualification-data";
+  platform: "windows-amd64";
+  installationProfile: "windows-user";
+  model: InstallationModelDescriptor;
+  fixture: InstallationArtifactGrant;
+}
+/** Same existing Kim model; this descriptor authorizes data integrity only. */
+export const STORE_QUALIFICATION_MODEL = Object.freeze({
+  filename: "Kim_Vocal_2.onnx",
+  bytes: 66_759_214,
+  sha256: "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
+});
 
 export interface QualificationUploadGrant {
   method: "PUT";
@@ -196,20 +212,38 @@ export class WorkerEnrollmentClient {
     installationCredential: string,
     platform: WorkerPlatform,
     signal?: AbortSignal,
+    installationProfile?: "windows-user",
   ): Promise<InstallationArtifactsResult> {
     assertUuid(installationId, "Installation ID");
     assertCredential(installationCredential, "Installation credential");
     oneOf(platform, WORKER_PLATFORMS, "worker platform");
+    if (
+      installationProfile !== undefined &&
+      (installationProfile !== "windows-user" || platform !== "windows-amd64")
+    )
+      throw new TypeError("Installation artifact profile is invalid");
     const value = strictRecord(
       await this.request(
         `worker/installations/${installationId}/artifacts`,
         installationCredential,
-        { platform },
+        {
+          platform,
+          ...(installationProfile === undefined ? {} : { installationProfile }),
+        },
         signal,
       ),
-      new Set(["schemaVersion", "platform", "release", "model", "fixture"]),
+      new Set([
+        "schemaVersion",
+        "platform",
+        "installationProfile",
+        "release",
+        "model",
+        "fixture",
+      ]),
       "Installation artifacts response",
     );
+    if (value.installationProfile !== installationProfile)
+      throw new TypeError("Installation artifact profile changed");
     if (value.schemaVersion !== 1)
       throw new TypeError("Installation artifacts schema is invalid");
     const responsePlatform = oneOf(
@@ -241,7 +275,99 @@ export class WorkerEnrollmentClient {
     return {
       schemaVersion: 1,
       platform: responsePlatform,
+      ...(installationProfile === undefined ? {} : { installationProfile }),
       release,
+      model,
+      fixture,
+    };
+  }
+
+  async storeQualificationArtifacts(
+    installationId: string,
+    installationCredential: string,
+    signal?: AbortSignal,
+  ): Promise<StoreQualificationArtifactsResult> {
+    assertUuid(installationId, "Installation ID");
+    assertCredential(installationCredential, "Installation credential");
+    const value = strictRecord(
+      await this.request(
+        `worker/installations/${installationId}/store-qualification-artifacts`,
+        installationCredential,
+        {},
+        signal,
+      ),
+      new Set([
+        "schemaVersion",
+        "purpose",
+        "platform",
+        "installationProfile",
+        "model",
+        "fixture",
+      ]),
+      "Store qualification data",
+      true,
+    );
+    if (
+      value.schemaVersion !== 1 ||
+      value.purpose !== "store-qualification-data" ||
+      value.platform !== "windows-amd64" ||
+      value.installationProfile !== "windows-user"
+    )
+      throw new TypeError("Store qualification data identity is invalid");
+    strictRecord(
+      value.model,
+      new Set([
+        "filename",
+        "bytes",
+        "sha256",
+        "contentType",
+        "url",
+        "sourcePolicy",
+        "allowedHosts",
+        "maxRedirects",
+      ]),
+      "Store model data",
+      true,
+    );
+    strictRecord(
+      value.fixture,
+      new Set([
+        "filename",
+        "bytes",
+        "sha256",
+        "contentType",
+        "url",
+        "expiresAt",
+      ]),
+      "Store fixture data",
+      true,
+    );
+    const model = parseModelDescriptor(value.model, false),
+      fixture = parseArtifactGrant(
+        value.fixture,
+        "fixture",
+        "audio/wav",
+        false,
+        false,
+      );
+    if (
+      model.filename !== STORE_QUALIFICATION_MODEL.filename ||
+      model.bytes !== STORE_QUALIFICATION_MODEL.bytes ||
+      model.sha256 !== STORE_QUALIFICATION_MODEL.sha256 ||
+      fixture.bytes < 44 ||
+      fixture.bytes > 64 * 1024 ** 2 ||
+      !/\.wav$/iu.test(fixture.filename) ||
+      Date.parse(fixture.expiresAt) <= Date.now() ||
+      fixture.filename === model.filename
+    )
+      throw new TypeError(
+        "Store qualification data differs from approved inputs",
+      );
+    return {
+      schemaVersion: 1,
+      purpose: "store-qualification-data",
+      platform: "windows-amd64",
+      installationProfile: "windows-user",
       model,
       fixture,
     };
@@ -824,6 +950,7 @@ export function assertInstallationReport(
       "manifestDigest",
       "modelDigest",
       "providerRuntimeVersion",
+      "installationProfile",
     ]),
     "Runtime report",
     true,
@@ -840,6 +967,16 @@ export function assertInstallationReport(
     throw new TypeError("Runtime digest is invalid");
   boundedText(runtime.providerRuntimeVersion, "provider runtime version", 100);
   if (
+    runtime.installationProfile !== undefined &&
+    runtime.installationProfile !== "windows-user"
+  )
+    throw new TypeError("Worker installation profile is unsupported");
+  if (
+    runtime.installationProfile === "windows-user" &&
+    (hardware.os !== "Windows" || hardware.architecture !== "x86_64")
+  )
+    throw new TypeError("Windows user installation hardware is invalid");
+  if (
     !Array.isArray(value.capabilities) ||
     value.capabilities.length < 1 ||
     value.capabilities.length > 16
@@ -854,6 +991,13 @@ export function assertInstallationReport(
     );
     oneOf(capability.platform, WORKER_PLATFORMS, "worker platform");
     oneOf(capability.provider, WORKER_PROVIDERS, "worker provider");
+    if (
+      runtime.installationProfile === "windows-user" &&
+      (capability.platform !== "windows-amd64" ||
+        capability.provider !== "directml" ||
+        capability.maxSlots !== 1)
+    )
+      throw new TypeError("Windows user installation capability is invalid");
     boundedText(capability.gpuId, "capability GPU ID", 128);
     if (
       !Array.isArray(capability.recipeIds) ||

@@ -28,6 +28,7 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.library.*
 import com.hatem.musicmute.playback.*
 import com.hatem.musicmute.ui.design.*
+import com.hatem.musicmute.ui.library.LibraryThumbnail
 import com.hatem.musicmute.ui.library.audioTime
 import kotlin.math.abs
 import kotlinx.coroutines.delay
@@ -131,8 +132,11 @@ fun PlaybackQueueSheet(
                             QueueHeading(stringResource(R.string.creative_library_now_playing), active = true)
                             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.GraphicEq, null, Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.primary)
+                                LibraryThumbnail(byKey[current.key]?.thumbnailUrl, Modifier.size(40.dp),
+                                    shape = RoundedCornerShape(12.dp)) {
+                                    Icon(Icons.Outlined.GraphicEq, null, Modifier.size(22.dp),
+                                        tint = MaterialTheme.colorScheme.primary)
+                                }
                                 Text(current.title, Modifier.weight(1f).padding(horizontal = 12.dp),
                                     style = MaterialTheme.typography.bodyMedium, maxLines = 2,
                                     overflow = TextOverflow.Ellipsis)
@@ -175,7 +179,7 @@ fun PlaybackQueueSheet(
                     itemsIndexed(display.upcoming, key = { _, track -> queueRowKey(track.key) }) { index, track ->
                         QueueTrackRow(track, index + 1, byKey[track.key]?.durationMs, onSelect, onRemove,
                             display.upcoming, onMove, onPlayNext, dragging == track.key,
-                            { startDrag(track.key) }, drag, endDrag)
+                            { startDrag(track.key) }, drag, endDrag, byKey[track.key]?.thumbnailUrl)
                     }
                     if (display.other.isNotEmpty()) {
                         item {
@@ -185,7 +189,7 @@ fun PlaybackQueueSheet(
                         itemsIndexed(display.other, key = { _, track -> queueRowKey(track.key) }) { index, track ->
                             QueueTrackRow(track, index + 1, byKey[track.key]?.durationMs, onSelect, onRemove,
                                 display.other, onMove, onPlayNext, dragging == track.key,
-                                { startDrag(track.key) }, drag, endDrag)
+                                { startDrag(track.key) }, drag, endDrag, byKey[track.key]?.thumbnailUrl)
                         }
                     }
                 }
@@ -216,6 +220,7 @@ private fun QueueTrackRow(
     section: List<QueueTrack>, onMove: (LibraryKey, LibraryKey) -> Unit,
     onPlayNext: (LibraryKey) -> Unit, dragging: Boolean,
     onDragStart: () -> Unit, onDrag: (Float) -> Unit, onDragEnd: () -> Unit,
+    thumbnailUrl: String?,
 ) {
     var menu by remember { mutableStateOf(false) }
     val index = section.indexOfFirst { it.key == track.key }
@@ -249,8 +254,11 @@ private fun QueueTrackRow(
                 .clickable(role = Role.Button, onClickLabel = stringResource(R.string.creative_library_play)) { onSelect(track.key) },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(number.toString(), Modifier.widthIn(min = 24.dp),
-                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LibraryThumbnail(thumbnailUrl, Modifier.size(32.dp),
+                shape = RoundedCornerShape(10.dp), shadowElevation = 2.dp) {
+                Text(number.toString(), Modifier.widthIn(min = 24.dp),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text(track.title, Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             duration?.let {

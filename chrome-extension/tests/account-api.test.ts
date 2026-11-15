@@ -25,6 +25,17 @@ const json = (data: unknown, status = 200, headers?: HeadersInit) =>
 
 describe("native desktop account boundary", () => {
   it.each([
+    `{"protocol_version":1,"protocol_version":1,"request_id":"${requestId}","type":"CLEAR_CACHE","payload":{}}`,
+    `{"protocol_version":1,"request_id":"${requestId}","type":"CLEAR_CACHE","ty\\u0070e":"CLEAR_CACHE","payload":{}}`,
+    `{"protocol_version":1,"request_id":"${requestId}","type":"SET_CACHE_BUDGET","payload":{"budget_bytes":2000000000,"budget_bytes":2000000000}}`,
+    `{"protocol_version":1,"request_id":"${requestId}","type":"SYNC","payload":{},"session":{"firebase_uid":"owner-a","firebase_uid":"owner-a","session_generation":"${session.session_generation}","installation_id":"${session.installation_id}","id_token":"header.payload.signature"}}`,
+  ])(
+    "rejects duplicate decoded envelope/payload/session keys without changing the valid native schema",
+    (raw) => {
+      expect(() => parseDesktopRequest(raw)).toThrow("INVALID_DESKTOP_REQUEST");
+    },
+  );
+  it.each([
     1_000_000_000,
     2_000_000_000,
     5_000_000_000,

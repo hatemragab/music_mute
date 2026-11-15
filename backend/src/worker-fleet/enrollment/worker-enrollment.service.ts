@@ -66,6 +66,7 @@ function canonical(value: unknown): string {
 }
 
 function normalizeReport(dto: ReportWorkerInstallationDto) {
+  const { installationProfile, ...runtime } = dto.runtime;
   return {
     label: dto.label,
     groupId: dto.groupId ?? null,
@@ -76,7 +77,10 @@ function normalizeReport(dto: ReportWorkerInstallationDto) {
         memoryBytes: gpu.memoryBytes ?? null,
       })),
     },
-    runtimeIdentity: dto.runtime,
+    runtimeIdentity: {
+      ...runtime,
+      ...(installationProfile === undefined ? {} : { installationProfile }),
+    },
     capabilities: dto.capabilities,
     reportSummary: sanitizeWorkerDiagnosticLine(dto.summary),
   };
@@ -92,6 +96,24 @@ function isQualified(dto: {
   const gpuIds = new Set(dto.hardware.gpus.map((gpu) => gpu.id));
   const architecture = dto.hardware.architecture.toLowerCase();
   const os = dto.hardware.os.toLowerCase();
+  if (dto.runtime.installationProfile !== undefined) {
+    const build = /^(?:10\.0\.)?([0-9]{4,6})(?:\.[0-9]+)?$/.exec(
+      dto.hardware.osBuild,
+    )?.[1];
+    if (
+      dto.runtime.installationProfile !== 'windows-user' ||
+      !os.includes('windows') ||
+      !['amd64', 'x64', 'x86_64'].includes(architecture) ||
+      !build ||
+      Number(build) < 19045 ||
+      dto.capabilities.some(
+        (capability) =>
+          capability.platform !== 'windows-amd64' ||
+          capability.provider !== 'directml',
+      )
+    )
+      return false;
+  }
   return dto.capabilities.every((capability) => {
     if (!gpuIds.has(capability.gpuId)) return false;
     if (!capability.recipeIds.includes(DEFAULT_WORKER_RECIPE_ID)) return false;

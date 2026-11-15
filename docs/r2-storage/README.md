@@ -22,7 +22,7 @@ remaining publication/distribution gates.
 | Backend                  | Required generic R2 configuration, S3-compatible presigning, create-only PUT identity, ETag schemas, owned media downloads, retention/deletion, cached storage health    |
 | Android/iOS/web          | Opaque grants and exact signed headers, generic uploader names, no storage credentials; web CSP uses explicit R2 origin                                                  |
 | Worker/CLI               | Input integrity and conditional download, output PUT/recovery/completion ETag contract, enrollment/qualification/runtime artifacts without permanent storage credentials |
-| Dashboard/releases       | Exact signed APK upload headers and backend identity verification; no browser secret/configuration exposure                                                              |
+| Dashboard/releases       | Android binaries remain in Google Play; historical private APK objects are retained without new uploads or download grants                                               |
 | Installer/catalog        | Old provider-specific runtime/fixture entries removed; real R2 publication and signature/hash verification required before activation                                    |
 | Configuration/deployment | Safe backend env examples updated; Docker/CapRover/CI use runtime configuration, without baked provider secrets or extra storage services                                |
 | MongoDB                  | Key/ETag/bytes/checksum/type identities; no migration/reset/copy automation                                                                                              |
@@ -186,7 +186,7 @@ PUT and ranged GET after manual bucket setup; local HTTP fixtures do not prove t
 
 ## Retention, cleanup and billing
 
-Use Standard for media, runtime archives, APKs and qualification fixtures. No
+Use Standard for media, runtime archives, retained historical APKs and qualification fixtures. No
 Intelligent-Tiering, Infrequent Access transition, archive tier, transfer
 acceleration, or extra metered proxy is enabled. Standard has no minimum storage
 duration; Infrequent Access adds retrieval charges and a minimum duration, which
@@ -256,8 +256,10 @@ No AWS bucket/object deletion is authorized or implemented here.
 Before real worker enrollment/update/qualification, republish required runtime
 archives and the bounded synthetic qualification fixture to R2 through the existing
 trusted release pipeline. Verify each unique key's ETag, bytes, SHA-256, type and
-Ed25519 signature, then promote the corresponding installation catalog. Publish
-required APK releases through the existing administrator upload/verification flow.
+Ed25519 signature, then promote the corresponding installation catalog. Android
+App Bundles are uploaded only in Play Console; the dashboard records the Play
+version and update policy without receiving a binary. Historical APK objects
+remain private and retained; the retired release routes issue no upload or download grants.
 The initial migration catalog was intentionally empty. The current catalog now
 contains verified private R2 macOS/Windows 0.1.2 runtime objects and the synthetic
 qualification fixture. Their publication and separate native acceptance boundaries
@@ -310,7 +312,7 @@ production media access or environment changes.
 
 Before enabling real processing, separately verify private access, checksum
 rejection, overwrite rejection, signed URL expiration, browser CORS/ranges,
-worker input/output, qualification, installer artifacts, APK verification and
+worker input/output, qualification, installer artifacts and
 failed/abandoned cleanup with bounded synthetic files. No deployment, bucket
 configuration, destructive database operation, data copying or live billing test
 is implied by local validation.

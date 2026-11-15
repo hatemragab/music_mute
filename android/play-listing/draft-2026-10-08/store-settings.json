@@ -1,0 +1,16 @@
+{
+  "app_name": "MusicMute",
+  "default_language": "en-US",
+  "localizations": ["en-US", "ar"],
+  "application_type": "App",
+  "category": "Music & Audio",
+  "support_email": "hatemragapdev@gmail.com",
+  "support_website": "https://api.music-mute.com/support",
+  "product_website": "https://www.music-mute.com/",
+  "privacy_policy_url": "https://api.music-mute.com/privacy",
+  "account_deletion_url": "https://api.music-mute.com/delete-account",
+  "optional_phone": null,
+  "suggested_tag_intents": ["Audio editing", "Music player"],
+  "tag_instructions": "Choose only matching predefined tags actually offered by Play Console. Audio editing describes voice separation; Music player describes the completed-audio player. Do not invent tags, fill all five slots unnecessarily, or choose Karaoke, Radio, Streaming, Video editing or accessibility tags without corresponding evidence.",
+  "save_scope": "Draft app metadata and declarations only; no app bundle or APK upload; no review submission or publication."
+}

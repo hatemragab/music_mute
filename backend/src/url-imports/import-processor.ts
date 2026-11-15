@@ -7,6 +7,10 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job as QueueJob } from 'bullmq';
 import { trusted, type Model } from 'mongoose';
 import { randomUUID } from 'node:crypto';
+import {
+  localDiagnostics,
+  diagnosticError,
+} from '../observability/local-diagnostics.js';
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { JobsService } from '../jobs/jobs.service.js';
@@ -56,6 +60,58 @@ export class ImportProcessor extends WorkerHost {
   }
 
   async process(
+    job: QueueJob<{
+      importId: string;
+      attempt?: number;
+      handoffAttempt?: number;
+    }>,
+  ): Promise<void> {
+    if (!localDiagnostics.isEnabled) return this.processExecution(job);
+    const started = performance.now();
+    return localDiagnostics.context.run(
+      { importId: job.data.importId },
+      async () => {
+        localDiagnostics.event({
+          category: 'queue',
+          name: 'import.execution',
+          summary: 'Import queue execution started',
+          phase: 'started',
+          data: {
+            queueJobId: job.id,
+            attempt: job.attemptsMade,
+            acquisitionAttempt: job.data.attempt,
+            handoffAttempt: job.data.handoffAttempt,
+          },
+        });
+        try {
+          await this.processExecution(job);
+          localDiagnostics.event({
+            category: 'queue',
+            name: 'import.execution',
+            summary: 'Import queue execution completed',
+            phase: 'completed',
+            result: 'processor-returned',
+            durationMs: Math.round(performance.now() - started),
+            data: { queueJobId: job.id },
+          });
+        } catch (error) {
+          localDiagnostics.event({
+            category: 'queue',
+            name: 'import.execution',
+            summary: 'Import queue execution failed',
+            level: 'error',
+            phase: 'completed',
+            result: 'failed',
+            durationMs: Math.round(performance.now() - started),
+            data: { queueJobId: job.id, error: diagnosticError(error) },
+          });
+          throw error;
+        }
+      },
+    );
+  }
+
+  private async processExecution(
     job: QueueJob<{
       importId: string;
       attempt?: number;
@@ -142,6 +198,11 @@ export class ImportProcessor extends WorkerHost {
       )
       .lean();
     if (!record) return;
+    const diagnosticContext = localDiagnostics.context.getStore();
+    if (diagnosticContext) {
+      diagnosticContext.userId = record.userId.toHexString();
+      if (record.jobId) diagnosticContext.jobId = record.jobId.toHexString();
+    }
     // Preparation must consume the persisted execution budget, rather than
     // starting a new full transfer lifetime after slow dependency reads.
     const remainingMs = record.deadlineAt!.getTime() - Date.now();
@@ -174,7 +235,12 @@ export class ImportProcessor extends WorkerHost {
         );
         if (timingJobId)
           await this.jobRecords.updateOne(
-            { _id: timingJobId, userId: record.userId },
+            {
+              _id: timingJobId,
+              userId: record.userId,
+              requestId: record.jobRequestId,
+              deletedAt: null,
+            },
             { $set: { importStageTimings: stages } },
             { runValidators: true },
           );
@@ -574,7 +640,12 @@ export class ImportProcessor extends WorkerHost {
       if (jobId)
         await this.observeTimings(record, async () => {
           await this.jobRecords.updateOne(
-            { _id: jobId, userId: record.userId },
+            {
+              _id: jobId,
+              userId: record.userId,
+              requestId: record.jobRequestId,
+              deletedAt: null,
+            },
             { $set: { importStageTimings: stages } },
             { runValidators: true },
           );
@@ -640,6 +711,7 @@ export class ImportProcessor extends WorkerHost {
             },
             record.executionId ?? undefined,
             acquired ? record._id : undefined,
+            record._id,
           )
         : await this.jobs.createForSharedInput(
             record.userId.toHexString(),
@@ -711,7 +783,12 @@ export class ImportProcessor extends WorkerHost {
     record = fresh;
     // If confirmation committed just before a crash/network error, preserve its accepted job.
     const current = await this.jobRecords
-      .findOne({ userId: record.userId, requestId: record.jobRequestId })
+      .findOne({
+        userId: record.userId,
+        ...(record.jobId
+          ? { _id: record.jobId }
+          : { requestId: record.jobRequestId }),
+      })
       .lean();
     if (current?.inputObject) {
       await this.finish(record, 'submitted', current._id.toHexString());

@@ -63,6 +63,55 @@ struct JobStages: Codable, Equatable, Sendable {
   let uploadingResultAt: Date?
 }
 
+enum JobThumbnailURL {
+  static func validated(_ value: String?) -> URL? {
+    guard let value, value.utf8.count <= 2048,
+      value.unicodeScalars.allSatisfy({ (33...126).contains($0.value) }),
+      !value.contains("\\"), !value.contains("#"),
+      let components = URLComponents(string: value), components.scheme == "https",
+      components.host == "i.ytimg.com", components.user == nil, components.password == nil,
+      components.port == nil, components.fragment == nil,
+      components.percentEncodedPath.range(
+        of: #"^/vi(?:_webp)?/[A-Za-z0-9_-]{11}/[A-Za-z0-9_-]{1,64}\.(?:jpg|webp)$"#,
+        options: .regularExpression) != nil
+    else { return nil }
+    let parameters = components.queryItems ?? []
+    guard parameters.count <= 2 else { return nil }
+    var names: Set<String> = []
+    for parameter in parameters {
+      guard ["sqp", "rs"].contains(parameter.name), names.insert(parameter.name).inserted,
+        let field = parameter.value,
+        field.range(of: #"^[A-Za-z0-9_-]{1,1024}={0,2}$"#, options: .regularExpression) != nil
+      else { return nil }
+    }
+    return URL(string: value)
+  }
+}
+
+@propertyWrapper struct NullableJobThumbnail: Codable, Equatable, Sendable {
+  var wrappedValue: String?
+
+  init(wrappedValue: String?) {
+    self.wrappedValue = JobThumbnailURL.validated(wrappedValue)?.absoluteString
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    self.init(wrappedValue: try? container.decode(String.self))
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(wrappedValue)
+  }
+}
+
+extension KeyedDecodingContainer {
+  func decode(_ type: NullableJobThumbnail.Type, forKey key: Key) throws -> NullableJobThumbnail {
+    try decodeIfPresent(type, forKey: key) ?? NullableJobThumbnail(wrappedValue: nil)
+  }
+}
+
 struct Job: Codable, Equatable, Identifiable, Sendable {
   var trimEnabled: Bool? = nil
   var comparisonRanges: [[Int64]]? = nil
@@ -98,6 +147,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
   let stages: JobStages?
   let queue: ProcessingQueue?
   let processingProgress: ProcessingProgress?
+  @NullableJobThumbnail private(set) var thumbnailUrl: String? = nil
 
   init(
     id: String, status: String, createdAt: Date, updatedAt: Date, queuedAt: Date?,
@@ -107,7 +157,7 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     sourceKind: JobSourceKind? = nil, serverTime: Date? = nil, timing: JobTiming? = nil,
     stages: JobStages? = nil, queue: ProcessingQueue? = nil,
     processingProgress: ProcessingProgress? = nil,
-    serverStageTimings: ServerStageTimings? = nil
+    serverStageTimings: ServerStageTimings? = nil, thumbnailUrl: String? = nil
   ) {
     self.id = id
     self.status = status
@@ -131,7 +181,10 @@ struct Job: Codable, Equatable, Identifiable, Sendable {
     self.stages = stages
     self.queue = queue
     self.processingProgress = processingProgress
+    self.thumbnailUrl = JobThumbnailURL.validated(thumbnailUrl)?.absoluteString
   }
+
+  var thumbnailURL: URL? { JobThumbnailURL.validated(thumbnailUrl) }
 
   var preferredName: String {
     let value = displayName ?? sourceTitle

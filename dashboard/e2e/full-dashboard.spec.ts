@@ -6,7 +6,6 @@ import {
 } from "../src/test/dashboard-fixtures";
 import { fromWireCase, toWireCase } from "../src/api/wire-case";
 import { installDashboardFixture, setDashboardRole } from "./helpers/session";
-import { E2E_APP_ORIGIN } from "./helpers/urls";
 
 test("owner can open every dashboard area without runtime errors", async ({
   page,
@@ -282,7 +281,7 @@ test("owner withdraws a release with a replacement policy", async ({
   await installDashboardFixture(page, fixture);
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.publishedRelease}`);
-  await page.getByLabel("Direct release ID").fill(FIXTURE_IDS.release);
+  await page.getByLabel("Play release ID").fill(FIXTURE_IDS.release);
   await page.getByRole("button", { name: "Preview policy" }).click();
   await expect(page.getByText("Policy is valid")).toBeVisible();
   await page.getByRole("button", { name: "Withdraw with replacement" }).click();
@@ -294,7 +293,8 @@ test("owner withdraws a release with a replacement policy", async ({
   await dialog.getByRole("button", { name: "Withdraw release" }).click();
   await expect(dialog).toHaveCount(0);
   expect(fixture.releases[1].state).toBe("withdrawn");
-  expect(fixture.policy.android.directReleaseId).toBe(FIXTURE_IDS.release);
+  expect(fixture.policy.android.storeReleaseId).toBe(FIXTURE_IDS.release);
+  expect(fixture.policy.android.directReleaseId).toBeNull();
 });
 
 test("support restricts an account, requests media deliberately, and cancels a job", async ({
@@ -347,59 +347,31 @@ test("support restricts an account, requests media deliberately, and cancels a j
   await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
 });
 
-test("owner uploads a direct APK, publishes verified policy, and saves settings", async ({
+test("owner publishes a Play release without an upload and saves settings", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = createDashboardFixture();
-  fixture.releases[0].artifactState = null;
-  fixture.releases[0].bytes = null;
-  fixture.releases[0].sha256Hex = null;
   await installDashboardFixture(page, fixture);
-  const uploadErrors: string[] = [];
-  page.on("pageerror", (error) => uploadErrors.push(error.message));
-  page.on("console", (message) => {
-    if (message.type() === "error") uploadErrors.push(message.text());
-  });
-  await page.route("https://upload.fixture.invalid/", (route) =>
-    route.fulfill({
-      status: 204,
-      headers: {
-        "access-control-allow-origin": E2E_APP_ORIGIN,
-        "access-control-allow-methods": "PUT, OPTIONS",
-        "access-control-allow-headers":
-          "Content-Type, If-None-Match, X-Amz-Checksum-Sha256",
-      },
-      body: "",
-    }),
-  );
-
   await page.goto(`/releases/${FIXTURE_IDS.release}`);
-  await page.getByLabel("APK file").setInputFiles({
-    name: "fixture.apk",
-    mimeType: "application/vnd.android.package-archive",
-    buffer: Buffer.from("synthetic APK bytes for browser flow"),
-  });
-  await page.getByRole("button", { name: "Hash and upload" }).click();
-  try {
-    await expect(
-      page.getByText("verified", { exact: true }).last(),
-    ).toBeVisible();
-  } catch (error) {
-    throw new Error(
-      `Fixture APK upload failed: ${JSON.stringify({
-        errors: uploadErrors,
-        artifactState: fixture.releases[0].artifactState,
-        page: await page.locator("main").innerText(),
-      })}`,
-      { cause: error },
-    );
-  }
-  expect(fixture.releases[0].artifactState).toBe("verified");
+  await expect(page.getByLabel("APK file")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Hash and upload" }),
+  ).toHaveCount(0);
+  expect(fixture.releases[0].artifactState).toBeNull();
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.release}`);
+  await page.getByLabel("Play release ID").fill(FIXTURE_IDS.release);
   await page.getByRole("button", { name: "Preview policy" }).click();
   await expect(page.getByText("Policy is valid")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Publish release" }),
+  ).toBeDisabled();
+  await page
+    .getByRole("checkbox", {
+      name: "I verified that this store release is available to the intended audience.",
+    })
+    .check();
   await page.getByRole("button", { name: "Publish release" }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason").fill("Publish verified browser fixture");
@@ -414,6 +386,12 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
 
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Accept new jobs" }).click();
+  await page.getByRole("switch", { name: "Show import from link" }).click();
+  const countries = page.getByLabel("Hide link import in these countries");
+  await countries.fill("United States");
+  await page.getByRole("checkbox", { name: "United States (US)" }).check();
+  await countries.fill("Egypt");
+  await page.getByRole("checkbox", { name: "Egypt (EG)" }).check();
   await page
     .getByLabel("Maintenance message, English")
     .fill("Processing is paused for maintenance.");
@@ -426,6 +404,8 @@ test("owner uploads a direct APK, publishes verified policy, and saves settings"
   await dialog.getByRole("button", { name: "Save policy" }).click();
   await expect(dialog).toHaveCount(0);
   expect(fixture.settings.acceptNewJobs).toBe(false);
+  expect(fixture.settings.linkImportEnabled).toBe(true);
+  expect(fixture.settings.linkImportDisabledCountries).toEqual(["EG", "US"]);
   expect(fixture.settings.maintenanceMessageEn).toBe(
     "Processing is paused for maintenance.",
   );

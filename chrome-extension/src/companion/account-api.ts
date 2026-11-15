@@ -1,3 +1,4 @@
+import { localDiagnostics, withLocalLogContext } from "./local-debug.js";
 import {
   desktopRecord,
   validateDesktopSession,
@@ -15,6 +16,55 @@ export class DesktopApiError extends Error {
     readonly retry_after_seconds?: number,
   ) {
     super(code);
+  }
+}
+/** Closed parser locations only: never response text, dynamic keys or field values. */
+export const CLOUD_REPLY_VALIDATION_REASONS = [
+  "job_record",
+  "job_id",
+  "job_request_id",
+  "job_status",
+  "job_trim",
+  "job_capabilities",
+  "input_record",
+  "input_extension",
+  "input_content_type",
+  "input_bytes",
+  "input_duration",
+  "input_hash",
+  "output_record",
+  "output_format",
+  "output_bytes",
+  "output_hash",
+  "output_duration",
+  "source_reference",
+  "recipe_digest",
+  "processing_origin",
+  "local_profile",
+  "source_kind",
+  "source_title",
+  "display_name",
+  "error_metadata",
+  "history_page",
+  "history_cursor",
+  "import_metadata",
+  "import_identity",
+  "import_result",
+  "job_identity",
+  "create_receipt",
+  "snapshot_parser",
+] as const;
+export type CloudReplyValidationReason =
+  (typeof CLOUD_REPLY_VALIDATION_REASONS)[number];
+const cloudReplyReasons = new Set<string>(CLOUD_REPLY_VALIDATION_REASONS);
+export function isCloudReplyValidationReason(
+  value: unknown,
+): value is CloudReplyValidationReason {
+  return typeof value === "string" && cloudReplyReasons.has(value);
+}
+export class CloudReplyValidationError extends DesktopApiError {
+  constructor(readonly validationReason: CloudReplyValidationReason) {
+    super("CLOUD_REPLY_INVALID");
   }
 }
 export function sameAccountScope(a: AccountScope, b: AccountScope): boolean {
@@ -73,7 +123,13 @@ export async function boundedJson(
         throw new DesktopApiError("API_REPLY_TOO_LARGE", response.status);
       chunks.push(chunk.value);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    localDiagnostics.emit("http.payload", { response: value }, "debug", {
+      requestId: response.headers.get("x-request-id") ?? undefined,
+      status: response.status,
+      phase: "body_consumed",
+    });
+    return value;
   } catch (error) {
     await reader.cancel().catch(() => {});
     if (error instanceof DesktopApiError) throw error;
@@ -104,6 +160,22 @@ export class AccountApiClient {
     body?: unknown,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    return withLocalLogContext(
+      {
+        operationId: globalThis.crypto.randomUUID(),
+        userId: scope.firebase_uid,
+        accountGeneration: scope.session_generation,
+      },
+      () => this.performRequest(scope, path, method, body, signal),
+    );
+  }
+  private async performRequest(
+    scope: AccountScope,
+    path: string,
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const target = new URL(path, this.origin);
     if (
       path.length > 8192 ||
@@ -124,21 +196,28 @@ export class AccountApiClient {
     if (serialized !== undefined && Buffer.byteLength(serialized) > 64 * 1024)
       throw new DesktopApiError("API_REQUEST_TOO_LARGE");
     try {
-      const response = await this.fetcher(target, {
-        method,
-        headers: {
-          Authorization: `Bearer ${session.id_token}`,
-          "X-Installation-Id": session.installation_id,
-          ...(serialized !== undefined
-            ? { "Content-Type": "application/json" }
-            : {}),
+      const response = await withLocalLogContext(
+        {
+          userId: scope.firebase_uid,
+          accountGeneration: scope.session_generation,
         },
-        ...(serialized === undefined ? {} : { body: serialized }),
-        redirect: "error",
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(180_000)])
-          : AbortSignal.timeout(180_000),
-      });
+        () =>
+          this.fetcher(target, {
+            method,
+            headers: {
+              Authorization: `Bearer ${session.id_token}`,
+              "X-Installation-Id": session.installation_id,
+              ...(serialized !== undefined
+                ? { "Content-Type": "application/json" }
+                : {}),
+            },
+            ...(serialized === undefined ? {} : { body: serialized }),
+            redirect: "error",
+            signal: signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(180_000)])
+              : AbortSignal.timeout(180_000),
+          }),
+      );
       if (!this.isCurrent(scope)) {
         await response.body?.cancel().catch(() => {});
         throw new DesktopApiError("ACCOUNT_CHANGED");

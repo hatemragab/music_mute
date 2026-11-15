@@ -269,7 +269,11 @@ describe('complete administration route authorization contract', () => {
           allowed ? route.successStatus : 403,
         );
         expect(response.headers['cache-control']).toBe('no-store');
-        if (!allowed || route.path === '/admin/session')
+        if (
+          !allowed ||
+          route.path === '/admin/session' ||
+          route.responseCategory === 'retired'
+        )
           expect(domainCalls).toEqual([]);
         else expect(domainCalls.length).toBe(1);
       }
@@ -290,15 +294,25 @@ describe('complete administration route authorization contract', () => {
       );
       if (route.validationOwner === 'dto') {
         domainCalls.length = 0;
-        const invalid = await send(owner, {
-          ...route.requestBody,
-          unrecognizedProperty: true,
-        });
+        const invalid =
+          route.method === 'GET'
+            ? await harness.request(
+                'get',
+                `${endpoint(route)}?unrecognized_property=true`,
+                undefined,
+                owner,
+              )
+            : await send(owner, {
+                ...route.requestBody,
+                unrecognizedProperty: true,
+              });
         expect(invalid.status, invalid.text).toBe(400);
         expect(domainCalls).toEqual([]);
-        const missing = await send(owner, {});
-        expect(missing.status, missing.text).toBe(400);
-        expect(domainCalls).toEqual([]);
+        if (route.method !== 'GET') {
+          const missing = await send(owner, {});
+          expect(missing.status, missing.text).toBe(400);
+          expect(domainCalls).toEqual([]);
+        }
       }
       domainCalls.length = 0;
       reserve.mockClear();

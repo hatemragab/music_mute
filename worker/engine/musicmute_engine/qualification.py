@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import copy
 import hashlib
 import json
 import math
 import os
 import platform
+import re
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from collections import Counter
@@ -43,10 +46,27 @@ PROFILE_LIMIT_BYTES = 64 * 1024 * 1024
 RELEASE_MANIFEST_LIMIT_BYTES = 16 * 1024 * 1024
 REPORT_SCHEMA_VERSION = 1
 QUALIFIED_IDENTITIES = {"Windows": "S-1-5-19"}
+GPU_ONLY_POLICY = "onnxruntime-disable-cpu-fallback-v1"
 
 
 class QualificationError(RuntimeError):
     """Raised when service-context GPU qualification cannot be proven."""
+
+
+def assert_context_identity(arguments: argparse.Namespace, system: str, identity: str) -> str:
+    profile = getattr(arguments, "runtime_profile", "legacy-service")
+    if profile == "windows-user":
+        expected = getattr(arguments, "expected_user_sid", None)
+        if (system != "Windows" or arguments.provider != "directml"
+                or not isinstance(expected, str) or not re.fullmatch(r"S-1-(?:\d+-){1,14}\d+", expected)
+                or expected in {"S-1-5-18", "S-1-5-19", "S-1-5-20"} or identity != expected):
+            raise QualificationError("Qualification must run as the expected Windows user")
+    elif profile != "legacy-service" or not (
+        system == "Darwin" and identity.casefold() != "root"
+        or system == "Windows" and identity == QUALIFIED_IDENTITIES["Windows"]
+    ):
+        raise QualificationError("Qualification must run as the worker service identity")
+    return profile
 
 
 def sha256_hex(path: Path) -> str:
@@ -68,6 +88,7 @@ def service_identity() -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                creationflags=0x00000008 if sys.platform == "win32" else 0,
             )
             row = next(csv.reader([completed.stdout.strip()]))
         except (
@@ -120,7 +141,7 @@ def summarize_profiles(
 
     accelerated = counts[expected_provider]
     cpu = counts[CPU_PROVIDER]
-    proven = profile_count > 0 and accelerated > 0 and cpu == 0
+    proven = profile_count > 0 and accelerated > 0 and cpu == 0 and not (set(counts) - {expected_provider})
     return {
         "expectedProvider": expected_provider,
         "profileCount": profile_count,
@@ -200,18 +221,11 @@ def _run_qualification(
         save_audio_dir.mkdir(mode=0o700)
     system = platform.system()
     identity = service_identity()
-    expected_identity = QUALIFIED_IDENTITIES.get(system)
-    if system == "Darwin":
-        identity_is_valid = identity.casefold() != "root"
-    else:
-        identity_is_valid = (
-            expected_identity is not None
-            and identity.casefold() == expected_identity.casefold()
-        )
-    if not identity_is_valid:
-        raise QualificationError(
-            "Qualification must run as the worker service identity"
-        )
+    runtime_profile = assert_context_identity(arguments, system, identity)
+    gpu_identity = None
+    if runtime_profile == "windows-user":
+        from .windows_gpu import adapter_identity
+        gpu_identity = adapter_identity(arguments.directml_device_id)
 
     fixture = arguments.fixture.resolve(strict=True)
     work_root = arguments.work_root.resolve(strict=True)
@@ -412,6 +426,11 @@ def _run_qualification(
             dispatch = summarize_profiles(profile_paths, DIRECTML_PROVIDER)
         if not dispatch["proven"]:
             raise QualificationError("Accelerated provider dispatch was not proven")
+        if gpu_identity is not None:
+            # A driver reset/re-enumeration during qualification invalidates
+            # the attempt, even if its transient ordinal now refers elsewhere.
+            if adapter_identity(arguments.directml_device_id) != gpu_identity:
+                raise QualificationError("GPU identity changed during qualification")
     finally:
         for path in profile_paths:
             path.unlink(missing_ok=True)
@@ -426,7 +445,7 @@ def _run_qualification(
         "status": "PASS",
         "platform": "darwin-arm64" if system == "Darwin" else "windows-amd64",
         "provider": arguments.provider,
-        "gpuId": "gpu0",
+        "gpuId": "gpu0" if gpu_identity is None else f"dxgi-{gpu_identity['luid']}",
         "directmlDeviceId": arguments.directml_device_id,
         "serviceIdentity": identity,
         "releaseManifestDigest": release_manifest_digest,
@@ -438,6 +457,13 @@ def _run_qualification(
         "uploadCandidate": upload_candidate,
         "preloadSeconds": preload_seconds,
         "totalSeconds": total_seconds,
+        **({"gpuOnlyPolicy": GPU_ONLY_POLICY} if arguments.provider == "directml" else {}),
+        **({"runtimeProfile": runtime_profile, "gpuIdentity": gpu_identity,
+            "resourceObservations": {
+                "dedicatedVideoMemoryLimitBytes": gpu_identity["dedicatedVideoMemoryBytes"],
+                "sharedSystemMemoryLimitBytes": gpu_identity["sharedSystemMemoryLimitBytes"],
+                "inferenceSlots": 1,
+            }} if gpu_identity is not None else {}),
         **({"savedAudioArtifacts": saved_audio_artifacts,
             "measuredWallSeconds": measured_wall_seconds} if benchmark_mode else {}),
     }
@@ -472,10 +498,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ffmpeg", type=Path, required=True)
     parser.add_argument("--ffprobe", type=Path, required=True)
     parser.add_argument("--directml-device-id", type=int, default=0)
+    parser.add_argument("--runtime-profile", choices=("legacy-service", "windows-user"), default="legacy-service")
+    parser.add_argument("--expected-user-sid")
+    parser.add_argument("--auto-select", action="store_true")
+    parser.add_argument("--preferred-gpu-receipt", type=Path)
     parser.add_argument("--recipe-id", choices=tuple(RECIPE_DEFINITIONS))
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--report", type=Path, required=True)
     arguments = parser.parse_args()
+    if arguments.runtime_profile == "windows-user" and (arguments.provider != "directml" or not arguments.expected_user_sid):
+        parser.error("windows-user requires DirectML and --expected-user-sid")
+    if arguments.auto_select and arguments.runtime_profile != "windows-user":
+        parser.error("--auto-select requires the windows-user runtime profile")
+    if arguments.preferred_gpu_receipt is not None and (not arguments.auto_select or not arguments.preferred_gpu_receipt.is_absolute()):
+        parser.error("--preferred-gpu-receipt requires --auto-select and an absolute path")
     if not all(
         path.is_absolute()
         for path in (
@@ -508,7 +544,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     arguments = parse_args()
-    report = run_qualification(arguments)
+    if getattr(arguments, "auto_select", False):
+        from .windows_gpu import qualify_candidates, validate_identity
+        preference = None
+        preference_path = getattr(arguments, "preferred_gpu_receipt", None)
+        if preference_path is not None:
+            if preference_path.is_symlink() or not preference_path.is_file() or not 2 <= preference_path.stat().st_size <= 64 * 1024:
+                raise QualificationError("Preferred GPU receipt is unsafe")
+            receipt = json.loads(preference_path.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict):
+                raise QualificationError("Preferred GPU receipt is invalid")
+            preference = validate_identity(receipt.get("gpuIdentity"))
+
+        def qualify(candidate: dict[str, object]) -> dict[str, object]:
+            selected = copy.copy(arguments)
+            selected.directml_device_id = candidate["deviceIndex"]
+            return run_qualification(selected)
+
+        report = qualify_candidates(qualify, preference=preference)
+    else:
+        report = run_qualification(arguments)
     try:
         write_private_report(arguments.report, report)
     except Exception:

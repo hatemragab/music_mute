@@ -1,8 +1,6 @@
 import { parseCapacityBenchmarkReport } from "../platform/shared/capacity-benchmark.js";
-import {
-  stableCapacityGpuIdentity,
-  type installedCapacityIdentity,
-} from "./capacity-identity.js";
+import { stableCapacityGpuIdentity } from "./capacity-gpu-identity.js";
+import type { installedCapacityIdentity } from "./capacity-identity.js";
 
 type CapacityIdentity = Awaited<ReturnType<typeof installedCapacityIdentity>>;
 type Measurements = ReturnType<typeof parseCapacityBenchmarkReport>;
@@ -26,6 +24,7 @@ export function createCapacityReceipt(options: {
   identity: CapacityIdentity;
   measurements: Measurements;
   now?: number;
+  expectedUserSid?: string;
 }) {
   const now = options.now ?? Date.now();
   const receipt = parseCapacityReceipt(
@@ -39,9 +38,22 @@ export function createCapacityReceipt(options: {
       expiresAt: new Date(now + LIFETIME_MS).toISOString(),
       measurements: options.measurements,
     },
-    { machineId: options.machineId, provider: options.identity.provider, now },
+    {
+      machineId: options.machineId,
+      provider: options.identity.provider,
+      now,
+      ...(options.expectedUserSid === undefined
+        ? {}
+        : { expectedUserSid: options.expectedUserSid }),
+    },
   );
-  assertCapacityReceiptIdentity(receipt, options.identity);
+  assertCapacityReceiptIdentity(
+    receipt,
+    options.identity,
+    options.expectedUserSid === undefined
+      ? {}
+      : { expectedUserSid: options.expectedUserSid },
+  );
   return receipt;
 }
 
@@ -51,6 +63,7 @@ export function parseCapacityReceipt(
     machineId: string;
     provider: "mps" | "directml";
     now?: number;
+    expectedUserSid?: string;
   },
 ) {
   const record = object(value);
@@ -89,6 +102,9 @@ export function parseCapacityReceipt(
     warmupRuns: Number(measurements.warmupRuns),
     measuredRuns: Number(measurements.measuredRuns),
     stored: true,
+    ...(options.expectedUserSid === undefined
+      ? {}
+      : { expectedUserSid: options.expectedUserSid }),
   });
   if (validated.status !== "PASS")
     throw new TypeError("Capacity benchmark measurements did not pass");
@@ -107,6 +123,7 @@ export function parseCapacityReceipt(
 export function assertCapacityReceiptIdentity(
   receipt: ReturnType<typeof parseCapacityReceipt>,
   identity: CapacityIdentity,
+  options: { expectedUserSid?: string } = {},
 ): void {
   for (const key of [
     "releaseManifestDigest",
@@ -121,7 +138,9 @@ export function assertCapacityReceiptIdentity(
   }
   const gpu =
     receipt.measurements.provider === "directml"
-      ? stableCapacityGpuIdentity(receipt.measurements.gpuIdentity)
+      ? stableCapacityGpuIdentity(receipt.measurements.gpuIdentity, {
+          allowDeviceOrdinal: options.expectedUserSid !== undefined,
+        })
       : null;
   if (
     receipt.hostDigest !== identity.hostDigest ||

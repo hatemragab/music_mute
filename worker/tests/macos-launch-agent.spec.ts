@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import {
   MacLaunchAgentController,
+  MacLaunchAgentError,
   renderLaunchAgentPlist,
   type LaunchAgentExecutor,
 } from "../src/platform/macos/launch-agent.js";
@@ -60,6 +61,7 @@ describe.skipIf(process.platform !== "darwin")("macOS user LaunchAgent", () => {
     await controller.bootout();
 
     expect(execute.mock.calls).toEqual([
+      ["/bin/launchctl", ["enable", "gui/501/com.musicmute.worker"]],
       [
         "/bin/launchctl",
         [
@@ -73,6 +75,66 @@ describe.skipIf(process.platform !== "darwin")("macOS user LaunchAgent", () => {
       ["/bin/launchctl", ["print", "gui/501/com.musicmute.worker"]],
     ]);
   });
+
+  it("reinstalls a worker whose disabled override survived app and data removal", async () => {
+    const disabled = new Set([
+      "gui/501/com.musicmute.worker",
+      "gui/501/com.example.other",
+      "gui/502/com.musicmute.worker",
+    ]);
+    const execute = vi.fn<LaunchAgentExecutor>(async (_file, args) => {
+      if (args[0] === "enable") disabled.delete(args[1]!);
+      if (
+        args[0] === "bootstrap" &&
+        disabled.has(`${args[1]}/com.musicmute.worker`)
+      )
+        throw Object.assign(new Error("Bootstrap failed: 5"), { code: 5 });
+      return { stdout: "", stderr: "" };
+    });
+    const plistPath =
+      "/Users/tester/Library/LaunchAgents/com.musicmute.worker.plist";
+
+    await new MacLaunchAgentController(501, execute).bootstrap(plistPath);
+
+    expect(execute.mock.calls).toEqual([
+      ["/bin/launchctl", ["enable", "gui/501/com.musicmute.worker"]],
+      ["/bin/launchctl", ["bootstrap", "gui/501", plistPath]],
+    ]);
+    expect([...disabled]).toEqual([
+      "gui/501/com.example.other",
+      "gui/502/com.musicmute.worker",
+    ]);
+  });
+
+  it.each([
+    ["enable", "WORKER_SERVICE_ENABLE_FAILED"],
+    ["bootstrap", "WORKER_SERVICE_START_FAILED"],
+  ] as const)(
+    "reports a safe %s failure and stops the startup sequence",
+    async (command, code) => {
+      const cause = Object.assign(new Error("private launchctl output"), {
+        code: 5,
+      });
+      const execute = vi.fn<LaunchAgentExecutor>(async (_file, args) => {
+        if (args[0] === command) throw cause;
+        return { stdout: "", stderr: "" };
+      });
+      const failure = await new MacLaunchAgentController(501, execute)
+        .bootstrap(
+          "/Users/tester/Library/LaunchAgents/com.musicmute.worker.plist",
+        )
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(MacLaunchAgentError);
+      expect(failure).toMatchObject({ code, cause });
+      expect((failure as MacLaunchAgentError).message).not.toContain(
+        cause.message,
+      );
+      expect(execute.mock.calls.map(([, args]) => args[0])).toEqual(
+        command === "enable" ? ["enable"] : ["enable", "bootstrap"],
+      );
+    },
+  );
 
   it("waits for registration removal after bootout is acknowledged", async () => {
     vi.useFakeTimers();

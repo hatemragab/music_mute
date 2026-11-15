@@ -604,6 +604,18 @@ JobSchema.index(
 );
 JobSchema.index({ userId: 1, status: 1 }, { name: 'jobs_owner_running' });
 JobSchema.index(
+  { userId: 1, 'outputObject.key': 1 },
+  {
+    name: 'jobs_owner_cached_output',
+    partialFilterExpression: {
+      sourceKind: 'url',
+      status: 'ready',
+      deletedAt: null,
+      'outputObject.key': { $type: 'string' },
+    },
+  },
+);
+JobSchema.index(
   {
     status: 1,
     reservationCleanupScheduledAt: 1,

@@ -1,4 +1,5 @@
 import { LocalMediaSyncsModule } from '../local-media-syncs/local-media-syncs.module.js';
+import { AppPolicyModule } from '../app-policy/app-policy.module.js';
 import { AdminNotificationsModule } from '../admin-notifications/admin-notifications.module.js';
 import { RealtimeSocketService } from './realtime-socket.service.js';
 import { QueueProjectionService } from './queue-projection.service.js';
@@ -14,6 +15,7 @@ import { WorkerFleetModule } from '../worker-fleet/worker-fleet.module.js';
 import { RealtimeResourcesService } from './realtime-resources.service.js';
 import { RealtimeFeedModule } from './realtime-feed.module.js';
 import { Module } from '@nestjs/common';
+import { DevicesModule } from '../devices/devices.module.js';
 import { AdminModule } from '../admin/admin.module.js';
 import { FirebaseModule } from '../auth/firebase.module.js';
 import { RateLimitsModule } from '../rate-limits/rate-limits.module.js';
@@ -27,11 +29,13 @@ import {
 @Module({
   imports: [
     RealtimeFeedModule,
+    AppPolicyModule,
     ProcessingPersistenceModule,
     AdminModule,
     FirebaseModule,
     RateLimitsModule,
     UsersModule,
+    DevicesModule,
     AdminJobsModule,
     AdminHealthModule,
     AdminObservabilityModule,

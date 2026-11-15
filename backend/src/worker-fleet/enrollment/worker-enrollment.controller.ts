@@ -1,4 +1,5 @@
-import { Body, Controller, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, Param, Post, Req } from '@nestjs/common';
+import { EmptyBodyPipe } from '../../auth/dto/empty-body.pipe.js';
 import { LimitWorker, WorkerRoute } from '../auth/worker-auth.decorators.js';
 import type { WorkerRequest } from '../auth/worker-auth.types.js';
 import {
@@ -70,6 +71,7 @@ export class WorkerEnrollmentController {
       request.workerPrincipal!,
       id,
       dto.platform,
+      dto.installationProfile,
     );
   }
 
@@ -81,6 +83,21 @@ export class WorkerEnrollmentController {
     @Body() dto: ReportWorkerInstallationDto,
   ) {
     return this.enrollment.report(request.workerPrincipal!, id, dto);
+  }
+
+  @Post(':id/store-qualification-artifacts')
+  @Header('Cache-Control', 'no-store')
+  @WorkerRoute('installation')
+  @LimitWorker('transfer')
+  storeQualificationArtifacts(
+    @Req() request: WorkerRequest,
+    @Param('id') id: string,
+    @Body(EmptyBodyPipe) _body: void,
+  ) {
+    return this.artifacts.createStoreQualificationDataGrants(
+      request.workerPrincipal!,
+      id,
+    );
   }
 
   @Post(':id/logs')

@@ -1,3 +1,4 @@
+import "./local-debug.js";
 import { loadLocalConfig, LocalSetupError } from "./config.js";
 import { Diagnostics } from "./diagnostics.js";
 import { resolveDiagnosticIdentity } from "./diagnostic-identity.js";

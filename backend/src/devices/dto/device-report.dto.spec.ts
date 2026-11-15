@@ -38,14 +38,17 @@ describe('device report boundary', () => {
       await errors({ ...report, platform: 'web', osVersion: 'Browser' }),
     ).toEqual([]);
   });
-  it('accepts a native Mac installation with the same bounded metadata', async () => {
-    expect(
-      await errors({ ...report, platform: 'macos', osVersion: 'macOS 26.0' }),
-    ).toEqual([]);
-    expect(
-      (await errors({ ...report, platform: 'macos', buildNumber: 0 })).length,
-    ).toBeGreaterThan(0);
-  });
+  it.each(['macos', 'windows'])(
+    'accepts a native %s installation with the same bounded metadata',
+    async (platform) => {
+      expect(
+        await errors({ ...report, platform, osVersion: '10.0.19045' }),
+      ).toEqual([]);
+      expect(
+        (await errors({ ...report, platform, buildNumber: 0 })).length,
+      ).toBeGreaterThan(0);
+    },
+  );
   it.each([
     { installationId: 'not-a-uuid' },
     { platform: 'desktop' },

@@ -1,0 +1,324 @@
+{
+  "app_name": "MusicMute",
+  "package_name": "com.hatem.musicmute",
+  "status": "Source-backed preparation for the existing MusicMute Console app; Console save and artifact verification belong to the root task",
+  "privacy_policy_url": "https://api.music-mute.com/privacy",
+  "account_deletion_url": "https://api.music-mute.com/delete-account",
+  "contains_ads": false,
+  "uses_advertising_id": false,
+  "government_app": false,
+  "news_app": false,
+  "health_features": [],
+  "financial_features": [],
+  "app_access": "all or some functionality restricted; account required",
+  "reviewer_credentials_status": "Provided privately to the root task; credentials and private contact values must not be repeated or persisted here; clean access verification is handled by root",
+  "account_creation_methods": ["Email and password", "OAuth (Google)"],
+  "collects_data": true,
+  "encrypted_in_transit": true,
+  "supports_account_deletion": true,
+  "target_audience": "Owner intent not explicitly stated; 18 and over is a reasonable editable draft recommendation for the current general audio utility",
+  "collection": [
+    {
+      "data_type": "Name",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["App functionality", "Account management"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission"
+    },
+    {
+      "data_type": "Email address",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": [
+        "App functionality",
+        "Account management",
+        "Fraud prevention, security, and compliance"
+      ],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission"
+    },
+    {
+      "data_type": "User IDs",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": [
+        "App functionality",
+        "Account management",
+        "Fraud prevention, security, and compliance",
+        "Analytics"
+      ],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission"
+    },
+    {
+      "data_type": "Voice or sound recordings",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["App functionality"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission",
+      "sharing_exception_evidence": "Known R2 customer-content processing has standard service-provider support; explicit Android audio export can use the user-initiated action exception. Other recipient roles still need release/operator reconciliation."
+    },
+    {
+      "data_type": "Music files",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["App functionality"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission",
+      "sharing_exception_evidence": "Known R2 customer-content processing has standard service-provider support; explicit Android audio export can use the user-initiated action exception. Other recipient roles still need release/operator reconciliation."
+    },
+    {
+      "data_type": "Other audio files",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["App functionality"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission",
+      "sharing_exception_evidence": "Known R2 customer-content processing has standard service-provider support; explicit Android audio export can use the user-initiated action exception. Other recipient roles still need release/operator reconciliation."
+    },
+    {
+      "data_type": "Files and docs",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["App functionality"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission"
+    },
+    {
+      "data_type": "Other user-generated content",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "optional",
+      "purposes": ["App functionality", "Account management"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission"
+    },
+    {
+      "data_type": "App interactions",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": [
+        "App functionality",
+        "Fraud prevention, security, and compliance",
+        "Analytics"
+      ],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission",
+      "analytics_evidence": "First-party admin observability aggregates job usage/performance; operations device statistics aggregate device activity and installation counts."
+    },
+    {
+      "data_type": "Crash logs",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["Analytics"],
+      "sharing": "Provisional Shared for Analytics in an editable draft; service-provider/anonymous exception remains unverified",
+      "sharing_draft_choice": "Shared",
+      "sharing_purposes": ["Analytics"],
+      "sharing_final_verified": false
+    },
+    {
+      "data_type": "Diagnostics",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["Analytics"],
+      "sharing": "Provisional Shared for Analytics in an editable draft; service-provider/anonymous exception remains unverified",
+      "sharing_draft_choice": "Shared",
+      "sharing_purposes": ["Analytics"],
+      "sharing_final_verified": false
+    },
+    {
+      "data_type": "Device or other IDs",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": [
+        "App functionality",
+        "Account management",
+        "Fraud prevention, security, and compliance",
+        "Analytics"
+      ],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission",
+      "analytics_evidence": "First-party admin observability aggregates job usage/performance; operations device statistics aggregate device activity and installation counts."
+    },
+    {
+      "data_type": "Approximate location",
+      "collected": true,
+      "ephemeral": false,
+      "user_control": "required",
+      "purposes": ["App functionality", "Account management"],
+      "sharing": "unconfirmed; assess service-provider and user-initiated transfer exceptions before submission"
+    }
+  ],
+  "precise_location_status": "Unresolved physical-area classification: retained IP-derived coordinates have no stored/provider accuracy-area guarantee. Do not infer No from absent GPS permission or estimated coordinates.",
+  "remaining_evidence": [
+    "Exact uploaded 1.0.0/build20 Play AAB identity and merged permissions",
+    "Console read-back of saved form answers/listing and draft release",
+    "Owner review of recommended target age group",
+    "Root verification of privately supplied reviewer access and reusable sample",
+    "Console IARC answer read-back and calculated ratings",
+    "Sentry sharing-exception/account data-use evidence and remaining recipient roles",
+    "Physical-area classification for retained IP-derived coordinates",
+    "Genuine Android screenshots and required FGS feature video",
+    "Android Auto validation if that surface is included"
+  ],
+  "source_guidance": "https://support.google.com/googleplay/android-developer/answer/10787469",
+  "constraints": {
+    "upload_apk_or_aab": true,
+    "allowed_upload": "Play AAB 1.0.0/build20 to an unpublished draft only",
+    "upload_apk": false,
+    "submit_for_review": false,
+    "publish": false,
+    "start_rollout": false
+  },
+  "checked_on": "2026-10-08",
+  "release": {
+    "version_name": "1.0.0",
+    "version_code": 20,
+    "distribution": "play",
+    "target_sdk": 36,
+    "source_version_verified": true,
+    "uploaded_artifact_verified_by_this_audit": false
+  },
+  "public_contact_status": "Owner supplied public contact values; root enters and verifies them privately in Console",
+  "privacy_live_verification": {
+    "checked_on": "2026-10-08",
+    "privacy_page_retrieved": true,
+    "ip_location_and_coordinate_disclosure_present": true,
+    "deletion_page_retrieved": true,
+    "external_ownership_verification_instructions_present": true,
+    "support_mailbox_operation_tested": false
+  },
+  "target_audience_draft": {
+    "recommended_age_groups": ["18 and over"],
+    "selection_basis": "General audio-processing and listening utility with account management; no child-directed characters, games, lessons or marketing found in the current native/store sources",
+    "owner_intent_confirmed": false,
+    "designed_primarily_for_children": false,
+    "restrict_minor_access_recommended": false,
+    "restriction_note": "No mandatory age-restricted gambling, dating or other adult-only functionality was found. Selecting an adult target does not by itself require restricting all minor access."
+  },
+  "ads_and_permissions_evidence": {
+    "source_manifest_ad_id": false,
+    "ads_sdk_found": false,
+    "payment_or_billing_sdk_found": false,
+    "source_only_note": "Reconcile against the exact uploaded AAB merged manifest/dependencies. Source declares mediaPlayback FGS and notifications; no GPS, microphone, camera, broad file, APK-install or full-screen-intent permission."
+  },
+  "some_data_deletion_without_account_deletion": {
+    "source_supported": true,
+    "mechanism": "In-app deletion of eligible completed/failed/cancelled jobs removes owned history/private media through cleanup while retaining the account",
+    "shared_media_limitation": "Accepted public-link shared objects can remain after job/account deletion; owned records and access are removed",
+    "dedicated_external_data_only_url_verified": false,
+    "console_answer_note": "Use the in-app mechanism if the optional question permits it. Do not invent a separate URL or assert a data-only external request flow has been tested."
+  },
+  "content_rating": {
+    "questionnaire_category": "All other app types",
+    "classification_basis": "Music/audio processing and playback utility; not a game, social network, dating app or messaging service",
+    "questionnaire_email_status": "Root uses the owner-provided public contact in Console; do not duplicate private values here",
+    "developer_supplied_content": {
+      "violence": false,
+      "sexual_content_or_nudity": false,
+      "profanity": false,
+      "gambling_or_simulated_gambling": false,
+      "drugs_tobacco_or_alcohol": false,
+      "horror_or_fear": false,
+      "scope": "Current supplied UI/copy/artwork only. User-selected audio and imported online material are not certified free of rating-relevant content."
+    },
+    "interactive_features": {
+      "in_app_other_user_chat_or_direct_exchange": false,
+      "public_profiles_comments_or_user_media_feed": false,
+      "public_user_upload_catalog": false,
+      "shares_user_location_with_other_users": false,
+      "digital_goods_purchases": false,
+      "real_money_purchases_or_prizes": false,
+      "private_cloud_upload_is_other_user_interaction": false,
+      "external_audio_share_chooser": true,
+      "external_share_note": "Android ACTION_SEND sends a private audio URI to the system chooser and a separately selected secondary app. Official Google Play rating-question guidance excludes sharing accomplished using secondary apps when evaluating native user interaction; MusicMute has no native user-to-user recipient/chat/feed/exchange service.",
+      "native_user_interaction_question": "Does the app natively allow users to interact or exchange content with other users through voice communication, text, or sharing images or audio?",
+      "native_user_interaction_answer": false,
+      "native_user_interaction_guidance": "https://support.google.com/googleplay/android-developer/answer/7021383?hl=en"
+    },
+    "online_content": {
+      "source_supported": true,
+      "source_supported_scope": "User-selected URL import capability, not an app-featured or promoted content catalog",
+      "native_ui_policy_gated": true,
+      "initial_native_default": "file-only until policy permits URL controls",
+      "server_visibility_is_api_admission_gate": false,
+      "question": "Does the app feature or promote content not included in the initial download that can be accessed from the app?",
+      "question_wording_status": "Scope paraphrase of the live Console wording reported by root; not a verbatim transcription",
+      "answer": false,
+      "answer_label": "No",
+      "guidance": "https://support.google.com/googleplay/android-developer/answer/11070055?hl=en",
+      "app_featured_or_promoted_media_catalog": false,
+      "note": "Google's specific IARC Online Content guide excludes content users import themselves and lists a podcast player with no supplied content as having no Online Content. MusicMute processes privately selected files or user-submitted URLs and displays account-owned jobs/results; no curated, featured or promoted media catalog was found. SupportedAudioSites contains provider names and URL rules, not promoted songs or podcasts. The source still supports policy-gated URL acquisition and downloaded playback; the No answer follows the imported-content exclusion, not an assertion that URL capability is absent. This supersedes the earlier broader Yes recommendation and does not certify arbitrary imported audio as rated or moderated.",
+      "source_evidence": [
+        "android/app/src/main/java/com/hatem/musicmute/ui/home/HomeScreen.kt:87",
+        "android/app/src/main/java/com/hatem/musicmute/library/DefaultLibraryRepository.kt:55",
+        "android/app/src/main/java/com/hatem/musicmute/playback/PlaybackLibraryCallback.kt:139",
+        "android/app/src/main/java/com/hatem/musicmute/processing/SupportedAudioSites.kt:7"
+      ]
+    },
+    "ugc_distinction": "Data Safety Other user-generated content includes selected URLs/recovery text. That does not make private processing a public UGC/social service. A reusable shared processing cache is not a browsable user-upload feed.",
+    "ai_facts": "Machine-learning source separation extracts vocals from supplied audio; no chatbot, prompt-to-image generator, voice impersonation or synthetic-person recording feature was found.",
+    "calculated_ratings_status": "Not calculated or verified by this audit; do not pre-claim Everyone, PEGI 3 or any territory certificate",
+    "wording_dependent_answers": []
+  },
+  "foreground_service": {
+    "types": ["mediaPlayback"],
+    "console_use_case": "Media playback",
+    "functionality": "Users choose original or processed audio in their private Library and start playback. Playback continues while the app is in the background or the screen is locked, with media notification/session controls.",
+    "deferred_impact": "Requested audio would not begin when the user presses Play.",
+    "interrupted_impact": "Playback would stop while listening or when the app leaves the foreground; the user would need to return and resume.",
+    "user_initiated": true,
+    "core_playback_functionality": true,
+    "demo_video_url": null,
+    "demo_video_status": "A genuine recording of the current Android release and a reachable reviewer video URL are required; no recording or device proof was created by this audit",
+    "not_declared_types": [
+      "dataSync",
+      "mediaProcessing",
+      "microphone",
+      "location",
+      "specialUse"
+    ],
+    "full_screen_intent_used": false
+  },
+  "android_auto": {
+    "source_declares_audio_car_integration": true,
+    "real_car_or_host_validation_done_by_this_audit": false,
+    "note": "Manifest exposes a MediaLibraryService and car application metadata. Source presence does not prove Android Auto quality/accessibility requirements or car screenshots."
+  },
+  "sharing_assessment": {
+    "standard_service_provider_basis": {
+      "Firebase Auth and Messaging": "Public standard terms support covered customer-instructed processing",
+      "Cloudflare R2 customer content": "Public self-serve terms/DPA support covered customer-content processing"
+    },
+    "sentry": "Exception unresolved: standard terms restrict Service Data to providing/maintaining/improving the service for the customer; Additional Uses are allowed for non-identifying data and customer-authorized other Service Data. The DPA is separately accepted. SDK scrubbing does not prove organization settings, accepted DPA, complete anonymization or all receiver-side purposes.",
+    "conservative_editable_draft": {
+      "Crash logs": "Collected and Shared; Analytics",
+      "Diagnostics": "Collected and Shared; Analytics",
+      "note": "Provisional disclosure of confirmed third-party diagnostic transfer while exception evidence is missing; not a claim that Sentry actually uses identifiable end-user data independently. Review before any app review submission."
+    },
+    "other_transfers": "Assess first-party hosting/worker/database roles and active URL acquisition recipients. User-directed audio export has a clear sharing action/chooser and can use the user-initiated transfer exception. Do not declare overall No sharing solely from vendor names.",
+    "final_exception_evidence_verified": false
+  },
+  "precise_location_conservative_draft": {
+    "choice": "Collected",
+    "ephemeral": false,
+    "user_control": "required",
+    "purposes": ["App functionality", "Account management"],
+    "source_classification_confirmed": false,
+    "note": "A broader editable draft disclosure can include the retained coordinate estimate while its exact classification is unresolved. This is not proof the estimate locates a user inside an area below 3 square kilometers."
+  },
+  "official_guidance": {
+    "data_safety": "https://support.google.com/googleplay/android-developer/answer/10787469",
+    "target_audience": "https://support.google.com/googleplay/android-developer/answer/9867159",
+    "content_rating": "https://support.google.com/googleplay/android-developer/answer/9859655",
+    "foreground_services": "https://support.google.com/googleplay/android-developer/answer/13392821",
+    "ai_generated_content_scope": "https://support.google.com/googleplay/android-developer/answer/14094294",
+    "sentry_terms": "https://sentry.io/terms/",
+    "sentry_dpa_acceptance": "https://www.sentry.help/en/articles/13965008-how-do-i-sign-your-data-processing-addendum",
+    "native_interaction_question": "https://support.google.com/googleplay/android-developer/answer/7021383?hl=en",
+    "iarc_online_content": "https://support.google.com/googleplay/android-developer/answer/11070055?hl=en"
+  }
+}

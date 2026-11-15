@@ -33,4 +33,21 @@ describe("extension product discovery", () => {
     expect(link.target).toBe("_blank");
     expect(link.rel.split(" ")).toEqual(["noopener", "noreferrer"]);
   });
+  it("keeps the reviewed Downloads page distinct from any installer or platform release", () => {
+    const url = new URL(PRODUCT_LINKS.downloads);
+    expect(url.href).toBe("https://music-mute.com/#downloads");
+    expect([url.username, url.password, url.search, url.port]).toEqual([
+      "",
+      "",
+      "",
+      "",
+    ]);
+    const link = { href: "", target: "", rel: "" };
+    configureProductLink(link as HTMLAnchorElement, "downloads");
+    expect(link).toEqual({
+      href: url.href,
+      target: "_blank",
+      rel: "noopener noreferrer",
+    });
+  });
 });

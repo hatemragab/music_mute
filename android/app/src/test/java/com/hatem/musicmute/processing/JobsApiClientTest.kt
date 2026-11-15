@@ -8,6 +8,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class JobsApiClientTest {
+    @Test fun signedOutPolicyCheckoutUsesPublicRouteWithoutRequestingAToken() = runTest {
+        val auth = AuthApiClient(AuthConfiguration("https://api.example.test", false), { null },
+            { error("Public policy checkout must not request a Firebase token") },
+            AuthHttpTransport { url, method, headers, body ->
+                assertEquals("https://api.example.test/processing-policy?schema_version=2", url)
+                assertEquals("GET", method)
+                assertFalse(headers.containsKey("Authorization"))
+                assertNull(body)
+                AuthHttpResponse(200, processingPolicyFixture)
+            })
+        val api = JobsApiClient(auth, { "" })
+        assertFalse(api.checkoutMediaPolicy(authenticated = false).linkImportVisible)
+    }
+
     @Test fun rateLimitStopsOtherJobRoutesBeforeTransport() = runTest {
         var calls = 0
         val api = client(AuthHttpTransport { _, _, _, _ ->
@@ -182,6 +196,20 @@ class JobsApiClientTest {
 
         api.download(id, "output", requestId)
         assertEquals(listOf("/jobs/$id", "/jobs/$id/download-grants"), requests)
+    }
+
+    @Test fun optionalThumbnailUsesOriginalWireUrlAndMalformedArtworkDoesNotBreakJobs() = runTest {
+        val thumbnail = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=Ab_-123%3D%3D&rs=signature"
+        for (value in listOf(JsonPrimitive(thumbnail).toString(), "null", "42", "{}", "[]",
+            JsonPrimitive("https://evil.test/image.jpg").toString())) {
+            val detail = job("ready").dropLast(1) + ",\"thumbnail_url\":$value}"
+            val api = client(AuthHttpTransport { url, _, _, _ ->
+                AuthHttpResponse(200, if (url.contains("?")) "{\"items\":[$detail]}" else detail)
+            })
+            val expected = if (value == JsonPrimitive(thumbnail).toString()) thumbnail else null
+            assertEquals(expected, api.detail(id).thumbnailUrl)
+            assertEquals(expected, api.list().items.single().thumbnailUrl)
+        }
     }
 
     @Test fun refreshOnceKeepsExactIntentAndHeaders() = runTest {

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import {
   Types,
+  trusted,
   type ClientSession,
   type Model,
   type UpdateQuery,
@@ -30,6 +31,7 @@ import {
   type AccountPolicyValueKey,
 } from './account-policy.schema.js';
 import { ProcessingAdmissionFence } from './processing-settings.schema.js';
+import { visitorCountry } from '../devices/cloudflare-location.js';
 
 const POLICY_VALUE_KEYS = Object.freeze(
   Object.keys(DEFAULT_ACCOUNT_POLICY_VALUES) as AccountPolicyValueKey[],
@@ -54,8 +56,74 @@ const ENFORCED_FEATURES = Object.freeze([
   'service_outbound',
 ]);
 
+interface LinkImportPolicy {
+  linkImportEnabled: boolean;
+  linkImportDisabledCountries: string[];
+  linkImportDisabledUserIds?: string[];
+}
+
+export function validateLinkImportVisibility(value: LinkImportPolicy): void {
+  const codes = value.linkImportDisabledCountries;
+  const userIds =
+    value.linkImportDisabledUserIds === undefined
+      ? []
+      : value.linkImportDisabledUserIds;
+  if (
+    typeof value.linkImportEnabled !== 'boolean' ||
+    !Array.isArray(codes) ||
+    codes.length > 250 ||
+    new Set(codes).size !== codes.length ||
+    codes.some((code) => visitorCountry(code) === null) ||
+    !Array.isArray(userIds) ||
+    userIds.length > 1000 ||
+    new Set(userIds).size !== userIds.length ||
+    userIds.some(
+      (id) =>
+        typeof id !== 'string' ||
+        id.length !== 24 ||
+        !/^[a-f0-9]{24}$/.test(id),
+    )
+  )
+    throw adminError('INVALID_REQUEST');
+}
+
+/** Native presentation only: never use this decision for API admission. */
+export function linkImportVisibility(
+  policy: LinkImportPolicy & { revision: number },
+  forcedOff: boolean,
+  observedCountry: string | null,
+  accountId: string | null = null,
+) {
+  const country = visitorCountry(observedCountry);
+  const enabled = policy.linkImportEnabled && !forcedOff;
+  const codes = policy.linkImportDisabledCountries;
+  const reason = !enabled
+    ? 'globally_hidden'
+    : accountId !== null &&
+        policy.linkImportDisabledUserIds?.includes(accountId)
+      ? 'user_hidden'
+      : codes.length === 0
+        ? 'allowed'
+        : country === null
+          ? 'unknown_country'
+          : codes.includes(country)
+            ? 'country_hidden'
+            : 'allowed';
+  return {
+    linkImportEnabled: enabled,
+    linkImportDisabledCountries: codes,
+    visitorCountry: country,
+    linkImportVisible: reason === 'allowed',
+    linkImportReason: reason,
+    linkImportPolicyRevision: policy.revision,
+  };
+}
+
 export interface StoredAccountPolicy extends AccountPolicyValues {
   revision: number;
+  linkImportEnabled: boolean;
+  linkImportDisabledCountries: string[];
+  linkImportDisabledUserIds: string[];
   acceptNewJobs: boolean;
   maintenanceMessageEn: string;
   maintenanceMessageAr: string | null;
@@ -132,11 +200,18 @@ function validateOperationalFields(value: {
     throw adminError('INVALID_REQUEST');
 }
 
-function presentGlobal(value: StoredAccountPolicy) {
+function presentGlobal(
+  value: StoredAccountPolicy,
+  linkImportForcedOff: boolean,
+) {
   return {
     plan: STANDARD_ACCOUNT_POLICY_ID,
     revision: value.revision,
     acceptNewJobs: value.acceptNewJobs,
+    linkImportEnabled: value.linkImportEnabled,
+    linkImportDisabledCountries: value.linkImportDisabledCountries,
+    linkImportDisabledUserIds: value.linkImportDisabledUserIds,
+    linkImportForcedOff,
     maintenanceMessageEn: value.maintenanceMessageEn,
     maintenanceMessageAr: value.maintenanceMessageAr,
     values: pickValues(value),
@@ -198,6 +273,9 @@ export class AccountPolicyService implements OnModuleInit {
         return {
           revision: 0,
           acceptNewJobs: true,
+          linkImportEnabled: false,
+          linkImportDisabledCountries: [],
+          linkImportDisabledUserIds: [],
           maintenanceMessageEn: '',
           maintenanceMessageAr: null,
           ...DEFAULT_ACCOUNT_POLICY_VALUES,
@@ -216,7 +294,26 @@ export class AccountPolicyService implements OnModuleInit {
         !Number.isFinite(stored.updatedAt.getTime())
       )
         throw new Error('Invalid stored account policy');
-      return { ...stored, ...values };
+      const visibility = {
+        linkImportEnabled: stored.linkImportEnabled ?? false,
+        linkImportDisabledCountries: stored.linkImportDisabledCountries ?? [],
+        linkImportDisabledUserIds:
+          stored.linkImportDisabledUserIds === undefined
+            ? []
+            : stored.linkImportDisabledUserIds,
+      };
+      validateLinkImportVisibility(visibility);
+      return {
+        ...stored,
+        ...values,
+        ...visibility,
+        linkImportDisabledCountries: [
+          ...visibility.linkImportDisabledCountries,
+        ].sort(),
+        linkImportDisabledUserIds: [
+          ...visibility.linkImportDisabledUserIds,
+        ].sort(),
+      };
     } catch {
       throw adminError('DEPENDENCY_UNAVAILABLE');
     }
@@ -262,14 +359,19 @@ export class AccountPolicyService implements OnModuleInit {
   }
 
   async current() {
-    return presentGlobal(await this.global());
+    return presentGlobal(await this.global(), this.linkImportForcedOff());
   }
 
   async currentOverride(accountId: Types.ObjectId) {
     return presentOverride(await this.overrides.findOne({ accountId }).lean());
   }
 
-  async publicPolicy(schemaVersion = '2', mediaLimitsVersion = '1') {
+  async publicPolicy(
+    schemaVersion = '2',
+    mediaLimitsVersion = '1',
+    country: string | null = null,
+    accountId: string | null = null,
+  ) {
     if (schemaVersion !== '2' || !['1', '2'].includes(mediaLimitsVersion))
       throw jobError('PROCESSING_POLICY_INCOMPATIBLE');
     const policy = await this.global();
@@ -282,6 +384,12 @@ export class AccountPolicyService implements OnModuleInit {
       acceptNewJobs,
       acceptLongJobs: policy.maxDurationSeconds > 600,
       checkedAt: new Date().toISOString(),
+      ...linkImportVisibility(
+        policy,
+        this.linkImportForcedOff(),
+        country,
+        accountId,
+      ),
       messageEn: policy.maintenanceMessageEn,
       messageAr: policy.maintenanceMessageAr,
       limits: {
@@ -326,7 +434,19 @@ export class AccountPolicyService implements OnModuleInit {
       {
         operationId: dto.operationId,
         route: 'PUT /admin/settings/account-policy',
-        request: { ...next, expectedRevision: dto.expectedRevision },
+        request: {
+          ...next,
+          ...(dto.linkImportEnabled === undefined
+            ? {}
+            : { linkImportEnabled: dto.linkImportEnabled }),
+          ...(dto.linkImportDisabledCountries === undefined
+            ? {}
+            : { linkImportDisabledCountries: dto.linkImportDisabledCountries }),
+          ...(dto.linkImportDisabledUserIds === undefined
+            ? {}
+            : { linkImportDisabledUserIds: dto.linkImportDisabledUserIds }),
+          expectedRevision: dto.expectedRevision,
+        },
         action: 'settings.account_policy.update',
         resourceType: 'account_policy',
         reason: dto.reason,
@@ -336,6 +456,39 @@ export class AccountPolicyService implements OnModuleInit {
         const current = await this.global(session);
         if (current.revision !== dto.expectedRevision)
           throw adminError('REVISION_CONFLICT');
+        const replacementPolicy = {
+          ...next,
+          linkImportEnabled: dto.linkImportEnabled ?? current.linkImportEnabled,
+          linkImportDisabledCountries: [
+            ...(dto.linkImportDisabledCountries ??
+              current.linkImportDisabledCountries),
+          ].sort(),
+          linkImportDisabledUserIds:
+            dto.linkImportDisabledUserIds === undefined
+              ? current.linkImportDisabledUserIds
+              : dto.linkImportDisabledUserIds,
+        };
+        validateLinkImportVisibility(replacementPolicy);
+        replacementPolicy.linkImportDisabledUserIds = [
+          ...replacementPolicy.linkImportDisabledUserIds,
+        ].sort();
+        const addedUserIds = replacementPolicy.linkImportDisabledUserIds.filter(
+          (id) => !current.linkImportDisabledUserIds.includes(id),
+        );
+        if (addedUserIds.length) {
+          const existing = await this.users
+            .find({
+              _id: trusted({
+                $in: addedUserIds.map((id) => new Types.ObjectId(id)),
+              }),
+            })
+            .select('_id')
+            .limit(addedUserIds.length)
+            .session(session)
+            .lean();
+          if (existing.length !== addedUserIds.length)
+            throw adminError('RESOURCE_NOT_FOUND');
+        }
         const updatedAt = new Date();
         let updated: AccountPolicy;
         if (current.revision === 0) {
@@ -344,7 +497,7 @@ export class AccountPolicyService implements OnModuleInit {
               [
                 {
                   _id: STANDARD_ACCOUNT_POLICY_ID,
-                  ...next,
+                  ...replacementPolicy,
                   revision: 1,
                   updatedBy: actor.uid,
                   updatedAt,
@@ -365,7 +518,7 @@ export class AccountPolicyService implements OnModuleInit {
                 revision: dto.expectedRevision,
               },
               {
-                $set: { ...next, updatedBy: actor.uid, updatedAt },
+                $set: { ...replacementPolicy, updatedBy: actor.uid, updatedAt },
                 $inc: { revision: 1 },
               },
               { session, returnDocument: 'after', runValidators: true },
@@ -379,12 +532,15 @@ export class AccountPolicyService implements OnModuleInit {
           resourceId: STANDARD_ACCOUNT_POLICY_ID,
           previousRevision: dto.expectedRevision,
           revision: updated.revision,
-          value: presentGlobal({
-            ...next,
-            revision: updated.revision,
-            updatedBy: updated.updatedBy,
-            updatedAt: updated.updatedAt,
-          }),
+          value: presentGlobal(
+            {
+              ...replacementPolicy,
+              revision: updated.revision,
+              updatedBy: updated.updatedBy,
+              updatedAt: updated.updatedAt,
+            },
+            this.linkImportForcedOff(),
+          ),
         };
       },
     );
@@ -586,11 +742,30 @@ export class AccountPolicyService implements OnModuleInit {
         before: before.acceptNewJobs,
         after: after.acceptNewJobs,
       },
+      {
+        field: 'linkImportEnabled',
+        before: before.linkImportEnabled,
+        after: after.linkImportEnabled,
+      },
+      {
+        field: 'linkImportDisabledCountries',
+        before: before.linkImportDisabledCountries.join(','),
+        after: after.linkImportDisabledCountries.join(','),
+      },
+      {
+        field: 'linkImportDisabledUserIds',
+        before: before.linkImportDisabledUserIds.join(','),
+        after: after.linkImportDisabledUserIds.join(','),
+      },
       ...POLICY_VALUE_KEYS.map((field) => ({
         field,
         before: before[field],
         after: after[field],
       })),
     ];
+  }
+
+  private linkImportForcedOff(): boolean {
+    return this.config.get<boolean>('URL_IMPORT_ENABLED') !== true;
   }
 }

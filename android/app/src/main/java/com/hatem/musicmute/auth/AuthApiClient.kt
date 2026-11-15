@@ -1,5 +1,7 @@
 package com.hatem.musicmute.auth
 
+import com.hatem.musicmute.diagnostics.LocalDiagnostics
+import com.hatem.musicmute.diagnostics.LocalLogContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -14,6 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -23,7 +26,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-data class AuthHttpResponse(val status: Int, val body: String, val retryAfter: String? = null)
+data class AuthHttpResponse(val status: Int, val body: String, val retryAfter: String? = null, val requestId: String? = null)
 
 fun interface AuthHttpTransport {
     suspend fun execute(
@@ -89,6 +92,7 @@ class UrlConnectionAuthTransport : AuthHttpTransport {
                                     status,
                                     bytes.toString(Charsets.UTF_8.name()),
                                     client.getHeaderField("Retry-After"),
+                                    client.getHeaderField("X-Request-Id"),
                                 )
                             )
                     } catch (error: Exception) {
@@ -225,6 +229,38 @@ class AuthApiClient(
             if (authenticated && uid != currentUid())
                 throw CancellationException("Auth session changed")
         }
+        val traceId = java.util.UUID.randomUUID().toString()
+        suspend fun observedExecute(headers: Map<String, String>, wireBody: String?): AuthHttpResponse {
+            if (!LocalDiagnostics.enabled) return transport.execute(url, method, headers, wireBody)
+            val requestId = java.util.UUID.randomUUID().toString()
+            val start = System.nanoTime()
+            var observed: AuthHttpResponse? = null
+            var result = "failed"
+            var error: Map<String, Any> = emptyMap()
+            try {
+                return withContext(LocalLogContext(uid, traceId)) {
+                    transport.execute(url, method, headers + ("X-Request-Id" to requestId), wireBody)
+                }.also {
+                    observed = it
+                    result = if (it.status in 200..299) "completed" else "http_error"
+                }
+            } catch (failure: Exception) {
+                result = if (failure is CancellationException) "aborted" else "failed"
+                error = LocalDiagnostics.error(failure)
+                throw failure
+            } finally {
+                val serverRequestId = observed?.requestId?.takeIf { runCatching { java.util.UUID.fromString(it).toString() == it.lowercase() }.getOrDefault(false) }
+                LocalDiagnostics.emit("http.completed", "http", if (result == "completed") "info" else "warn", mapOf(
+                    "operation" to "http.request", "method" to method, "url" to url,
+                    "status" to observed?.status, "result" to result, "durationMs" to (System.nanoTime() - start) / 1_000_000.0,
+                    "headers" to headers, "path" to URI(url).path,
+                    "query" to runCatching { URI(url).rawQuery?.split('&', limit = 65)?.take(64)?.associate { pair ->
+                        val parts = pair.split('=', limit = 2)
+                        java.net.URLDecoder.decode(parts[0], "UTF-8") to java.net.URLDecoder.decode(parts.getOrElse(1) { "" }, "UTF-8")
+                    } ?: emptyMap() }.getOrElse { mapOf("omitted" to "invalid_query_encoding") }, "request" to LocalDiagnostics.payload(wireBody), "response" to LocalDiagnostics.payload(observed?.body), "error" to error,
+                ), userId = uid, requestId = serverRequestId ?: requestId, traceId = traceId)
+            }
+        }
         return try {
             checkIdentity()
             val wireBody = body?.let(ApiWireJson::request)
@@ -232,9 +268,7 @@ class AuthApiClient(
             var bearer = if (authenticated) token(false) else null
             checkIdentity()
             var response =
-                transport.execute(
-                    url,
-                    method,
+                observedExecute(
                     additionalHeaders + (bearer?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap()),
                     wireBody,
                 )
@@ -247,7 +281,7 @@ class AuthApiClient(
                 }
                 checkIdentity()
                 response =
-                    transport.execute(url, method, additionalHeaders + mapOf("Authorization" to "Bearer $bearer"), wireBody)
+                    observedExecute(additionalHeaders + mapOf("Authorization" to "Bearer $bearer"), wireBody)
                 checkIdentity()
             }
             if (response.status !in 200..299) throw responseFailure(response)

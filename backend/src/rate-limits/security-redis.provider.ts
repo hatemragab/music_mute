@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
+import { localDiagnostics } from '../observability/local-diagnostics.js';
+import { observeRedisClient } from '../observability/local-service-diagnostics.js';
 
 export const SECURITY_REDIS = Symbol('SECURITY_REDIS');
 
@@ -13,6 +15,7 @@ export const securityRedisProvider: Provider = {
   provide: SECURITY_REDIS,
   inject: [ConfigService],
   useFactory: (config: ConfigService): Redis => {
+    localDiagnostics.configure(config);
     const redis = new Redis(config.getOrThrow<string>('REDIS_URL'), {
       connectTimeout: 5000,
       commandTimeout: 5000,
@@ -22,7 +25,7 @@ export const securityRedisProvider: Provider = {
     // Callers receive sanitized 503 errors; do not let ioredis print connection
     // details through its default unhandled-error diagnostic.
     redis.on('error', () => undefined);
-    return redis;
+    return observeRedisClient(redis);
   },
 };
 

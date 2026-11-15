@@ -108,6 +108,14 @@
 "MusicMute prepares the full vocals track locally, then plays it with the original YouTube video." = "MusicMute prepares the full vocals track locally, then plays it with the original YouTube video.";
 "MusicMute voice waveform" = "MusicMute voice waveform";
 "Newest" = "Newest";
+"Most Played" = "Most Played";
+"Show starred" = "Show starred";
+"Show only starred songs in this list" = "Show only starred songs in this list";
+"No played songs yet" = "No played songs yet";
+"No songs match your filters" = "No songs match your filters";
+"Try another search or change the filters." = "Try another search or change the filters.";
+"Play songs to build your Most Played list. Listening history stays on this Mac." = "Play songs to build your Most Played list. Listening history stays on this Mac.";
+"Listening history stays on this Mac." = "Listening history stays on this Mac.";
 "Next account page" = "Next account page";
 "Next track" = "Next track";
 "No retained app events are available." = "No retained app events are available.";
@@ -590,7 +598,7 @@
 "This video is unavailable to the guest downloader. Use audio you can access and have permission to process." = "This video is unavailable to the guest downloader. Use audio you can access and have permission to process.";
 "There is not enough free space. Free space on your Mac, then retry. Saved voices remain available." = "There is not enough free space. Free space on your Mac, then retry. Saved voices remain available.";
 
-"Check YouTube tools" = "Check YouTube tools";
+"Prepare local tools" = "Prepare local tools";
 "Cancel the update download or wait until it is ready to install before quitting." = "Cancel the update download or wait until it is ready to install before quitting.";
 
 "Local tools are prepared. Add the Chrome extension to finish. YouTube access is checked when you use a video." = "Local tools are prepared. Add the Chrome extension to finish. YouTube access is checked when you use a video.";
@@ -615,6 +623,24 @@
 
 /* Independent macOS worker controls. */
 "Worker" = "Worker";
+"Advanced" = "Advanced";
+"Start" = "Start";
+"Resume" = "Resume";
+"Connecting…" = "Connecting…";
+"Checking…" = "Checking…";
+"Needs attention" = "Needs attention";
+"Finishing jobs" = "Finishing jobs";
+"Working…" = "Working…";
+"Sign in with Google to continue." = "Sign in with Google to continue.";
+"Waiting for approval" = "Waiting for approval";
+"Could not connect" = "Could not connect";
+"Connection needs attention" = "Connection needs attention";
+"Check connection" = "Check connection";
+"Setup interrupted" = "Setup interrupted";
+"Retry registration" = "Retry registration";
+"Registration needs attention" = "Registration needs attention";
+"Open details" = "Open details";
+"Set up" = "Set up";
 "INDEPENDENT BACKGROUND PROCESSING" = "INDEPENDENT BACKGROUND PROCESSING";
 "Overview" = "Overview";
 "Worker setup" = "Worker setup";
@@ -790,6 +816,7 @@
 "Report display is limited. Narrow the filters or export diagnostics for more detail." = "Report display is limited. Narrow the filters or export diagnostics for more detail.";
 "macOS controls background permissions and may show a notice or ask you to enable MusicMute in Login Items & Extensions. Audio jobs do not require individual approval." = "macOS controls background permissions and may show a notice or ask you to enable MusicMute in Login Items & Extensions. Audio jobs do not require individual approval.";
 "Open macOS background settings" = "Open macOS background settings";
+"macOS could not start the background worker. Allow MusicMute in Login Items & Extensions, then retry worker setup." = "macOS could not start the background worker. Allow MusicMute in Login Items & Extensions, then retry worker setup.";
 "Attempt ID" = "Attempt ID";
 "Worker ID" = "Worker ID";
 "Machine ID" = "Machine ID";
@@ -970,6 +997,7 @@
 "Open Worker setup to check registration or restore a preserved installation." = "Open Worker setup to check registration or restore a preserved installation.";
 "Worker registration could not resume. Check administrator approval and retry registration." = "Worker registration could not resume. Check administrator approval and retry registration.";
 "Worker registration was refused or could not complete. Retry the preserved installation, or review Worker health." = "Worker registration was refused or could not complete. Retry the preserved installation, or review Worker health.";
+"Worker setup expired. Retry registration when offered; an uncertain activation must be recovered first." = "Worker setup expired. Retry registration when offered; an uncertain activation must be recovered first.";
 "Administrator approval is required to register this Mac." = "Administrator approval is required to register this Mac.";
 "The existing worker installation could not be safely inspected. Review Worker health before making changes." = "The existing worker installation could not be safely inspected. Review Worker health before making changes.";
 "The worker was removed on this Mac. Automatic registration remains off until you choose to register again." = "The worker was removed on this Mac. Automatic registration remains off until you choose to register again.";
@@ -1007,3 +1035,7 @@
 "Installed Voice processing engine" = "Installed Voice processing engine";
 "MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare." = "MusicMute cannot safely update its extension folder. Review the MusicMute Application Support folder, then retry Prepare.";
 "The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare." = "The bundled Chrome extension is incomplete or unsafe. Reinstall or update MusicMute, then retry Prepare.";
+
+"Choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio." = "Choose an audio file. MusicMute keeps the full timeline and prepares voice-only audio.";
+"Updating library…" = "Updating library…";
+"Updating local library…" = "Updating local library…";

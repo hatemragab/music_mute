@@ -40,6 +40,10 @@ import {
 } from "../src/companion/account-cache-restore.js";
 import { accountCacheKey } from "../src/companion/account-cache.js";
 import { DesktopCatalog } from "../src/companion/desktop-catalog.js";
+import {
+  DesktopApiError,
+  CloudReplyValidationError,
+} from "../src/companion/account-api.js";
 import type { LocalConfig } from "../src/companion/config.js";
 import type { DesktopRequest } from "../src/shared/desktop-protocol.js";
 import type { ProcessingProvider } from "../src/shared/protocol.js";
@@ -354,6 +358,145 @@ describe("selected-file account reuse before inference", () => {
           "utf8",
         ),
       ).not.toContain("private fixture network failure");
+    },
+  );
+
+  it.each([
+    {
+      kind: "typed",
+      error: new DesktopApiError("REALTIME_FRAME_INVALID", 502),
+      code: "REALTIME_FRAME_INVALID",
+      status: 502,
+      validationReason: undefined,
+    },
+    {
+      kind: "unknown-code",
+      error: new DesktopApiError("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER", 503),
+      code: "DESKTOP_OPERATION_FAILED",
+      status: 503,
+      validationReason: undefined,
+    },
+    {
+      kind: "raw-message",
+      error: new Error("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER"),
+      code: "DESKTOP_OPERATION_FAILED",
+      status: undefined,
+      validationReason: undefined,
+    },
+    {
+      kind: "throwing-error-accessor",
+      error: Object.defineProperty({}, "code", {
+        get() {
+          throw new Error("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER");
+        },
+      }),
+      code: "DESKTOP_OPERATION_FAILED",
+      status: undefined,
+      validationReason: undefined,
+    },
+    {
+      kind: "closed-parser-reason",
+      error: new CloudReplyValidationError("input_hash"),
+      code: "CLOUD_REPLY_INVALID",
+      status: undefined,
+      validationReason: "input_hash",
+    },
+    {
+      kind: "untyped-forged-reason",
+      error: Object.assign(new DesktopApiError("CLOUD_REPLY_INVALID"), {
+        validationReason: "input_hash",
+      }),
+      code: "CLOUD_REPLY_INVALID",
+      status: undefined,
+      validationReason: undefined,
+    },
+    {
+      kind: "unapproved-parser-reason",
+      error: Object.defineProperty(
+        new CloudReplyValidationError("input_hash"),
+        "validationReason",
+        { value: "SYNTHETIC_OPAQUE_CREDENTIAL_MARKER" },
+      ),
+      code: "CLOUD_REPLY_INVALID",
+      status: undefined,
+      validationReason: undefined,
+    },
+    {
+      kind: "parser-reason-accessor",
+      error: Object.defineProperty(
+        new CloudReplyValidationError("input_hash"),
+        "validationReason",
+        {
+          get() {
+            throw new Error("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER");
+          },
+        },
+      ),
+      code: "CLOUD_REPLY_INVALID",
+      status: undefined,
+      validationReason: undefined,
+    },
+    {
+      kind: "changed-error-code",
+      error: Object.defineProperty(
+        new CloudReplyValidationError("input_hash"),
+        "code",
+        { value: "COMMAND_FAILED" },
+      ),
+      code: "COMMAND_FAILED",
+      status: undefined,
+      validationReason: undefined,
+    },
+  ])(
+    "keeps optional file-reuse $kind diagnostics scoped and private while local processing succeeds",
+    async ({ error, code, status, validationReason }) => {
+      const e = await accountFileFixture();
+      await rm(e.cache, { recursive: true, force: true });
+      e.lookup.mockRejectedValue(error);
+      e.inference.mockImplementation(async (...args) => {
+        const { source: _source, ...audio } = await e.prepare(...args);
+        return audio;
+      });
+      const output = await executeDesktopRequest(
+        e.config,
+        e.request,
+        () => {},
+        new AbortController().signal,
+        e.dependencies,
+      );
+      expect(output).toMatchObject({
+        cache_hit: false,
+        sync_state: "local_only",
+      });
+      expect(e.lookup).toHaveBeenCalledOnce();
+      expect(e.inference).toHaveBeenCalledOnce();
+      expect(e.fetcher).not.toHaveBeenCalled();
+      const journal = await readFile(
+        join(e.config.logs_root, "desktop", "events.jsonl"),
+        "utf8",
+      );
+      const records = journal
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const warning = records.find(
+        (row) => row.event === "diagnostic_error" && row.severity === "warning",
+      );
+      expect(warning).toMatchObject({
+        code,
+        request_id: e.request.request_id,
+        metrics: {
+          stage: "account_file_reuse",
+          ...(status === undefined ? {} : { http_status: status }),
+          ...(validationReason ? { validation_reason: validationReason } : {}),
+        },
+      });
+      expect(warning?.job_id).toBeUndefined();
+      if (status === undefined)
+        expect(warning?.metrics).not.toHaveProperty("http_status");
+      if (!validationReason)
+        expect(warning?.metrics).not.toHaveProperty("validation_reason");
+      expect(journal).not.toContain("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER");
     },
   );
 

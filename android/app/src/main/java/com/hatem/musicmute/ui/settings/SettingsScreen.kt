@@ -29,8 +29,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 
 import com.hatem.musicmute.BuildConfig
@@ -59,6 +61,11 @@ internal fun isTrustedMusicMutePlatformUrl(value: String): Boolean =
                 else -> false
             }
     }.getOrDefault(false)
+
+internal fun availableMusicMutePlatformUrl(value: String): String? =
+    value.takeIf { isTrustedMusicMutePlatformUrl(it) }
+        ?.takeIf { URI(it).host.equals(URI(MUSICMUTE_WEB_APP_URL).host, ignoreCase = true) }
+        ?.let { MUSICMUTE_WEB_APP_URL }
 
 @Composable
 fun CreativeSettingsScreen(
@@ -231,8 +238,9 @@ fun AboutScreen(onBack: () -> Unit) {
             title = stringResource(R.string.creative_settings_macos),
             description = stringResource(R.string.creative_settings_macos_description),
             icon = Icons.Outlined.LaptopMac,
+            availabilityLabel = stringResource(R.string.creative_settings_coming_soon),
             modifier = Modifier.testTag("about-platform-macos"),
-        ) { context.openMusicMutePlatformUrl(MUSICMUTE_MACOS_DOWNLOADS_URL) }
+        )
         Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         AccountPublicLinks()
@@ -245,9 +253,14 @@ private fun PlatformLinkCard(
     description: String,
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
+    availabilityLabel: String? = null,
+    onClick: (() -> Unit)? = null,
 ) {
-    CreativeCard(modifier = modifier, onClick = onClick) {
+    val cardModifier = if (onClick == null) modifier.semantics(mergeDescendants = true) {
+        disabled()
+        availabilityLabel?.let { stateDescription = it }
+    } else modifier
+    CreativeCard(modifier = cardModifier, onClick = onClick) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
@@ -264,17 +277,21 @@ private fun PlatformLinkCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(
+            if (onClick != null) Icon(
                 Icons.AutoMirrored.Outlined.OpenInNew,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) else if (availabilityLabel != null) Text(
+                availabilityLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
 
 private fun android.content.Context.openMusicMutePlatformUrl(url: String) {
-    if (!isTrustedMusicMutePlatformUrl(url)) return
-    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    val destination = availableMusicMutePlatformUrl(url) ?: return
+    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(destination))) }
 }

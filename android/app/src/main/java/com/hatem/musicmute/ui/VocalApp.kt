@@ -123,12 +123,17 @@ fun VocalApp(
     val app = context.applicationContext as VocalApplication
     val urlImports by app.urlImports.records.collectAsStateWithLifecycle()
     val retryingUrlImports by app.urlImports.retrying.collectAsStateWithLifecycle()
+    val processingPolicy by app.processingPolicy.policy.collectAsStateWithLifecycle()
+    val linkImportVisible = processingPolicy.linkImportVisible
     var linkRequest by rememberSaveable { mutableIntStateOf(0) }
     var urlImportText by rememberSaveable { mutableStateOf("") }
     var urlImportError by remember(processingSession) { mutableStateOf<String?>(null) }
     var urlImportBusy by remember(processingSession) { mutableStateOf(false) }
     var trimEnabled by rememberSaveable(processingSession) { mutableStateOf(true) }
     var confirmUrlImport by remember(processingSession) { mutableStateOf(false) }
+    LaunchedEffect(linkImportVisible) {
+        if (!linkImportVisible) confirmUrlImport = false
+    }
     LaunchedEffect(sharedUrlText) {
         if (sharedUrlText != null) {
             val extracted = UrlImportSource.sharedText(sharedUrlText)
@@ -275,7 +280,7 @@ fun VocalApp(
         when (entryAction) {
             "LIBRARY" -> nav.navigate(Destination.Library.name) { launchSingleTop = true }
             "IMPORT_AUDIO" -> { nav.navigate(Destination.Home.name) { launchSingleTop = true }; importAudio.launch(arrayOf("audio/*")) }
-            "IMPORT_LINK" -> { linkRequest++; nav.navigate(Destination.Home.name) { launchSingleTop = true } }
+            "IMPORT_LINK" -> { if (linkImportVisible) linkRequest++; nav.navigate(Destination.Home.name) { launchSingleTop = true } }
             else -> return@LaunchedEffect
         }
         onEntryConsumed()
@@ -380,7 +385,7 @@ fun VocalApp(
             onPlayerOpened()
         }
     }
-    if (confirmUrlImport) {
+    if (confirmUrlImport && linkImportVisible) {
         UrlImportConfirmationSheet(urlImportText, urlImportBusy,
             onDismiss = { confirmUrlImport = false },
             onConfirm = { confirmUrlImport = false; submitUrlImport() })
@@ -474,6 +479,7 @@ fun VocalApp(
                             tasks = audioTasks, history = jobs, busy = processing.preparing,
                             trimEnabled = trimEnabled, onTrimEnabled = { trimEnabled = it },
                             linkRequest = linkRequest,
+                            linkImportVisible = linkImportVisible,
                             urlImportText = urlImportText,
                             urlImportError = urlImportError,
                             urlImportBusy = urlImportBusy,
@@ -544,7 +550,7 @@ fun VocalApp(
                                 MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
                                     app.audioPlayback::closePlayback, app.audioPlayback::seek,
-                                    Modifier.padding(horizontal = 16.dp))
+                                    Modifier.padding(horizontal = 16.dp), entry = currentLibraryEntry)
                             },
                         )
                     }
@@ -583,7 +589,7 @@ fun VocalApp(
                     composable(Destination.Library.name) {
                         LibraryScreen(library, LibraryActions(
                             query = libraryModel::setQuery, filter = libraryModel::setFilter,
-                            sort = libraryModel::setSort, play = playLibraryTrack,
+                            sort = libraryModel::setSort, starredOnly = libraryModel::setStarredOnly, play = playLibraryTrack,
                             star = libraryModel::toggleStar, details = openAudioDetails,
                             download = libraryModel::download, hidden = libraryModel::setHidden,
                             home = { navigate(Destination.Home) }, refresh = {
@@ -600,7 +606,7 @@ fun VocalApp(
                             miniPlayer = {
                                 MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
-                                    app.audioPlayback::closePlayback, app.audioPlayback::seek)
+                                    app.audioPlayback::closePlayback, app.audioPlayback::seek, entry = currentLibraryEntry)
                             })
                     }
                     composable("player") {

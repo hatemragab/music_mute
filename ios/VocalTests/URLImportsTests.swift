@@ -165,6 +165,10 @@ import XCTest
     api.fail = false
     api.responseStatus = "queued"
     let socket = URLImportSocket()
+    let subscribed = expectation(description: "Import subscription sent")
+    socket.onSend = { text in
+      if text.contains("subscribe"), text.contains("import") { subscribed.fulfill() }
+    }
     let realtime = ProcessingRealtime(
       configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example.invalid")!),
       makeSocket: { _ in socket },
@@ -177,16 +181,16 @@ import XCTest
     realtime.bindOwner("owner")
     realtime.setForeground(true)
     let model = URLImportsModel(api: api, store: store)
+    let submitted = expectation(description: "Submitted import snapshot applied")
+    model.onSubmitted = { _ in submitted.fulfill() }
     await model.bindOwner("owner")
     await model.submit("https://youtu.be/UXqq0ZvbOnk")
-    for _ in 0..<200 where !socket.sent.contains(where: { $0.contains("subscribe") }) {
-      await Task.yield()
-    }
+    await fulfillment(of: [subscribed], timeout: 2)
     XCTAssertTrue(socket.sent.contains(where: { $0.contains("import") }))
     socket.frame(
       #"{"type":"snapshot","protocol_version":1,"stream_id":"imports","subscription_id":"s1","sequence":1,"data":{"import_id":"68c000000000000000000001","status":"submitted","job_id":"68c000000000000000000002","error":null}}"#
     )
-    for _ in 0..<200 where model.busy { await Task.yield() }
+    await fulfillment(of: [submitted], timeout: 2)
     XCTAssertEqual(model.record?.status, "submitted")
     XCTAssertEqual(api.requests.count, 1)
     XCTAssertEqual(api.importReads, 0)
@@ -337,13 +341,17 @@ import XCTest
 
 @MainActor private final class URLImportSocket: RealtimeSocket {
   var sent: [String] = []
+  var onSend: (String) -> Void = { _ in }
   private var queued = [#"{"type":"ready","protocol_version":1,"stream_id":"imports"}"#]
   private var waiting: CheckedContinuation<String, Error>?
   func receive() async throws -> String {
     if !queued.isEmpty { return queued.removeFirst() }
     return try await withCheckedThrowingContinuation { waiting = $0 }
   }
-  func send(_ text: String) async throws { sent.append(text) }
+  func send(_ text: String) async throws {
+    sent.append(text)
+    onSend(text)
+  }
   func frame(_ text: String) {
     if let continuation = waiting {
       waiting = nil

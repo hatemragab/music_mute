@@ -18,6 +18,7 @@ import { DevicesService } from './devices.service.js';
 import { presentDevice } from './devices.presenter.js';
 import { authError } from '../auth/auth.errors.js';
 import { EmptyBodyPipe } from '../auth/dto/empty-body.pipe.js';
+import { parseCloudflareLocation } from './cloudflare-location.js';
 
 @Controller('users/me/devices')
 export class DevicesController {
@@ -79,6 +80,7 @@ export class DevicesController {
         req.user!._id.toHexString(),
         req.identity.authTimeSec,
         { ...report, installationId: installationId.toLowerCase() },
+        parseCloudflareLocation(req.headers),
       ),
     );
   }

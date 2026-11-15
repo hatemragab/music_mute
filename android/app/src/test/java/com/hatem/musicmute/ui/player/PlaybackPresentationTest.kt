@@ -1,13 +1,45 @@
 package com.hatem.musicmute.ui.player
 
 import com.hatem.musicmute.R
+import com.hatem.musicmute.library.LibraryEntry
+import com.hatem.musicmute.library.LibraryKey
+import com.hatem.musicmute.library.OfflineStatus
 import com.hatem.musicmute.playback.PlaybackState
+import com.hatem.musicmute.playback.QueueTrack
 import com.hatem.musicmute.playback.RepeatMode
 import com.hatem.musicmute.processing.ArtifactProgress
 import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackPresentationTest {
+    @Test fun artworkFollowsTheSelectedOwnerAndJobWithoutKeepingPreviousTrack() {
+        val first = LibraryEntry(LibraryKey("owner", "first"), "First", 0, null, false, false,
+            OfflineStatus.REMOTE_ONLY, thumbnailUrl = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg")
+        val second = first.copy(key = LibraryKey("owner", "second"), title = "Second", thumbnailUrl = null)
+        val state = PlaybackState(trackId = "processing:first", currentIndex = 0,
+            queue = listOf(QueueTrack(first.key, first.title), QueueTrack(second.key, second.title)))
+        assertEquals(first, state.matchingLibraryEntry(first))
+        assertNull(state.matchingLibraryEntry(first.copy(key = LibraryKey("other-owner", "first"))))
+        val changed = state.copy(trackId = "processing:second", currentIndex = 1)
+        assertNull(changed.matchingLibraryEntry(first))
+        assertEquals(second, changed.matchingLibraryEntry(second))
+        assertNull(changed.matchingLibraryEntry(second)?.thumbnailUrl)
+    }
+
+    @Test fun delayedThumbnailEnrichmentAndRemovalUseCurrentLibrarySnapshot() {
+        val entry = LibraryEntry(LibraryKey("owner", "song"), "Song", 0, null, false, false,
+            OfflineStatus.AVAILABLE)
+        val state = PlaybackState(trackId = "processing:song", currentIndex = 0,
+            queue = listOf(QueueTrack(entry.key, entry.title)))
+        val enriched = entry.copy(thumbnailUrl = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg")
+        assertNull(state.matchingLibraryEntry(entry)?.thumbnailUrl)
+        assertEquals(enriched.thumbnailUrl, state.matchingLibraryEntry(enriched)?.thumbnailUrl)
+        assertNull(state.matchingLibraryEntry(entry)?.thumbnailUrl)
+        assertNull(state.matchingLibraryEntry(null))
+        assertNull(state.copy(trackId = null).matchingLibraryEntry(enriched))
+        assertNull(state.copy(currentIndex = -1).matchingLibraryEntry(enriched))
+    }
+
     @Test fun unavailableOrFailedAudioCannotSeekEvenWithStaleDuration() {
         assertFalse(PlaybackState(durationMs = 120_000).canSeekAudio())
         assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, failed = true).canSeekAudio())

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "../observability/local-debug.js";
+
 import { dirname, join, resolve } from "node:path";
 import {
   MacAppStartupRecovered,

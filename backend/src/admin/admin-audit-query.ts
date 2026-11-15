@@ -16,6 +16,9 @@ const processingAuditFields = new Set([
   'monthlyProcessingSeconds',
   'overrideExpiresAt',
   'acceptNewJobs',
+  'linkImportEnabled',
+  'linkImportDisabledCountries',
+  'linkImportDisabledUserIds',
   'maxDurationSeconds',
   'maxPreparedAudioBytes',
   'dailyUploadGrants',
@@ -296,7 +299,12 @@ export function validateAuditEvent(
             typeof item === 'boolean' ||
             (typeof item === 'number' && Number.isFinite(item)) ||
             (typeof item === 'string' &&
-              item.length <= 200 &&
+              item.length <=
+                (change.field === 'linkImportDisabledUserIds'
+                  ? 24_999
+                  : change.field === 'linkImportDisabledCountries'
+                    ? 750
+                    : 200) &&
               !/[\r\n]/.test(item) &&
               !item.includes(String.fromCharCode(0)))
           )

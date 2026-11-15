@@ -1,6 +1,8 @@
 package com.hatem.musicmute.ui.settings
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,6 +11,16 @@ class SettingsLinksTest {
     fun platformLinksMatchReviewedProductDestinations() {
         assertTrue(isTrustedMusicMutePlatformUrl(MUSICMUTE_WEB_APP_URL))
         assertTrue(isTrustedMusicMutePlatformUrl(MUSICMUTE_MACOS_DOWNLOADS_URL))
+    }
+
+    @Test
+    fun onlyAvailablePlatformsCanBeOpened() {
+        assertEquals(MUSICMUTE_WEB_APP_URL, availableMusicMutePlatformUrl(MUSICMUTE_WEB_APP_URL))
+        assertEquals(MUSICMUTE_WEB_APP_URL, availableMusicMutePlatformUrl("https://app.music-mute.com/"))
+        assertNull(availableMusicMutePlatformUrl(MUSICMUTE_MACOS_DOWNLOADS_URL))
+        assertNull(availableMusicMutePlatformUrl("https://MUSIC-MUTE.COM/#downloads"))
+        assertNull(availableMusicMutePlatformUrl("https://music-mute.com/#other"))
+        assertNull(availableMusicMutePlatformUrl("https://app.music-mute.com.evil.example"))
     }
 
     @Test

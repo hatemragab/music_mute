@@ -5,6 +5,137 @@ import { fileURLToPath } from "node:url";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIST = join(directory, "dist");
+const firebaseAuthPaths = new Set([
+  "/__/auth/handler",
+  "/__/auth/handler.js",
+  "/__/auth/experiments.js",
+  "/__/auth/iframe",
+  "/__/auth/iframe.js",
+  "/__/auth/links",
+  "/__/auth/links.js",
+]);
+const AUTH_REQUEST_LIMIT = 1024 * 1024;
+const AUTH_RESPONSE_LIMIT = 2 * 1024 * 1024;
+
+function readAuthRequest(request, signal) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    const finish = (error) => {
+      request.off("data", onData);
+      request.off("end", onEnd);
+      request.off("error", finish);
+      signal.removeEventListener("abort", onAbort);
+      if (error) {
+        request.resume();
+        reject(error);
+      } else resolve(Buffer.concat(chunks));
+    };
+    const onData = (chunk) => {
+      size += chunk.length;
+      if (size > AUTH_REQUEST_LIMIT)
+        finish(
+          Object.assign(new Error("Request is too large."), { status: 413 }),
+        );
+      else chunks.push(chunk);
+    };
+    const onEnd = () => finish();
+    const onAbort = () =>
+      finish(new Error("Authentication request timed out."));
+    if (Number(request.headers["content-length"]) > AUTH_REQUEST_LIMIT) {
+      finish(
+        Object.assign(new Error("Request is too large."), { status: 413 }),
+      );
+      return;
+    }
+    request.on("data", onData);
+    request.once("end", onEnd);
+    request.once("error", finish);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
+async function readAuthResponse(upstream) {
+  if (!upstream.body) return undefined;
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of upstream.body) {
+    size += chunk.length;
+    if (size > AUTH_RESPONSE_LIMIT)
+      throw new Error("Authentication response is too large.");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function proxyFirebaseAuth(request, response, url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  const onClose = () => {
+    if (!response.writableFinished) controller.abort();
+  };
+  response.once("close", onClose);
+  response.setHeader("X-Robots-Tag", "noindex, nofollow");
+  response.setHeader("Cache-Control", "no-store");
+  try {
+    const body =
+      request.method === "POST"
+        ? await readAuthRequest(request, controller.signal)
+        : undefined;
+    const headers = {};
+    for (const name of [
+      "accept",
+      "accept-language",
+      "content-type",
+      "user-agent",
+    ]) {
+      const value = request.headers[name];
+      if (typeof value === "string") headers[name] = value;
+    }
+    const upstream = await options.fetch(`${options.origin}${url}`, {
+      method: request.method,
+      headers,
+      body,
+      redirect: "manual",
+      signal: controller.signal,
+    });
+    const payload = await readAuthResponse(upstream);
+    // Firebase owns these helper documents. The app's CSP blocks their inline
+    // initialization and provider navigation; preserve Firebase's policy here.
+    response.removeHeader("Content-Security-Policy");
+    for (const name of [
+      "content-type",
+      "content-language",
+      "location",
+      "retry-after",
+      "content-security-policy",
+    ]) {
+      const value = upstream.headers.get(name);
+      if (value !== null) response.setHeader(name, value);
+    }
+    if (url.split("?")[0] === "/__/auth/iframe")
+      response.setHeader("X-Frame-Options", "SAMEORIGIN");
+    response.writeHead(upstream.status);
+    response.end(request.method === "HEAD" ? undefined : payload);
+  } catch (error) {
+    if (!response.destroyed) {
+      response.writeHead(
+        error?.status === 413 ? 413 : controller.signal.aborted ? 504 : 502,
+        { "Content-Type": "text/plain; charset=utf-8" },
+      );
+      response.end(
+        request.method === "HEAD"
+          ? undefined
+          : "Authentication is unavailable.",
+      );
+    }
+  } finally {
+    clearTimeout(timer);
+    response.off("close", onClose);
+  }
+}
+
 const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -44,6 +175,8 @@ export function publicConfig(env = process.env) {
   };
   if (!apiOrigin || Object.values(firebase).some((value) => !value))
     throw new Error("Public browser configuration is incomplete.");
+  if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(firebase.projectId))
+    throw new Error("PUBLIC_FIREBASE_PROJECT_ID must be a valid project ID.");
   const parsed = new URL(apiOrigin);
   if (
     parsed.protocol !== "https:" ||
@@ -77,8 +210,11 @@ export function publicConfig(env = process.env) {
 export function createWebServer({
   env = process.env,
   dist = DEFAULT_DIST,
+  authFetch = fetch,
+  authTimeoutMs = 15_000,
 } = {}) {
   const config = publicConfig(env);
+  const firebaseOrigin = `https://${config.firebase.projectId}.firebaseapp.com`;
   const indexNowKey = env.INDEXNOW_KEY;
   if (indexNowKey !== undefined && !/^[A-Za-z0-9-]{8,128}$/.test(indexNowKey))
     throw new Error(
@@ -114,7 +250,7 @@ export function createWebServer({
     "script-src 'self' 'wasm-unsafe-eval' https://apis.google.com https://www.gstatic.com",
     "worker-src 'self' blob:",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://www.gstatic.com https://accounts.google.com",
+    "img-src 'self' data: https://www.gstatic.com https://accounts.google.com https://i.ytimg.com",
     `connect-src 'self' ${telemetryOrigin} ${config.apiOrigin} ${config.apiOrigin.replace(/^https:/, "wss:").replace(/^http:/, "ws:")} ${mediaSources} https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com`,
     `media-src 'self' blob: ${mediaSources}`,
     `frame-src https://${config.firebase.authDomain} https://accounts.google.com`,
@@ -129,10 +265,6 @@ export function createWebServer({
       "camera=(), microphone=(), geolocation=()",
     );
     response.setHeader("Content-Security-Policy", csp);
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      response.writeHead(405, { Allow: "GET, HEAD" }).end();
-      return;
-    }
     let pathname;
     try {
       pathname = decodeURIComponent(
@@ -140,6 +272,40 @@ export function createWebServer({
       );
     } catch {
       response.writeHead(400).end();
+      return;
+    }
+    const rawPath = (request.url || "/").split("?")[0];
+    if (firebaseAuthPaths.has(rawPath)) {
+      if (!["GET", "HEAD", "POST"].includes(request.method)) {
+        response.writeHead(405, { Allow: "GET, HEAD, POST" }).end();
+        return;
+      }
+      await proxyFirebaseAuth(request, response, request.url, {
+        origin: firebaseOrigin,
+        fetch: authFetch,
+        timeoutMs: authTimeoutMs,
+      });
+      return;
+    }
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      response.writeHead(405, { Allow: "GET, HEAD" }).end();
+      return;
+    }
+    if (rawPath === "/__/firebase/init.json") {
+      response.setHeader("X-Robots-Tag", "noindex, nofollow");
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      response.end(
+        request.method === "HEAD" ? undefined : JSON.stringify(config.firebase),
+      );
+      return;
+    }
+    // Check the original request path so URL normalization and encoded slashes
+    // cannot widen the fixed helper allowlist.
+    if (rawPath.startsWith("/__/") || pathname.startsWith("/__/")) {
+      response.writeHead(404).end();
       return;
     }
     if (pathname === "/index.html") {

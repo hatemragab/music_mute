@@ -11,6 +11,8 @@ import { WorkerHintService } from './worker-hints/worker-hint.service.js';
 import { captureBackendStartupFailure } from './observability/sentry.js';
 import { installFatalDiagnostics } from './observability/fatal-errors.js';
 import { createApiLogger } from './observability/api-logger.js';
+import { localDiagnostics } from './observability/local-diagnostics.js';
+import { installLocalOutboundDiagnostics } from './observability/local-outbound-diagnostics.js';
 
 installFatalDiagnostics();
 
@@ -27,10 +29,31 @@ async function bootstrap() {
   app.get(RealtimeSocketService).attach(app.getHttpServer());
   app.get(YouTubeCommunitySocketService).attach(app.getHttpServer());
   const config = app.get(ConfigService);
+  localDiagnostics.configure(config);
+  installLocalOutboundDiagnostics();
   await app.listen(
     config.getOrThrow<number>('PORT'),
     config.getOrThrow<string>('HOST'),
   );
+  localDiagnostics.event({
+    category: 'lifecycle',
+    name: 'api.started',
+    summary: 'Local API started',
+    data: { port: config.get('PORT') },
+  });
+  if (localDiagnostics.isEnabled) {
+    const diagnosticsHealth = setInterval(
+      () =>
+        localDiagnostics.event({
+          category: 'logging',
+          name: 'logging.health',
+          summary: 'Backend diagnostic delivery health',
+          data: localDiagnostics.status(),
+        }),
+      5000,
+    );
+    diagnosticsHealth.unref();
+  }
 }
 bootstrap().catch(async (error: unknown) => {
   await captureBackendStartupFailure(error);

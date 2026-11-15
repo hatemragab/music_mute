@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
+import { Readable } from "node:stream";
 import { lstat, open, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import type {
@@ -349,7 +350,9 @@ export class WorkerTransferClient {
         redirect: "error",
         signal: requestSignal,
         headers: { ...grant.headers, "Content-Length": String(expected.bytes) },
-        body: verifiedBody(),
+        body: Readable.toWeb(
+          Readable.from(verifiedBody()),
+        ) as ReadableStream<Uint8Array>,
         duplex: "half",
       };
       const response = await this.fetchImplementation(grant.url, request);

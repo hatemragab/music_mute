@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { cloudHandoffUrl } from "../src/shared/app-handoff";
 import {
   isErrorContext,
@@ -9,7 +9,10 @@ import {
   safeLocalErrors,
   localErrorReport,
 } from "../src/extension/local-error-report";
-import { isExtensionMessage } from "../src/extension/messages";
+import {
+  isExtensionMessage,
+  type ExtensionStatus,
+} from "../src/extension/messages";
 
 describe("safe user guidance and local reports", () => {
   it.each([
@@ -145,6 +148,90 @@ describe("safe user guidance and local reports", () => {
       { retry_at: -1 },
     ])
       expect(isErrorContext(value)).toBe(false);
+  });
+  it("projects unknown uppercase/current/history codes to the shared fixed code without invoking hostile fields", () => {
+    const secret = "BEARER_SUPER_SECRET_TOKEN_123456";
+    // Wire compatibility remains separate from safe exported diagnostics.
+    expect(
+      isExtensionMessage({ type: "MM_ERROR", code: secret, generation: 1 }),
+    ).toBe(true);
+    const getter = vi.fn(() => {
+      throw new Error(secret);
+    });
+    const stringify = vi.fn(() => {
+      throw new Error(secret);
+    });
+    const row = {
+      component: "extension",
+      severity: "error",
+      event: "job_failed",
+      code: secret,
+    };
+    const accessorCode = { ...row };
+    Object.defineProperty(accessorCode, "code", {
+      get: getter,
+      enumerable: true,
+    });
+    const accessorStage = {
+      ...row,
+      code: "DENO_MISSING",
+      metrics: Object.defineProperty({}, "stage", { get: getter }),
+    };
+    const accessorEvent = { ...row };
+    Object.defineProperty(accessorEvent, "event", { get: getter });
+    const throwingProxy = new Proxy(row, {
+      getOwnPropertyDescriptor: () => {
+        throw new Error(secret);
+      },
+    });
+    const history = [
+      row,
+      accessorCode,
+      accessorStage,
+      accessorEvent,
+      throwingProxy,
+      { ...row, code: { toString: stringify } },
+    ];
+    expect(safeLocalErrors(history)).toEqual([
+      {
+        component: "extension",
+        severity: "error",
+        event: "job_failed",
+        code: "UNKNOWN_ERROR",
+      },
+      {
+        component: "extension",
+        severity: "error",
+        event: "job_failed",
+        code: "UNKNOWN_ERROR",
+      },
+      {
+        component: "extension",
+        severity: "error",
+        event: "job_failed",
+        code: "DENO_MISSING",
+      },
+      {
+        component: "extension",
+        severity: "error",
+        event: "job_failed",
+        code: "UNKNOWN_ERROR",
+      },
+    ]);
+    const array = [row];
+    Object.defineProperty(array, "0", { get: getter });
+    expect(safeLocalErrors(array)).toEqual([]);
+    const report = localErrorReport({
+      hello: null,
+      job: null,
+      error: secret,
+      diagnostics: history as unknown as ExtensionStatus["diagnostics"],
+    });
+    expect(report).toContain("Last error: UNKNOWN_ERROR");
+    expect(report).not.toContain(secret);
+    expect(report).toContain("Setup to repair the tools");
+    expect(getter).not.toHaveBeenCalled();
+    expect(stringify).not.toHaveBeenCalled();
   });
   it("bounds exports and projects historical storage again on read", () => {
     const rows = Array.from({ length: 80 }, () => ({

@@ -1,0 +1,179 @@
+{
+  "generated": "2026-10-08",
+  "source": "play-store-screenshots.html",
+  "playRequirements": {
+    "format": "PNG",
+    "maxBytes": 8388608,
+    "aspectRatio": "9:16",
+    "phone": {
+      "width": 1080,
+      "height": 1920
+    },
+    "sevenInchTablet": {
+      "width": 1440,
+      "height": 2560
+    }
+  },
+  "files": [
+    {
+      "file": "renders/phone/en/01-home.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 592618,
+      "sha256": "246f9f8b959ab3252826ccd9bca7f62f31da9f0ffd15b4b56ca598044c03039b"
+    },
+    {
+      "file": "renders/phone/en/02-processing.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 587068,
+      "sha256": "de32f9956f766ffe36ac2db78c7741d9653644ec81bf5e9c931edadc46e71696"
+    },
+    {
+      "file": "renders/phone/en/03-player.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 595501,
+      "sha256": "b714ec75fba24857f623f8656ab8c1c5e6602908d6fd2379fd9f88de7c685451"
+    },
+    {
+      "file": "renders/phone/en/04-library.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 590798,
+      "sha256": "a4e797d64142c28fcdbf48422aba47c1ed011250f45c98762555afeae716c19f"
+    },
+    {
+      "file": "renders/phone/ar/01-home.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 576969,
+      "sha256": "080428bd30f686bd46dad64a4cd6e4dbdb6d77e7a939b3674b45117b4a7758eb"
+    },
+    {
+      "file": "renders/phone/ar/02-processing.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 580025,
+      "sha256": "f2cb4ed71b337471367b5f050b12a72b933aa8058694262473942aced21d1b21"
+    },
+    {
+      "file": "renders/phone/ar/03-player.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 590740,
+      "sha256": "21a952834fbb7c0ca28592320d0500864ad1698e7083984d55452927e3821576"
+    },
+    {
+      "file": "renders/phone/ar/04-library.png",
+      "kind": "play-asset",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 573981,
+      "sha256": "a5fe0830352b87cabfb2966063bc08292b933fc228e4591df8b49860ddcfa9d4"
+    },
+    {
+      "file": "renders/tablet/en/01-home.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 771634,
+      "sha256": "bfcec61852bc356d8533fb55c965189c9a8284f98f40b30adb11595da34db7ce"
+    },
+    {
+      "file": "renders/tablet/en/02-processing.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 766848,
+      "sha256": "b8b832e2c6b5d0d9082441c44fcb70d9ed67170f83fc7ec9e1b7b0083140b8e7"
+    },
+    {
+      "file": "renders/tablet/en/03-player.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 792549,
+      "sha256": "e2bd80caed77667bd1cd2e856f03eac45f8df5c41c5e6e7c61b15f68267f81fb"
+    },
+    {
+      "file": "renders/tablet/en/04-library.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 769902,
+      "sha256": "f7d418814ad32df9e4cf01c2fd0e612f29cdc52ab093d422e1bb2bbc787327c5"
+    },
+    {
+      "file": "renders/tablet/ar/01-home.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 746925,
+      "sha256": "22295bd071b46e24a7879abeddf05013023bb04e0ab98bec5e3c2bf7bbb4643c"
+    },
+    {
+      "file": "renders/tablet/ar/02-processing.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 756276,
+      "sha256": "60536ed0130526223c82ce93101fc9d70ee35cef7d6e302a45575d40435404b7"
+    },
+    {
+      "file": "renders/tablet/ar/03-player.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 786458,
+      "sha256": "5243f6204ff69afdb4ce99e06eb0ce0af6bb78d476b95535c9e73eb039ecdde0"
+    },
+    {
+      "file": "renders/tablet/ar/04-library.png",
+      "kind": "play-asset",
+      "width": 1440,
+      "height": 2560,
+      "bytes": 745914,
+      "sha256": "cf5118cd65ca9ee1ffc0501a0bcbfb9a7b9c1223635313e5ce152d87238c36d0"
+    },
+    {
+      "file": "renders/preview/phone-en.png",
+      "kind": "review-preview",
+      "width": 1800,
+      "height": 1120,
+      "bytes": 318764,
+      "sha256": "e27526f820f06713379317625bf5a68f5c647e5158eb0ab1427de4e53005bce6"
+    },
+    {
+      "file": "renders/preview/phone-ar.png",
+      "kind": "review-preview",
+      "width": 1800,
+      "height": 1120,
+      "bytes": 300823,
+      "sha256": "5f6fa4de52e23541a84743db221b707833edae92585139f3df5b63226895779c"
+    },
+    {
+      "file": "renders/preview/tablet-en.png",
+      "kind": "review-preview",
+      "width": 1800,
+      "height": 1120,
+      "bytes": 282090,
+      "sha256": "c3f2ac01aba680db8836faea0ec31a1fe73180e515520fdefa9dca8c8070dccb"
+    },
+    {
+      "file": "renders/preview/tablet-ar.png",
+      "kind": "review-preview",
+      "width": 1800,
+      "height": 1120,
+      "bytes": 269793,
+      "sha256": "0332b4199cd6af359512ee6b9a78c0d9d87a698f17566b9276699371fb2f0d4e"
+    }
+  ]
+}

@@ -74,6 +74,15 @@ export class AccountPolicy {
   @Prop({ required: true, default: true })
   acceptNewJobs!: boolean;
 
+  @Prop({ type: Boolean, default: false })
+  linkImportEnabled!: boolean;
+
+  @Prop({ type: [String], default: [] })
+  linkImportDisabledCountries!: string[];
+
+  @Prop({ type: [String], default: [] })
+  linkImportDisabledUserIds!: string[];
+
   @Prop({ type: String, default: '', maxlength: 1000 })
   maintenanceMessageEn!: string;
 

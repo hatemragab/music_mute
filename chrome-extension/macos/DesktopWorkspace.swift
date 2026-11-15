@@ -33,6 +33,7 @@ private final class DesktopStderrBudget: @unchecked Sendable {
   private let signatureChecker: any RuntimeSignatureChecking
   private let verificationCoordinator: RuntimeVerificationCoordinator
   private let terminationGrace: Duration
+  var onPreparationRequired: ((DesktopAuthFailure) -> Void)?
   init(
     resources: URL?, support: URL = LocalPaths.support,
     signatureChecker: any RuntimeSignatureChecking = SystemRuntimeSignatureChecker(),
@@ -48,6 +49,34 @@ private final class DesktopStderrBudget: @unchecked Sendable {
   func request(type: String, payload: DesktopJSON, session: DesktopJSON?) async throws
     -> DesktopJSON
   {
+    do {
+      return try await execute(type: type, payload: payload, session: session)
+    } catch {
+      // The execution leases and busy reservation have already unwound. Only an actual
+      // installation failure requests a cheap readiness check; normal requests add no checks.
+      if !Task.isCancelled, let failure = Self.preparationFailure(error) {
+        onPreparationRequired?(failure)
+      }
+      throw error
+    }
+  }
+  static func preparationFailure(_ error: Error) -> DesktopAuthFailure? {
+    guard let failure = error as? DesktopAuthFailure else { return nil }
+    if failure.requiresRuntimePreparation { return failure }
+    switch failure {
+    case .service("APP_RUNTIME_MISSING"), .service("DESKTOP_RUNTIME_UNAVAILABLE"),
+      .service("MODEL_INVALID"), .service("YT_DLP_MISSING"), .service("DENO_MISSING"),
+      .service("PO_TOKEN_PROVIDER_MISSING"):
+      return failure
+    default: return nil
+    }
+  }
+  private func execute(type: String, payload: DesktopJSON, session: DesktopJSON?) async throws
+    -> DesktopJSON
+  {
+    guard !LocalUIDebugSession.active else {
+      throw DesktopAuthFailure.service("LOCAL_UI_OPERATION_UNAVAILABLE")
+    }
     guard !busy, let resources else { throw DesktopAuthFailure.service("APP_OPERATION_BUSY") }
     let id = UUID().uuidString.lowercased()
     var fields: [String: DesktopJSON] = [
@@ -296,6 +325,31 @@ private final class DesktopStderrBudget: @unchecked Sendable {
   }
 }
 
+enum DesktopThumbnailURL {
+  static func validated(_ value: String?) -> URL? {
+    guard let value, value.utf8.count <= 2048,
+      value.unicodeScalars.allSatisfy({ (33...126).contains($0.value) }),
+      !value.contains("\\"), !value.contains("#"),
+      let components = URLComponents(string: value), components.scheme == "https",
+      components.host == "i.ytimg.com", components.user == nil, components.password == nil,
+      components.port == nil, components.fragment == nil,
+      components.percentEncodedPath.range(
+        of: #"^/vi(?:_webp)?/[A-Za-z0-9_-]{11}/[A-Za-z0-9_-]{1,64}\.(?:jpg|webp)$"#,
+        options: .regularExpression) != nil
+    else { return nil }
+    let parameters = components.queryItems ?? []
+    guard parameters.count <= 2 else { return nil }
+    var names: Set<String> = []
+    for parameter in parameters {
+      guard ["sqp", "rs"].contains(parameter.name), names.insert(parameter.name).inserted,
+        let field = parameter.value,
+        field.range(of: #"^[A-Za-z0-9_-]{1,1024}={0,2}$"#, options: .regularExpression) != nil
+      else { return nil }
+    }
+    return URL(string: value)
+  }
+}
+
 struct DesktopTrack: Identifiable, Sendable, Equatable {
   let id: String
   var title: String
@@ -310,6 +364,7 @@ struct DesktopTrack: Identifiable, Sendable, Equatable {
   var syncState: String? = nil
   var updatedAt: Date? = nil
   var canDownloadInput: Bool? = nil
+  var thumbnailURL: URL? = nil
   var cloud: Bool { jobId != nil }
   var originalAvailable: Bool { jobId != nil && canDownloadInput == true }
 }
@@ -550,6 +605,93 @@ enum DesktopPlaybackQueue {
   }
 }
 
+/// Device-only listening history. Local cache IDs and account job IDs are aliases of one song.
+struct DesktopPlayHistory: Equatable {
+  private(set) var counts: [String: Int] = [:]
+
+  init(stored: [String: Any]? = nil) {
+    for (key, value) in stored ?? [:] {
+      guard !key.isEmpty, key.count <= 128,
+        let number = value as? NSNumber,
+        CFGetTypeID(number) != CFBooleanGetTypeID(),
+        let count = Int(exactly: number.int64Value), count > 0,
+        number.doubleValue == Double(count)
+      else { continue }
+      counts[key] = count
+    }
+  }
+
+  func count(_ track: DesktopTrack) -> Int {
+    Self.aliases(track).compactMap { counts[$0] }.max() ?? 0
+  }
+
+  mutating func record(_ track: DesktopTrack) {
+    let prior = count(track)
+    let next = prior == Int.max ? prior : prior + 1
+    for key in Self.aliases(track) { counts[key] = next }
+  }
+
+  /// Backfill linkage learned after playback without counting the same history twice.
+  mutating func reconcile(_ tracks: [DesktopTrack]) {
+    for track in tracks {
+      let value = count(track)
+      guard value > 0 else { continue }
+      for key in Self.aliases(track) { counts[key] = value }
+    }
+  }
+
+  private static func aliases(_ track: DesktopTrack) -> Set<String> {
+    Set([track.id, track.jobId].compactMap { $0 })
+  }
+}
+
+enum DesktopLibraryTab: String, CaseIterable {
+  case all = "All"
+  case mostPlayed = "Most Played"
+}
+
+enum DesktopLibrarySort: String, CaseIterable {
+  case newest = "Newest"
+  case title = "Title"
+  case mostPlayed = "Most Played"
+}
+
+@MainActor enum DesktopLibrarySelection {
+  static func visible(
+    tracks: [DesktopTrack], search: String, filter: String, tab: DesktopLibraryTab,
+    sort: DesktopLibrarySort, showStarredOnly: Bool, favorites: Set<String>,
+    hidden: Set<String>, history: DesktopPlayHistory
+  ) -> [DesktopTrack] {
+    func matches(_ track: DesktopTrack, keys: Set<String>) -> Bool {
+      keys.contains(track.id) || track.jobId.map(keys.contains) == true
+    }
+    let values = tracks.filter { track in
+      (search.isEmpty || track.title.localizedCaseInsensitiveContains(search))
+        && (filter == "Removed" ? matches(track, keys: hidden) : !matches(track, keys: hidden))
+        && (!(showStarredOnly || filter == "Starred") || matches(track, keys: favorites))
+        && (filter != "Offline" || track.path != nil)
+        && (filter != "Online" || track.path == nil)
+        && (tab != .mostPlayed || history.count(track) > 0)
+    }
+    switch tab == .mostPlayed ? .mostPlayed : sort {
+    case .newest: return DesktopWorkspace.newestTracks(values)
+    case .title:
+      return values.sorted { left, right in
+        let order = left.title.localizedStandardCompare(right.title)
+        return order == .orderedSame ? left.id < right.id : order == .orderedAscending
+      }
+    case .mostPlayed:
+      return values.sorted { left, right in
+        let leftCount = history.count(left)
+        let rightCount = history.count(right)
+        if leftCount != rightCount { return leftCount > rightCount }
+        let order = left.title.localizedStandardCompare(right.title)
+        return order == .orderedSame ? left.id < right.id : order == .orderedAscending
+      }
+    }
+  }
+}
+
 enum DesktopLibrarySnapshotReadiness: Equatable {
   case disconnected
   case awaitingInitialSnapshot(scope: DesktopSessionScope, streamID: String)
@@ -604,6 +746,7 @@ struct DesktopCloudJobsPage: Equatable {
   @Published private(set) var cacheClearedEntries: Int?
   @Published private var cacheBridgeBusy = false
   @Published private(set) var processing = false
+  @Published private(set) var finalizingProcessing = false
   @Published private(set) var progress = ""
   @Published var failure: String?
   @Published var notice: String?
@@ -617,6 +760,8 @@ struct DesktopCloudJobsPage: Equatable {
   @Published var repeatMode = "Off"
   @Published var favorites: Set<String> = []
   @Published var hidden: Set<String> = []
+  @Published private(set) var playHistory = DesktopPlayHistory()
+  @Published private(set) var showStarredOnly = false
   @Published var usage = DesktopJSON.null
   @Published private(set) var loopStart: Double?
   @Published private(set) var loopEnd: Double?
@@ -667,6 +812,17 @@ struct DesktopCloudJobsPage: Equatable {
   private var playbackPinTask: Task<URL, Error>?
   private var playbackStatus: NSKeyValueObservation?
   private var playbackWaiting: NSKeyValueObservation?
+  private var currentTrackCounted = false
+  private var playbackEndedItem: AVPlayerItem?
+  private var playbackSeekOperation = UUID()
+  private var pendingPlaybackSeek: (operation: UUID, target: Double)?
+  #if MUSICMUTE_NATIVE_TESTS && !MUSICMUTE_BROWSER_BRIDGE
+    var playbackSeekForTesting:
+      (@MainActor (AVPlayer, CMTime, @escaping @Sendable (Bool) -> Void) -> Void)?
+    var playbackTickForTesting: (@MainActor (@escaping @MainActor @Sendable () -> Void) -> Void)?
+  #endif
+  private var replaySeekPending = false
+  private var loopSeekPending = false
   private var receiptWatchers: [DesktopOutboxWatcher] = []
   private var syncOperation: UUID?
   private var syncRequested = false
@@ -676,6 +832,7 @@ struct DesktopCloudJobsPage: Equatable {
   var libraryConnected: Bool {
     librarySnapshotReadiness.isReady(scope: account.scope, streamID: streamId)
   }
+  var onPreparationRequired: ((DesktopAuthFailure) -> Void)?
   init(
     account: DesktopAccountModel, resources: URL?, journal: UIJournal? = nil,
     playbackSupport: URL = LocalPaths.support, preferences: UserDefaults = .standard,
@@ -696,9 +853,15 @@ struct DesktopCloudJobsPage: Equatable {
         muted: preferences.object(forKey: DesktopPreferenceKey.playbackMuted) as? Bool,
         lastAudibleLevel: DesktopPlaybackVolume.storedDouble(
           preferences.object(forKey: DesktopPreferenceKey.playbackLastAudibleVolume))))
+    loadLibraryPreferences(owner: account.firebaseUid ?? "local")
     observer = bridge.$progress.sink { [weak self] value in self?.progress = value }
     busyObserver = bridge.$busy.removeDuplicates().sink { [weak self] value in
       self?.cacheBridgeBusy = value
+    }
+    for control in [bridge, syncBridge, playbackBridge] {
+      control.onPreparationRequired = { [weak self] failure in
+        self?.onPreparationRequired?(failure)
+      }
     }
     account.onSessionChanged = { [weak self] scope in self?.sessionChanged(scope) }
   }
@@ -759,16 +922,10 @@ struct DesktopCloudJobsPage: Equatable {
     activeSession = scope
     if let scope { account.receiveWorkerRegistration(nil, scope: scope) }
     localTracks = []
-    favorites = []
-    hidden = []
+    loadLibraryPreferences(owner: scope?.firebaseUid ?? "local")
     queue = []
     nextCursor = nil
     if let scope {
-      favorites = Set(
-        UserDefaults.standard.stringArray(forKey: preferenceKey("favorites", scope.firebaseUid))
-          ?? [])
-      hidden = Set(
-        UserDefaults.standard.stringArray(forKey: preferenceKey("hidden", scope.firebaseUid)) ?? [])
       for directory in [
         "sync-outbox", "sync-captures", "cache-restores", "youtube-community-outbox/owner-links",
       ] {
@@ -799,6 +956,22 @@ struct DesktopCloudJobsPage: Equatable {
   private func preferenceKey(_ kind: String, _ owner: String) -> String {
     "desktop.\(kind).\(SHA256.hash(data: Data(owner.utf8)).map { String(format: "%02x", $0) }.joined())"
   }
+  private func loadLibraryPreferences(owner: String) {
+    favorites = Set(preferences.stringArray(forKey: preferenceKey("favorites", owner)) ?? [])
+    hidden = Set(preferences.stringArray(forKey: preferenceKey("hidden", owner)) ?? [])
+    playHistory = DesktopPlayHistory(
+      stored: preferences.dictionary(forKey: preferenceKey("play-counts", owner)))
+    showStarredOnly = preferences.bool(forKey: preferenceKey("show-starred", owner))
+  }
+  func setShowStarredOnly(_ value: Bool) {
+    showStarredOnly = value
+    preferences.set(value, forKey: preferenceKey("show-starred", account.firebaseUid ?? "local"))
+  }
+  func playCount(_ track: DesktopTrack) -> Int { playHistory.count(track) }
+  private func persistPlayHistory() {
+    preferences.set(
+      playHistory.counts, forKey: preferenceKey("play-counts", account.firebaseUid ?? "local"))
+  }
   func favorite(_ track: DesktopTrack) {
     let keys = Set([track.id, track.jobId].compactMap { $0 })
     if keys.isDisjoint(with: favorites) {
@@ -806,16 +979,26 @@ struct DesktopCloudJobsPage: Equatable {
     } else {
       favorites.subtract(keys)
     }
-    UserDefaults.standard.set(
+    preferences.set(
       Array(favorites).sorted(), forKey: preferenceKey("favorites", account.firebaseUid ?? "local"))
   }
   func hide(_ track: DesktopTrack) {
     let keys = Set([track.id, track.jobId].compactMap { $0 })
     if keys.isDisjoint(with: hidden) { hidden.formUnion(keys) } else { hidden.subtract(keys) }
-    UserDefaults.standard.set(
+    preferences.set(
       Array(hidden).sorted(), forKey: preferenceKey("hidden", account.firebaseUid ?? "local"))
   }
   @discardableResult func loadCache(cursor: String? = nil, append: Bool = false) async -> Bool {
+    if let session = LocalUIDebugSession.current {
+      localTracks = session.fixtureTrack().map { [$0] } ?? []
+      localTotal = localTracks.count
+      localHasMore = false
+      cacheBytes = localTracks.reduce(0) { $0 + $1.bytes }
+      let stored = preferences.object(forKey: "localDebug.storageBudget") as? Int64
+      budgetBytes = stored ?? DesktopOfflineStoragePolicy.defaultBytes
+      journal?.recordLocalUIAction("storage.read")
+      return true
+    }
     guard !bridge.busy else { return false }
     let fence = account.scope
     do {
@@ -849,6 +1032,7 @@ struct DesktopCloudJobsPage: Equatable {
           track.sourceDuration = sourceDuration
         }
         track.trimEnabled = record["trim_enabled"].bool
+        track.thumbnailURL = DesktopThumbnailURL.validated(record["thumbnail_url"].string)
         track.updatedAt = Self.date(milliseconds: record["updated_at"].number)
         return track
       }
@@ -867,11 +1051,18 @@ struct DesktopCloudJobsPage: Equatable {
       budgetBytes = budget
       return true
     } catch {
+      guard account.scope == fence, !Task.isCancelled, !shuttingDown else { return false }
       if let message = Self.visibleCacheLoadFailure(error) { failure = message }
       return false
     }
   }
   static func visibleCacheLoadFailure(_ error: Error) -> String? {
+    if error is CancellationError { return nil }
+    if let failure = error as? DesktopAuthFailure,
+      [.cancelled, .sessionChanged, .service("ACCOUNT_CHANGED")].contains(failure)
+    {
+      return nil
+    }
     if let failure = error as? DesktopAuthFailure, failure.requiresRuntimePreparation {
       // Setup owns this expected first-run state. Home and Library should remain quiet until the
       // user explicitly tries processing, where the same code has actionable guidance.
@@ -933,6 +1124,13 @@ struct DesktopCloudJobsPage: Equatable {
       cacheBudgetStatus = "Wait for the current MusicMute operation to finish, then try again."
       return
     }
+    if LocalUIDebugSession.active {
+      budgetBytes = bytes
+      preferences.set(bytes, forKey: "localDebug.storageBudget")
+      cacheBudgetStatus = "Offline voice storage limit saved."
+      journal?.recordLocalUIAction("storage.saved")
+      return
+    }
     savingCacheBudget = true
     cacheBudgetStatus = "Saving offline voice storage limit…"
     defer { savingCacheBudget = false }
@@ -951,6 +1149,11 @@ struct DesktopCloudJobsPage: Equatable {
     }
   }
   func clearOfflineVoices() async {
+    if LocalUIDebugSession.active {
+      cacheClearStatus = "Cache deletion is unavailable in this isolated UI session."
+      journal?.recordLocalUIAction("operation.omitted")
+      return
+    }
     cacheClearedEntries = nil
     guard !bridge.busy, !processing, !clearingCache else {
       cacheClearStatus = "Wait for the current MusicMute operation to finish, then try again."
@@ -1012,6 +1215,12 @@ struct DesktopCloudJobsPage: Equatable {
   func process(
     url: String?, file: URL?, cloud: Bool, expectedAccountScope: DesktopSessionScope? = nil
   ) async {
+    if LocalUIDebugSession.active {
+      notice =
+        "Inference, provider downloads and cloud processing are unavailable in this isolated UI session. Play the owned synthetic voice from Library."
+      journal?.recordLocalUIAction("operation.omitted")
+      return
+    }
     guard !processing, !bridge.busy else { return }
     guard !account.updateRequired else {
       failure = "Update MusicMute before starting new processing."
@@ -1038,9 +1247,13 @@ struct DesktopCloudJobsPage: Equatable {
       return
     }
     processing = true
+    finalizingProcessing = false
     failure = nil
     notice = nil
-    defer { processing = false }
+    defer {
+      processing = false
+      finalizingProcessing = false
+    }
     do {
       let result = try await bridge.request(
         type: cloud ? "CLOUD_START" : "LOCAL_START", payload: .object(payload),
@@ -1064,6 +1277,7 @@ struct DesktopCloudJobsPage: Equatable {
         track.operationId = operation
       }
       track.trimEnabled = result["trim_enabled"].bool
+      track.thumbnailURL = DesktopThumbnailURL.validated(result["thumbnail_url"].string)
       track.syncState = result["sync_state"].string
       if let sourceDuration = result["source_duration_seconds"].number {
         guard sourceDuration > 0, sourceDuration.isFinite else {
@@ -1075,6 +1289,7 @@ struct DesktopCloudJobsPage: Equatable {
         notice = Self.resultNotice(
           cacheHit: result["cache_hit"].bool == true, syncState: result["sync_state"].string)
       }
+      finalizingProcessing = true
       await loadCache()
       if !cloud, account.signedIn { Task { await self.syncAccount() } }
     } catch { failure = (error as? DesktopAuthFailure)?.message ?? "Processing could not finish." }
@@ -1254,6 +1469,7 @@ struct DesktopCloudJobsPage: Equatable {
       namedTrack.updatedAt = [track.updatedAt, Self.cloudDate(job)].compactMap { $0 }.max()
       namedTrack.canDownloadInput = job["can_download_input"].bool
       namedTrack.trimEnabled = job["trim_enabled"].bool ?? track.trimEnabled
+      namedTrack.thumbnailURL = DesktopThumbnailURL.validated(job["thumbnail_url"].string)
       if let sourceDuration = job["input"]["duration_seconds"].number,
         sourceDuration.isFinite, sourceDuration > 0
       {
@@ -1278,7 +1494,8 @@ struct DesktopCloudJobsPage: Equatable {
             job["display_name"].string, job["source_title"].string, fallback: "Voice track"),
           duration: outputDuration, path: nil, jobId: id, bytes: 0, sourceVideoId: nil,
           trimEnabled: job["trim_enabled"].bool, sourceDuration: sourceDuration,
-          updatedAt: Self.cloudDate(job), canDownloadInput: job["can_download_input"].bool))
+          updatedAt: Self.cloudDate(job), canDownloadInput: job["can_download_input"].bool,
+          thumbnailURL: DesktopThumbnailURL.validated(job["thumbnail_url"].string)))
     }
     return result
   }
@@ -1296,6 +1513,12 @@ struct DesktopCloudJobsPage: Equatable {
   }
   private func reconcilePlaybackMetadata() {
     let candidates = tracks
+    var reconciledHistory = playHistory
+    reconciledHistory.reconcile(candidates)
+    if reconciledHistory != playHistory {
+      playHistory = reconciledHistory
+      persistPlayHistory()
+    }
     if let currentTrack {
       self.currentTrack = Self.reconciledTrack(currentTrack, candidates: candidates)
     }
@@ -1315,6 +1538,7 @@ struct DesktopCloudJobsPage: Equatable {
     result.trimEnabled = candidate.trimEnabled ?? track.trimEnabled
     result.sourceDuration = candidate.sourceDuration ?? track.sourceDuration
     result.updatedAt = [track.updatedAt, candidate.updatedAt].compactMap { $0 }.max()
+    result.thumbnailURL = candidate.thumbnailURL
     return result
   }
   private static func date(milliseconds: Double?) -> Date? {
@@ -1338,13 +1562,17 @@ struct DesktopCloudJobsPage: Equatable {
   func removed(_ track: DesktopTrack) -> Bool {
     hidden.contains(track.id) || track.jobId.map(hidden.contains) == true
   }
-  @discardableResult func play(_ track: DesktopTrack, original: Bool = false) async -> Bool {
+  @discardableResult func play(
+    _ track: DesktopTrack, original: Bool = false, restart: Bool = false
+  ) async -> Bool {
+    journal?.recordLocalUIAction("playback.request")
     let sameTrack = currentTrack?.id == track.id
+    if !sameTrack || restart { currentTrackCounted = false }
     let request = DesktopPlaybackRequest(
       operation: UUID(), scope: account.scope, sameTrack: sameTrack,
       priorVariant: playbackTimelineVariant,
-      resumePlayback: sameTrack && player != nil ? playing : true,
-      position: sameTrack ? position : 0,
+      resumePlayback: restart || (sameTrack && player != nil ? playing : true),
+      position: sameTrack && !restart ? position : 0,
       bookmarks: sameTrack ? bookmarks : [],
       loopStart: sameTrack ? loopStart : nil, loopEnd: sameTrack ? loopEnd : nil)
     playbackTask?.cancel()
@@ -1571,7 +1799,7 @@ struct DesktopCloudJobsPage: Equatable {
             self.playing = false
             self.playbackPreparation = .failed(.audioFailed)
             self.recordPlaybackFailure(.audioFailed)
-          } else if item.status == .readyToPlay {
+          } else if item.status == .readyToPlay, self.pendingPlaybackSeek == nil {
             self.playbackPreparation =
               instance.timeControlStatus == .waitingToPlayAtSpecifiedRate ? .buffering : nil
           }
@@ -1580,39 +1808,72 @@ struct DesktopCloudJobsPage: Equatable {
       playbackWaiting = instance.observe(\.timeControlStatus, options: [.new]) {
         [weak self] _, _ in
         Task { @MainActor in
-          guard let self, self.player === instance, item.status == .readyToPlay else { return }
+          guard let self, self.player === instance, item.status == .readyToPlay,
+            !self.replaySeekPending, self.pendingPlaybackSeek == nil
+          else { return }
           self.playbackPreparation =
             instance.timeControlStatus == .waitingToPlayAtSpecifiedRate ? .buffering : nil
+          self.confirmPlaybackStarted(instance, scope: fence)
         }
       }
       periodicObserver = instance.addPeriodicTimeObserver(
         forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main
       ) { [weak self] time in
-        Task { @MainActor in
-          guard let self, self.player === instance else { return }
-          let value = time.seconds
-          if value.isFinite { self.playbackClock.update(position: value) }
-          if let end = self.loopEnd, let start = self.loopStart, value >= end {
-            self.seek(start)
-          } else if self.skipSilence, !self.compare,
-            let range = self.silenceRanges.first(where: {
-              value >= $0.start && value < $0.end - 0.04
-            })
-          {
-            self.seek(min(range.end, self.loopEnd ?? range.end))
+        MainActor.assumeIsolated {
+          guard let self, self.player === instance, self.pendingPlaybackSeek == nil,
+            !self.replaySeekPending, !self.loopSeekPending
+          else { return }
+          let seekOperation = self.playbackSeekOperation
+          let update: @MainActor @Sendable () -> Void = { [weak self] in
+            guard let self, self.player === instance, self.account.scope == fence,
+              self.playbackOperation == operation, self.playbackSeekOperation == seekOperation,
+              self.pendingPlaybackSeek == nil, !self.replaySeekPending, !self.loopSeekPending,
+              !self.shuttingDown
+            else { return }
+            let value = time.seconds
+            if value.isFinite { self.playbackClock.update(position: value) }
+            self.confirmPlaybackStarted(instance, scope: fence)
+            if self.playing, let end = self.loopEnd, let start = self.loopStart, value >= end {
+              self.restartLoop(at: start, player: instance, scope: fence)
+            } else if self.skipSilence, !self.compare,
+              let range = self.silenceRanges.first(where: {
+                value >= $0.start && value < $0.end - 0.04
+              })
+            {
+              self.seek(min(range.end, self.loopEnd ?? range.end))
+            }
+            let measured = instance.currentItem?.duration.seconds ?? 0
+            if measured.isFinite && measured > 0 {
+              self.playbackClock.update(duration: measured)
+            }
           }
-          let measured = instance.currentItem?.duration.seconds ?? 0
-          if measured.isFinite && measured > 0 {
-            self.playbackClock.update(duration: measured)
-          }
+          #if MUSICMUTE_NATIVE_TESTS && !MUSICMUTE_BROWSER_BRIDGE
+            if let playbackTickForTesting = self.playbackTickForTesting {
+              playbackTickForTesting(update)
+              return
+            }
+          #endif
+          Task { @MainActor in update() }
         }
       }
       endObserver = NotificationCenter.default.addObserver(
         forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
       ) { [weak self] _ in
-        Task { @MainActor in
-          guard let self, self.player === instance else { return }
-          await self.next()
+        MainActor.assumeIsolated {
+          guard let self, self.player === instance, instance.currentItem === item,
+            self.account.scope == fence, self.playbackOperation == operation,
+            self.pendingPlaybackSeek == nil, !self.replaySeekPending, !self.loopSeekPending,
+            !self.shuttingDown
+          else { return }
+          self.playbackEndedItem = item
+          let seekOperation = self.playbackSeekOperation
+          Task { @MainActor in
+            guard self.player === instance, instance.currentItem === item,
+              self.account.scope == fence, self.playbackOperation == operation,
+              self.playbackSeekOperation == seekOperation, !self.shuttingDown
+            else { return }
+            await self.next()
+          }
         }
       }
       if resumePlayback { instance.playImmediately(atRate: Float(rate)) }
@@ -1637,8 +1898,56 @@ struct DesktopCloudJobsPage: Equatable {
       return false
     }
   }
-  var preparingPlayback: Bool { playbackPreparation?.loading == true }
+  var preparingPlayback: Bool { replaySeekPending || playbackPreparation?.loading == true }
   var canControlPlayback: Bool { player != nil && !preparingPlayback }
+  private func confirmPlaybackStarted(_ instance: AVPlayer, scope: DesktopSessionScope?) {
+    guard player === instance, account.scope == scope, !currentTrackCounted,
+      instance.currentItem?.status == .readyToPlay, instance.timeControlStatus == .playing,
+      let currentTrack
+    else { return }
+    currentTrackCounted = true
+    playHistory.record(currentTrack)
+    persistPlayHistory()
+  }
+  private func restartLoop(
+    at position: Double, player instance: AVPlayer, scope: DesktopSessionScope?
+  ) {
+    guard !loopSeekPending, canControlPlayback, pendingPlaybackSeek == nil else { return }
+    let operation = playbackOperation
+    let seekOperation = UUID()
+    playbackEndedItem = nil
+    playbackSeekOperation = seekOperation
+    loopSeekPending = true
+    let complete: @Sendable (Bool) -> Void = { [weak self] finished in
+      Task { @MainActor in
+        guard let self, self.player === instance, self.account.scope == scope,
+          self.playbackOperation == operation, self.playbackSeekOperation == seekOperation,
+          !self.shuttingDown
+        else { return }
+        self.loopSeekPending = false
+        guard finished, self.playing else { return }
+        self.playbackEndedItem = nil
+        self.playbackClock.update(position: position)
+        self.currentTrackCounted = false
+        instance.playImmediately(atRate: Float(self.rate))
+        self.confirmPlaybackStarted(instance, scope: scope)
+      }
+    }
+    let time = CMTime(seconds: position, preferredTimescale: 600)
+    #if MUSICMUTE_NATIVE_TESTS && !MUSICMUTE_BROWSER_BRIDGE
+      if let playbackSeekForTesting {
+        playbackSeekForTesting(instance, time, complete)
+        return
+      }
+    #endif
+    instance.seek(to: time, completionHandler: complete)
+  }
+  #if MUSICMUTE_NATIVE_TESTS && !MUSICMUTE_BROWSER_BRIDGE
+    func restartLoopForTesting(at position: Double) {
+      guard let player else { return }
+      restartLoop(at: position, player: player, scope: account.scope)
+    }
+  #endif
   func retryPlayback() async {
     guard case .failed = playbackPreparation, let currentTrack else { return }
     await play(currentTrack, original: compare)
@@ -1650,6 +1959,50 @@ struct DesktopCloudJobsPage: Equatable {
   }
   func togglePlayback() {
     guard canControlPlayback, let player else { return }
+    journal?.recordLocalUIAction(playing ? "playback.pause" : "playback.request")
+    let position = pendingPlaybackSeek?.target ?? player.currentTime().seconds
+    let duration = player.currentItem?.duration.seconds ?? 0
+    let reachedEnd = playbackEndedItem != nil && playbackEndedItem === player.currentItem
+    if !playing,
+      reachedEnd
+        || (position.isFinite && duration.isFinite && duration > 0
+          && position >= duration - 1.0 / 600.0)
+    {
+      let scope = account.scope
+      let operation = playbackOperation
+      playbackEndedItem = nil
+      playbackSeekOperation = UUID()
+      pendingPlaybackSeek = nil
+      loopSeekPending = false
+      replaySeekPending = true
+      playbackPreparation = .preparing
+      player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) {
+        [weak self] finished in
+        Task { @MainActor in
+          guard let self, self.player === player, self.account.scope == scope,
+            self.playbackOperation == operation, !self.shuttingDown
+          else { return }
+          self.replaySeekPending = false
+          guard finished else {
+            self.playbackPreparation = .failed(.startFailed)
+            self.recordPlaybackFailure(.startFailed)
+            return
+          }
+          self.playbackClock.update(position: 0)
+          self.playbackEndedItem = nil
+          self.currentTrackCounted = false
+          self.playbackPreparation = nil
+          player.playImmediately(atRate: Float(self.rate))
+          self.playing = true
+        }
+      }
+      return
+    }
+    if pendingPlaybackSeek != nil {
+      playing.toggle()
+      if !playing { player.pause() }
+      return
+    }
     if playing { player.pause() } else { player.playImmediately(atRate: Float(rate)) }
     playing.toggle()
   }
@@ -1701,10 +2054,44 @@ struct DesktopCloudJobsPage: Equatable {
       value.lastAudibleLevel, forKey: DesktopPreferenceKey.playbackLastAudibleVolume)
   }
   func seek(_ value: Double) {
-    guard canControlPlayback, value.isFinite else { return }
+    guard canControlPlayback, value.isFinite, let player else { return }
     let target = max(0, min(duration, value))
+    let scope = account.scope
+    let operation = playbackOperation
+    let seekOperation = UUID()
+    playbackEndedItem = nil
+    playbackSeekOperation = seekOperation
+    pendingPlaybackSeek = (seekOperation, target)
+    loopSeekPending = false
     playbackClock.update(position: target)
-    player?.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+    let complete: @Sendable (Bool) -> Void = { [weak self] finished in
+      Task { @MainActor in
+        guard let self, self.player === player, self.account.scope == scope,
+          self.playbackOperation == operation, self.playbackSeekOperation == seekOperation,
+          let pending = self.pendingPlaybackSeek, pending.operation == seekOperation,
+          !self.shuttingDown
+        else { return }
+        self.pendingPlaybackSeek = nil
+        guard finished else {
+          self.teardownPlayer()
+          self.playing = false
+          self.playbackPreparation = .failed(.startFailed)
+          self.recordPlaybackFailure(.startFailed)
+          return
+        }
+        self.playbackEndedItem = nil
+        self.playbackClock.update(position: pending.target)
+        if self.playing { player.playImmediately(atRate: Float(self.rate)) } else { player.pause() }
+      }
+    }
+    let time = CMTime(seconds: target, preferredTimescale: 600)
+    #if MUSICMUTE_NATIVE_TESTS && !MUSICMUTE_BROWSER_BRIDGE
+      if let playbackSeekForTesting {
+        playbackSeekForTesting(player, time, complete)
+        return
+      }
+    #endif
+    player.seek(to: time, completionHandler: complete)
   }
   func compareOriginal() async {
     guard !preparingPlayback, let currentTrack else { return }
@@ -1714,6 +2101,11 @@ struct DesktopCloudJobsPage: Equatable {
   var originalPlaying: Bool { compare }
   var canCompareOriginal: Bool { originalPlaying || currentTrack?.originalAvailable == true }
   private func teardownPlayer() {
+    playbackEndedItem = nil
+    playbackSeekOperation = UUID()
+    pendingPlaybackSeek = nil
+    replaySeekPending = false
+    loopSeekPending = false
     if let periodicObserver { player?.removeTimeObserver(periodicObserver) }
     periodicObserver = nil
     if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
@@ -1730,6 +2122,8 @@ struct DesktopCloudJobsPage: Equatable {
     playbackTemporary = nil
   }
   func stop() {
+    journal?.recordLocalUIAction("playback.stop")
+    currentTrackCounted = false
     playbackOperation = nil
     playbackTask?.cancel()
     playbackTask = nil
@@ -1772,9 +2166,8 @@ struct DesktopCloudJobsPage: Equatable {
         playing = false
         return
       }
-      seek(0)
       await play(
-        currentTrack, original: variant.isOriginal && currentTrack.originalAvailable)
+        currentTrack, original: variant.isOriginal && currentTrack.originalAvailable, restart: true)
     case .playQueued(let index, let requeueCurrent, let variant):
       let track = queue.remove(at: index)
       if requeueCurrent, let currentTrack { queue.append(currentTrack) }
@@ -2068,7 +2461,7 @@ struct DesktopCloudJobsPage: Equatable {
         } else if id == "desktop-usage" {
           usage = event["data"]
         } else if id == "desktop-policy" {
-          account.receivePolicy(event["data"])
+          account.receiveProcessingPolicy(event["data"])
         } else if id == "desktop-worker-registration" {
           guard let allowed = event["data"]["worker_registration_allowed"].bool else {
             throw DesktopAuthFailure.malformedResponse

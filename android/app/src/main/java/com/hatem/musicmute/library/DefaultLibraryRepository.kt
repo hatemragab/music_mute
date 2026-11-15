@@ -77,6 +77,7 @@ class DefaultLibraryRepository(
                                     durationMs = job.input.durationSeconds.takeIf { it.isFinite() && it >= 0 }
                                         ?.let { (it * 1000).toLong() },
                                     starred = record.starred,
+                                    playCount = record.playCount,
                                     hidden = record.hidden,
                                     offlineStatus = when {
                                         transfer != null -> OfflineStatus.DOWNLOADING
@@ -87,6 +88,7 @@ class DefaultLibraryRepository(
                                     downloadedBytes = transfer?.bytes ?: 0,
                                     totalBytes = transfer?.totalBytes,
                                     problem = problem,
+                                    thumbnailUrl = com.hatem.musicmute.processing.validatedThumbnailUrl(job.thumbnailUrl),
                                 )
                             }
                         }.collect { entries ->

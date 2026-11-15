@@ -1,6 +1,6 @@
 import { lstat, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { sanitizeDiagnostic } from "../../agent/child-process.js";
+import { sanitizeDiagnostic } from "../../agent/diagnostic-redaction.js";
 import { investigateErrors, investigateJob } from "./investigation.js";
 import { queryPerformanceReport } from "./performance-report.js";
 import { readOperationalEvents } from "./operational-logs.js";

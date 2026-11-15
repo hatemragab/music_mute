@@ -14,6 +14,7 @@ import {
   ACCOUNT_RECOVERY,
   AUTH_OPERATION,
   PUBLIC_ROUTE,
+  OPTIONAL_AUTH,
 } from './auth.decorators.js';
 import { ADMIN_ROUTE } from '../admin/admin.decorators.js';
 
@@ -295,6 +296,58 @@ describe('private request trust order', () => {
     await expect(
       publicAdmin.guard.canActivate(publicAdmin.context),
     ).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it('allows optional-auth guests without Firebase or account budgets', async () => {
+    const f = setup(null);
+    f.req.headers = {};
+    f.req.rawHeaders = [];
+    Reflect.defineMetadata(OPTIONAL_AUTH, true, f.handler);
+    expect(await f.guard.canActivate(f.context)).toBe(true);
+    expect(f.req.user).toBeNull();
+    expect(f.events).toEqual([]);
+  });
+
+  it('authenticates optional-auth bearer reads through the full trust path', async () => {
+    const f = setup();
+    Reflect.defineMetadata(OPTIONAL_AUTH, true, f.handler);
+    Reflect.defineMetadata(AUTH_OPERATION, 'processing-read', f.handler);
+    expect(await f.guard.canActivate(f.context)).toBe(true);
+    expect(f.req.user._id).toBe('account-id');
+    expect(f.events).toEqual([
+      'signature',
+      'uid-budget',
+      'revocation',
+      'local-user',
+    ]);
+    f.firebase.verifySession.mockRejectedValue(new Error('revoked'));
+    await expect(f.guard.canActivate(f.context)).rejects.toThrow('revoked');
+  });
+
+  it.each(['', 'Basic fixture', ['Bearer a', 'Bearer b']])(
+    'rejects malformed optional-auth credentials %j rather than treating them as guests',
+    async (header) => {
+      const f = setup(header);
+      Reflect.defineMetadata(OPTIONAL_AUTH, true, f.handler);
+      await expect(f.guard.canActivate(f.context)).rejects.toMatchObject({
+        status: 401,
+      });
+      expect(f.firebase.verifySignature).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects contradictory optional-auth metadata and raw-only credentials', async () => {
+    const f = setup(null);
+    f.req.headers = {};
+    Reflect.defineMetadata(OPTIONAL_AUTH, true, f.handler);
+    await expect(f.guard.canActivate(f.context)).rejects.toMatchObject({
+      status: 401,
+    });
+    f.req.rawHeaders = [];
+    Reflect.defineMetadata(PUBLIC_ROUTE, true, f.handler);
+    await expect(f.guard.canActivate(f.context)).rejects.toMatchObject({
       status: 401,
     });
   });

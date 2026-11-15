@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct HomeView: View {
   var urlImports: URLImportsModel?
+  var linkImportVisible = false
   var openImportedJob: (String) -> Void = { _ in }
   var beginImport: () -> Void = {}
   var importAudio: (URL) -> Void = { _ in }
@@ -36,7 +37,10 @@ struct HomeView: View {
           .background(VocalStyle.teal.opacity(0.10), in: Capsule())
         }
         Text("home_start").font(.title2.bold())
-        if let urlImports { URLImportCard(model: urlImports, openJob: openImportedJob) }
+        if let urlImports {
+          URLImportCard(
+            model: urlImports, allowsNewImport: linkImportVisible, openJob: openImportedJob)
+        }
         VocalCard {
           Button {
             beginImport()

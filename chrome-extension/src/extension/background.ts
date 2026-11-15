@@ -1,3 +1,8 @@
+import { localDiagnostics } from "./local-debug";
+import {
+  isLocalProvider,
+  localProviderForHello,
+} from "../shared/browser-platform";
 import {
   NATIVE_HOST,
   PROTOCOL_VERSION,
@@ -26,6 +31,8 @@ import { loadSettings } from "./settings";
 import { cloudHandoffUrl } from "../shared/app-handoff";
 import { isErrorContext, type ErrorContext } from "../shared/error-context";
 import { safeLocalErrors } from "./local-error-report";
+import { isKnownDiagnosticCode } from "../shared/diagnostic-codes";
+import { redactLocalLog } from "../shared/local-debug-core";
 import { TabAudio } from "./tab-audio";
 import { PlaybackSessionStore } from "./playback-session";
 import {
@@ -367,49 +374,134 @@ function sendToPage(
   });
 }
 function safeDiagnostic(input: DiagnosticInput): DiagnosticInput | null {
-  if (
-    input.component !== "extension" ||
-    !["info", "warning", "error"].includes(input.severity) ||
-    !safeEvents.has(input.event)
-  )
+  try {
+    if (
+      input.component !== "extension" ||
+      !["info", "warning", "error"].includes(input.severity) ||
+      !safeEvents.has(input.event)
+    )
+      return null;
+    const output: DiagnosticInput = {
+      component: "extension",
+      severity: input.severity,
+      event: input.event,
+    };
+    for (const key of ["request_id", "job_id"] as const) {
+      const value = input[key];
+      if (
+        typeof value === "string" &&
+        /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+          value,
+        )
+      )
+        output[key] = value.toLowerCase();
+    }
+    const code = Object.getOwnPropertyDescriptor(input, "code");
+    if (code)
+      output.code =
+        "value" in code && isKnownDiagnosticCode(code.value)
+          ? code.value
+          : "UNKNOWN_ERROR";
+    if (input.metrics) {
+      const allowed = new Set([
+        "duration_ms",
+        "drift_ms",
+        "elapsed_ms",
+        "playing",
+        "stage",
+        "sequence",
+        "generation",
+        "passed",
+      ]);
+      output.metrics = Object.fromEntries(
+        Object.entries(input.metrics).filter(
+          ([key, value]) =>
+            allowed.has(key) &&
+            ((typeof value === "number" && Number.isFinite(value)) ||
+              typeof value === "boolean" ||
+              (key === "stage" &&
+                typeof value === "string" &&
+                /^[a-z_-]{1,40}$/.test(value))),
+        ),
+      );
+    }
+    return output;
+  } catch {
     return null;
-  const output: DiagnosticInput = {
-    component: "extension",
-    severity: input.severity,
-    event: input.event,
-  };
-  if (input.code && /^[A-Z0-9_]{1,80}$/.test(input.code))
-    output.code = input.code;
-  if (input.metrics) {
-    const allowed = new Set([
-      "duration_ms",
-      "drift_ms",
-      "elapsed_ms",
-      "playing",
-      "stage",
-      "sequence",
-      "generation",
-      "passed",
-    ]);
-    output.metrics = Object.fromEntries(
-      Object.entries(input.metrics).filter(
-        ([key, value]) =>
-          allowed.has(key) &&
-          ((typeof value === "number" && Number.isFinite(value)) ||
-            typeof value === "boolean" ||
-            (key === "stage" &&
-              typeof value === "string" &&
-              /^[a-z_-]{1,40}$/.test(value))),
-      ),
-    );
   }
-  return output;
 }
-function diagnostic(input: DiagnosticInput): void {
-  const safe = safeDiagnostic(input);
+/** Protocol observations cannot turn opaque thrown codes into retained credentials. */
+function protocolObservation(value: unknown): unknown {
+  const project = (item: unknown): unknown => {
+    if (!item || typeof item !== "object") return item;
+    if (Array.isArray(item)) return item.map(project);
+    return Object.fromEntries(
+      Object.entries(item).map(([key, entry]) => [
+        key,
+        key === "code" || key === "error_code"
+          ? isKnownDiagnosticCode(entry)
+            ? entry
+            : "UNKNOWN_ERROR"
+          : project(entry),
+      ]),
+    );
+  };
+  // The existing redactor bounds this plain snapshot and omits accessors before traversal.
+  try {
+    return project(redactLocalLog(value));
+  } catch {
+    return { omitted: "observation_sanitization_failed" };
+  }
+}
+/** Disabled/rejected diagnostics never evaluate snapshots or affect message delivery. */
+function observeProtocol(
+  name: string,
+  snapshot: () => unknown,
+  phase: string,
+  requestId?: string,
+): void {
+  try {
+    if (!localDiagnostics.status().enabled) return;
+  } catch {
+    return;
+  }
+  let data: unknown;
+  try {
+    data = protocolObservation(snapshot());
+  } catch {
+    data = { omitted: "observation_sanitization_failed" };
+  }
+  try {
+    localDiagnostics.emit(name, data, "debug", {
+      phase,
+      ...(requestId ? { requestId } : {}),
+    });
+  } catch {
+    // Observability must not affect protocol handling.
+  }
+}
+function diagnostic(
+  input: DiagnosticInput,
+  owner: ActiveSession | null = null,
+): void {
+  const scoped = safeDiagnostic(input);
+  if (!scoped) return;
+  if (owner) {
+    scoped.request_id = owner.requestId;
+    if (owner.jobId) scoped.job_id = owner.jobId;
+    else delete scoped.job_id;
+  }
+  const safe = safeDiagnostic(scoped);
   if (!safe) return;
-  if (active?.jobId && safe.event === "stage_completed")
-    safe.job_id = active.jobId;
+  localDiagnostics.emit(
+    `diagnostic.${safe.event}`,
+    safe,
+    safe.severity === "warning" ? "warn" : safe.severity,
+    {
+      ...(safe.request_id ? { requestId: safe.request_id } : {}),
+      ...(safe.job_id ? { jobId: safe.job_id } : {}),
+    },
+  );
   if (safe.severity !== "info") {
     diagnosticQueue = diagnosticQueue
       .then(async () => {
@@ -440,12 +532,15 @@ function diagnostic(input: DiagnosticInput): void {
 function fail(code: string, context?: ErrorContext): Promise<void> {
   lastError = code;
   lastErrorContext = context;
-  diagnostic({
-    component: "extension",
-    severity: "error",
-    event: "diagnostic_error",
-    code,
-  });
+  diagnostic(
+    {
+      component: "extension",
+      severity: "error",
+      event: "diagnostic_error",
+      code,
+    },
+    active ?? pendingStart,
+  );
   // Capture and retire ownership before waiting, retaining its native job until
   // cancellation has acknowledged. Every failure releases the same resources.
   return stop(true, null, code, context).catch(() => undefined);
@@ -466,6 +561,7 @@ function connect(): chrome.runtime.Port {
   const port = native;
   let handoffDeadline = idleRetirementDeadline;
   port.onDisconnect.addListener(() => {
+    localDiagnostics.emit("native.disconnect", undefined, "info");
     void chrome.runtime.lastError;
     if (native !== port) return;
     cancelStatusHandoff();
@@ -480,14 +576,24 @@ function connect(): chrome.runtime.Port {
     if (!startupFailure) fail("COMPANION_DISCONNECTED");
   });
   port.onMessage.addListener((value: unknown) => {
+    const observe = (snapshot: () => unknown, requestId?: string) =>
+      observeProtocol(
+        "native.receive",
+        snapshot,
+        "extension_received",
+        requestId,
+      );
+    const omit = () => observe(() => ({ omitted: "invalid_native_frame" }));
     if (
       native !== port ||
       startupFailures.has(port) ||
       !value ||
       typeof value !== "object" ||
       Array.isArray(value)
-    )
+    ) {
+      omit();
       return;
+    }
     const reply = value as NativeReply;
     if (
       reply.protocol_version !== PROTOCOL_VERSION ||
@@ -497,8 +603,10 @@ function connect(): chrome.runtime.Port {
       (reply.payload === null && reply.type !== "JOB") ||
       (reply.payload !== null &&
         (typeof reply.payload !== "object" || Array.isArray(reply.payload)))
-    )
+    ) {
+      omit();
       return;
+    }
     if (
       reply.type === "ERROR" &&
       (Object.keys(reply.payload).some(
@@ -508,8 +616,10 @@ function connect(): chrome.runtime.Port {
         !isErrorCode(reply.payload.error_code) ||
         (reply.payload.error_context !== undefined &&
           (!negotiatedErrors || !isErrorContext(reply.payload.error_context))))
-    )
+    ) {
+      omit();
       return;
+    }
     if (
       reply.type === "HELLO" &&
       (typeof reply.payload.ready !== "boolean" ||
@@ -539,22 +649,52 @@ function connect(): chrome.runtime.Port {
         (reply.payload.background_publication_supported !== undefined &&
           typeof reply.payload.background_publication_supported !==
             "boolean") ||
+        (reply.payload.cache_recovery_supported !== undefined &&
+          typeof reply.payload.cache_recovery_supported !== "boolean") ||
         (reply.payload.processing_provider !== undefined &&
-          !["LOCAL_MACOS", "ONLINE_MUSICMUTE"].includes(
+          (!["LOCAL_MACOS", "LOCAL_WINDOWS", "ONLINE_MUSICMUTE"].includes(
             reply.payload.processing_provider,
-          )) ||
+          ) ||
+            (isLocalProvider(reply.payload.processing_provider) &&
+              reply.payload.processing_provider !==
+                localProviderForHello(reply.payload)))) ||
         (reply.payload.processing_scope !== undefined &&
           (typeof reply.payload.processing_scope !== "string" ||
             reply.payload.processing_scope.length !== 64 ||
             !/^[a-f0-9]{64}$/.test(reply.payload.processing_scope))))
-    )
+    ) {
+      omit();
       return;
+    }
     if (
       reply.type === "JOB" &&
       reply.payload !== null &&
       !isJobSnapshot(reply.payload)
-    )
+    ) {
+      omit();
       return;
+    }
+    if (reply.type === "CHECK" && !isInstallationCheck(reply.payload)) {
+      omit();
+      return;
+    }
+    observe(
+      () => ({
+        protocol_version: reply.protocol_version,
+        request_id: reply.request_id,
+        type: reply.type,
+        payload: reply.payload,
+        ...(Object.keys(value).some(
+          (key) =>
+            !["protocol_version", "request_id", "type", "payload"].includes(
+              key,
+            ),
+        )
+          ? { omitted: "unsupported_native_frame_fields" }
+          : {}),
+      }),
+      reply.request_id,
+    );
     const entry = pending.get(reply.request_id);
     if (reply.type === "CHECK") {
       if (
@@ -663,6 +803,12 @@ function command(
       commandPort = port;
       const startupFailure = startupFailures.get(port);
       if (startupFailure) throw startupFailure;
+      observeProtocol(
+        "native.send",
+        () => command,
+        "extension_send_attempt",
+        command.request_id,
+      );
       port.postMessage(command);
     } catch (error) {
       clearTimeout(timer);
@@ -893,18 +1039,21 @@ async function receiveJob(
   if (snapshot.state === "FAILED") {
     lastError = snapshot.error_code;
     lastErrorContext = snapshot.error_context;
-    diagnostic({
-      component: "extension",
-      severity: "error",
-      event: "job_failed",
-      ...(snapshot.error_code ? { code: snapshot.error_code } : {}),
-      metrics: { stage: snapshot.error_context?.stage ?? "failed" },
-    });
+    diagnostic(
+      {
+        component: "extension",
+        severity: "error",
+        event: "job_failed",
+        ...(snapshot.error_code ? { code: snapshot.error_code } : {}),
+        metrics: { stage: snapshot.error_context?.stage ?? "failed" },
+      },
+      owner,
+    );
     await stop(false, null, null);
     return;
   }
   if (snapshot.state === "READY" && snapshot.media) {
-    if (snapshot.provider === "LOCAL_MACOS" && owner.documentId)
+    if (isLocalProvider(snapshot.provider) && owner.documentId)
       playbackSessions.save({
         version: 1,
         tabId: owner.tabId,
@@ -942,7 +1091,7 @@ function canAcknowledgePlayback(owner: ActiveSession): boolean {
     owner.media !== undefined &&
     job?.job_id === owner.jobId &&
     job.state === "READY" &&
-    job.provider === "LOCAL_MACOS" &&
+    isLocalProvider(job.provider) &&
     !owner.publicationAcknowledged &&
     (owner.publicationAttempts ?? 0) < MAX_PUBLICATION_ACK_ATTEMPTS
   );
@@ -1005,16 +1154,19 @@ async function stop(
   playbackSessions.save(null);
   const owner = active ?? pendingStart;
   if (owner && reason)
-    diagnostic({
-      component: "extension",
-      severity: "info",
-      event: "playback_stopped",
-      code:
-        successor && reason === "SESSION_STOPPED"
-          ? "PLAYBACK_REPLACED"
-          : reason,
-      metrics: { stage: "background" },
-    });
+    diagnostic(
+      {
+        component: "extension",
+        severity: "info",
+        event: "playback_stopped",
+        code:
+          successor && reason === "SESSION_STOPPED"
+            ? "PLAYBACK_REPLACED"
+            : reason,
+        metrics: { stage: "background" },
+      },
+      owner,
+    );
   if (owner) {
     owner.publicationPlaying = false;
     cancelPublicationRetry(owner);
@@ -1040,7 +1192,7 @@ async function stop(
     retainForNavigation &&
     owner &&
     native &&
-    (oldJob?.provider === "LOCAL_MACOS" ||
+    (isLocalProvider(oldJob?.provider) ||
       (!oldJob && hello?.processing_provider !== "ONLINE_MUSICMUTE"));
   let retention: RetainedSession | undefined;
   if (keepPort) {
@@ -1201,7 +1353,14 @@ async function recoverPlayback(
         protocol_version: PROTOCOL_VERSION,
         request_id: crypto.randomUUID(),
         type: "STATUS",
-        payload: {},
+        payload:
+          hello?.cache_recovery_supported === true
+            ? {
+                video_id: saved.videoId,
+                duration_seconds: saved.durationSeconds,
+                job_id: saved.jobId,
+              }
+            : {},
       });
       if (pendingStart !== owner) return;
       // STATUS rechecks the native account and saved provider. Never START,
@@ -1212,7 +1371,7 @@ async function recoverPlayback(
         !isJobSnapshot(reply.payload) ||
         reply.payload.job_id !== saved.jobId ||
         reply.payload.video_id !== saved.videoId ||
-        reply.payload.provider !== "LOCAL_MACOS" ||
+        !isLocalProvider(reply.payload.provider) ||
         reply.payload.state !== "READY" ||
         !reply.payload.media ||
         Math.abs(reply.payload.media.duration_seconds - saved.durationSeconds) >
@@ -1224,12 +1383,15 @@ async function recoverPlayback(
       armPageLease(owner);
       await receiveJob(reply.payload, owner.requestId);
       if (active === owner)
-        diagnostic({
-          component: "extension",
-          severity: "info",
-          event: "stage_completed",
-          metrics: { stage: "session_recovered" },
-        });
+        diagnostic(
+          {
+            component: "extension",
+            severity: "info",
+            event: "stage_completed",
+            metrics: { stage: "session_recovered" },
+          },
+          owner,
+        );
     } catch {
       // No valid native grant remains. The page restores original audio and
       // reports the failed recovery instead of silently starting a new job.
@@ -1281,7 +1443,26 @@ async function handle(
     );
   }
   if (message.type === "MM_EVENT") {
-    diagnostic(message.payload);
+    const owner = active ?? pendingStart;
+    const observedGeneration = message.payload.metrics?.generation;
+    const correlatedOwner =
+      owner &&
+      Number.isSafeInteger(observedGeneration) &&
+      observedGeneration === owner.generation &&
+      (fromOffscreen(sender) ||
+        (validPage(sender) &&
+          sender.tab?.id === owner.tabId &&
+          senderVideoId(sender) === owner.videoId &&
+          (owner.documentId === undefined ||
+            owner.documentId === sender.documentId)))
+        ? owner
+        : null;
+    // Relayed diagnostic identities belong to the verified owner, never caller claims.
+    const input = safeDiagnostic(message.payload);
+    if (!input) return { ok: true };
+    delete input.request_id;
+    delete input.job_id;
+    diagnostic(input, correlatedOwner);
     return { ok: true };
   }
   if (message.type === "MM_STATUS") {
@@ -1413,16 +1594,19 @@ async function handle(
       active.publicationPlaying = message.playing;
       if (message.playing && !active.firstPlaybackRecorded) {
         active.firstPlaybackRecorded = true;
-        diagnostic({
-          component: "extension",
-          severity: "info",
-          event: "stage_completed",
-          ...(active.jobId ? { job_id: active.jobId } : {}),
-          metrics: {
-            stage: "start-to-playback",
-            duration_ms: performance.now() - active.startedAt,
+        diagnostic(
+          {
+            component: "extension",
+            severity: "info",
+            event: "stage_completed",
+            ...(active.jobId ? { job_id: active.jobId } : {}),
+            metrics: {
+              stage: "start-to-playback",
+              duration_ms: performance.now() - active.startedAt,
+            },
           },
-        });
+          active,
+        );
       }
       if (!message.playing) cancelPublicationRetry(active);
       sendToPage({
@@ -1448,7 +1632,8 @@ async function handle(
       message.video_id
     )
       return { ok: false, error: "UNSUPPORTED_VIDEO" };
-    // Never submit billable work in Chrome: native Home reviews account and quota.
+    // This separate handoff only prefills native Home for review. A manual Start
+    // still uses the app's saved local/cloud provider through the native host.
     // App launch works before Chrome registration and model setup. A known old
     // helper gets upgrade guidance; an absent helper is not a cloud prerequisite.
     if (hello && !hello.capabilities?.includes("cloud_handoff_v1"))
@@ -1560,7 +1745,7 @@ async function handle(
       let currentTab: chrome.tabs.Tab;
       let candidate = retained;
       const preserve =
-        !!active && canRefresh(active) && job?.provider === "LOCAL_MACOS";
+        !!active && canRefresh(active) && isLocalProvider(job?.provider);
       const replacement = candidate
         ? ((pendingStart = owner), candidate.handoff)
         : predecessor || !automatic
@@ -1642,7 +1827,7 @@ async function handle(
           Date.now() < candidate.expiresAt &&
           current.type === "JOB" &&
           current.payload?.state === "READY" &&
-          current.payload.provider === "LOCAL_MACOS" &&
+          isLocalProvider(current.payload.provider) &&
           current.payload.job_id === candidate.snapshot?.job_id &&
           current.payload.video_id === owner.videoId &&
           current.payload.media?.url === candidate.owner.media.url &&
@@ -1695,7 +1880,8 @@ async function handle(
         hello?.capabilities?.includes("processing_selection_v1") &&
         hello.processing_provider === "ONLINE_MUSICMUTE"
           ? "ONLINE_MUSICMUTE"
-          : "LOCAL_MACOS";
+          : localProviderForHello(hello);
+      if (!selectedProvider) throw new Error("UNSUPPORTED_PLATFORM");
       const choiceError =
         selectedProvider === "ONLINE_MUSICMUTE"
           ? automatic
@@ -1819,33 +2005,39 @@ async function handle(
                 } satisfies ExtensionMessage);
               } catch {
                 if (active !== owner) return { ok: false };
-                diagnostic({
-                  component: "extension",
-                  severity: "warning",
-                  event: "diagnostic_error",
-                  code: "AUDIO_CONTEXT_LOST",
-                  metrics: {
-                    stage: "playback",
-                    generation: owner.generation,
-                    passed: false,
-                  },
-                });
-                // The document may have disappeared after hasDocument(). Allow
-                // one singleflight reload; a failed reload reaches the error
-                // boundary below rather than recursively retrying this clock.
-                await loadAudio();
-                if (active === owner)
-                  diagnostic({
+                diagnostic(
+                  {
                     component: "extension",
-                    severity: "info",
+                    severity: "warning",
                     event: "diagnostic_error",
                     code: "AUDIO_CONTEXT_LOST",
                     metrics: {
                       stage: "playback",
                       generation: owner.generation,
-                      passed: true,
+                      passed: false,
                     },
-                  });
+                  },
+                  owner,
+                );
+                // The document may have disappeared after hasDocument(). Allow
+                // one singleflight reload; a failed reload reaches the error
+                // boundary below rather than recursively retrying this clock.
+                await loadAudio();
+                if (active === owner)
+                  diagnostic(
+                    {
+                      component: "extension",
+                      severity: "info",
+                      event: "diagnostic_error",
+                      code: "AUDIO_CONTEXT_LOST",
+                      metrics: {
+                        stage: "playback",
+                        generation: owner.generation,
+                        passed: true,
+                      },
+                    },
+                    owner,
+                  );
               }
             }
           }
@@ -1874,6 +2066,7 @@ chrome.runtime.onMessage.addListener((value: unknown, sender, sendResponse) => {
     return true;
   }
   const message = value;
+  observeProtocol("extension.message", () => message, "background_received");
   if (
     message.type.startsWith("MM_AUDIO_") &&
     !["MM_AUDIO_READY", "MM_AUDIO_STATE", "MM_AUDIO_ERROR"].includes(

@@ -72,11 +72,12 @@ fun MiniPlayer(
     onClose: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    entry: LibraryEntry? = null,
 ) {
     val controls = remember(playback) { playback.controls() }
     val state by controls.collectAsStateWithLifecycle(remember(playback) { playback.value.withoutPosition() })
     MiniPlayer(state, onOpen, onToggle, onNext, onClose, onSeek, modifier,
-        progress = { PlaybackProgress(playback, onSeek, compact = true) })
+        progress = { PlaybackProgress(playback, onSeek, compact = true) }, entry = entry)
 }
 
 @Composable
@@ -89,8 +90,10 @@ fun MiniPlayer(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
     progress: @Composable () -> Unit = { PlaybackProgress(state, onSeek, compact = true) },
+    entry: LibraryEntry? = null,
 ) {
     if (!state.shouldShowMiniPlayer()) return
+    val currentEntry = state.matchingLibraryEntry(entry)
     Surface(
         modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth()
             .padding(top = 8.dp, bottom = 20.dp),
@@ -107,9 +110,12 @@ fun MiniPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        Icon(Icons.Outlined.MusicNote, null,
-                            Modifier.padding(8.dp).size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    LibraryThumbnail(currentEntry?.thumbnailUrl, Modifier.size(36.dp),
+                        shape = RoundedCornerShape(12.dp)) {
+                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Icon(Icons.Outlined.MusicNote, null,
+                                Modifier.padding(8.dp).size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
                     }
                     Column(Modifier.weight(1f)) {
                         Text(state.queue.getOrNull(state.currentIndex)?.title?.takeIf { it.isNotBlank() }

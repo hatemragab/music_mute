@@ -12,6 +12,8 @@
     <string name="creative_library_search">ابحث في ملفاتك الصوتية</string>
     <string name="creative_library_all">الكل</string>
     <string name="creative_library_starred">المفضلة</string>
+    <string name="creative_library_show_starred">عرض المفضلة</string>
+    <string name="creative_library_most_played">الأكثر تشغيلاً</string>
     <string name="creative_library_downloaded">تم تنزيلها</string>
     <string name="creative_library_not_downloaded">غير منزلة</string>
     <string name="creative_library_removed">المخفية</string>

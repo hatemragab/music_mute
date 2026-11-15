@@ -9,6 +9,10 @@ import { DeviceInstallationOwnersService } from './device-installation-owners.se
 import { Device } from './device.schema.js';
 import type { DeviceDocument } from './device.schema.js';
 import type { ListDevicesDto } from './dto/list-devices.dto.js';
+import {
+  sameLocation,
+  type CloudflareLocation,
+} from './cloudflare-location.js';
 
 @Injectable()
 export class DevicesService {
@@ -22,9 +26,10 @@ export class DevicesService {
     userId: string,
     authTimeSec: number,
     report: DeviceReport,
+    location?: CloudflareLocation,
   ): Promise<DeviceDocument> {
     const result = await this.access.runActive(userId, (session) =>
-      this.syncInTransaction(userId, authTimeSec, report, session),
+      this.syncInTransaction(userId, authTimeSec, report, session, location),
     );
     // An ambiguous equal-time ownership claim must commit its invalidation before returning a conflict.
     if (!result) throw authError('DEVICE_REPORT_CONFLICT');
@@ -36,6 +41,7 @@ export class DevicesService {
     authTimeSec: number,
     report: DeviceReport,
     session: ClientSession,
+    location?: CloudflareLocation,
   ): Promise<DeviceDocument | null> {
     const owner = {
       userId,
@@ -66,6 +72,9 @@ export class DevicesService {
                 lastSeenAt: now,
                 lastAuthenticatedAtSec: authTimeSec,
                 versionHistory: [this.transition(report, now)],
+                ...(location
+                  ? { location: { ...location, observedAt: now } }
+                  : {}),
               },
             },
             {
@@ -105,6 +114,8 @@ export class DevicesService {
         throw authError('DEVICE_REPORT_CONFLICT');
       const changed = report.metadataRevision > current.metadataRevision;
       const seenDue = now.getTime() - current.lastSeenAt.getTime() >= 300000;
+      const locationChanged =
+        location !== undefined && !sameLocation(current.location, location);
       if (
         !(await this.claimInstallation(
           userId,
@@ -118,6 +129,7 @@ export class DevicesService {
       if (
         !changed &&
         !seenDue &&
+        !locationChanged &&
         !restoreHistory &&
         authTimeSec <= current.lastAuthenticatedAtSec
       )
@@ -136,12 +148,15 @@ export class DevicesService {
             lastAuthenticatedAtSec: current.lastAuthenticatedAtSec,
           },
           {
-            ...(changed || seenDue || restoreHistory
+            ...(changed || seenDue || restoreHistory || locationChanged
               ? {
                   $set: {
                     ...(changed ? metadata : {}),
                     lastSeenAt: now,
                     historyHiddenAt: null,
+                    ...(location && (locationChanged || seenDue)
+                      ? { location: { ...location, observedAt: now } }
+                      : {}),
                   },
                 }
               : {}),
@@ -175,6 +190,41 @@ export class DevicesService {
       .findOne({ userId, installationId: installationId.toLowerCase() })
       .session(session ?? null)
       .exec();
+  }
+
+  /** Ticket checkout observes only an existing, currently owned installation. */
+  async observeLocation(
+    userId: string,
+    installationId: string,
+    location: CloudflareLocation,
+  ): Promise<void> {
+    await this.access.runActive(userId, async (session) => {
+      if (
+        !(await this.installationOwners.isCurrentOwner(
+          new Types.ObjectId(userId),
+          installationId,
+          session,
+        ))
+      )
+        return;
+      const current = await this.findOwned(userId, installationId, session);
+      if (!current) return;
+      const now = new Date();
+      const seenDue = now.getTime() - current.lastSeenAt.getTime() >= 300000;
+      if (sameLocation(current.location, location) && !seenDue) return;
+      await this.devices.updateOne(
+        {
+          _id: current._id,
+          userId,
+          installationId: installationId.toLowerCase(),
+          lastSeenAt: current.lastSeenAt,
+        },
+        {
+          $set: { location: { ...location, observedAt: now }, lastSeenAt: now },
+        },
+        { session, runValidators: true },
+      );
+    });
   }
 
   async listOwned(

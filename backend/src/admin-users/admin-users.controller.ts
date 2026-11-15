@@ -19,6 +19,8 @@ import {
   RequireFreshAdminAuth,
 } from '../admin/admin.decorators.js';
 import { AdminUsersService } from './admin-users.service.js';
+import { AdminUserDevicesService } from './admin-user-devices.service.js';
+import { ListDevicesDto } from '../devices/dto/list-devices.dto.js';
 import { PutWorkerRegistrationDto } from './worker-registration.dto.js';
 import {
   DeleteAccountPolicyOverrideDto,
@@ -28,7 +30,10 @@ import {
 @Controller('admin/users')
 @RequireAdminPermission('users.read')
 export class AdminUsersController {
-  constructor(private readonly users: AdminUsersService) {}
+  constructor(
+    private readonly users: AdminUsersService,
+    private readonly devices: AdminUserDevicesService,
+  ) {}
 
   @Get()
   list(@Query() query: Record<string, unknown>) {
@@ -38,6 +43,12 @@ export class AdminUsersController {
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.users.detail(id);
+  }
+
+  @Get(':id/devices')
+  @Header('Cache-Control', 'no-store')
+  deviceList(@Param('id') id: string, @Query() query: ListDevicesDto) {
+    return this.devices.list(id, query);
   }
 
   @Put(':id/worker-registration')

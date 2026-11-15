@@ -18,6 +18,10 @@ import {
 } from '../storage/object-identity.js';
 import { isSharedMediaObjectKey } from '../shared-media/shared-media-key.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
+import {
+  ACTIVE_IMPORT_STATES,
+  MediaImport,
+} from '../url-imports/media-import.schema.js';
 import { AccountAccessService } from '../users/account-access.service.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { jobError } from './job-errors.js';
@@ -63,6 +67,7 @@ interface SharedJobReservation extends Omit<SharedJobInput, 'outputObject'> {
   serverTiming?: SharedImportMeasurements;
   acquisitionId?: string;
   importReservationId?: Types.ObjectId;
+  deliveryImportId?: Types.ObjectId;
 }
 
 @Injectable()
@@ -85,11 +90,13 @@ export class JobsService {
     cached: SharedJobInput,
     acquisitionId?: string,
     importReservationId?: Types.ObjectId,
+    deliveryImportId?: Types.ObjectId,
   ): Promise<{ jobId: string }> {
     return this.createSharedJob(userId, requestId, {
       ...cached,
       acquisitionId,
       importReservationId,
+      deliveryImportId,
     });
   }
 
@@ -188,17 +195,82 @@ export class JobsService {
           }
         : undefined;
     let job = await this.jobs.findOne({ userId: owner, requestId }).lean();
-    if (!job) {
+    if (!job || shared.deliveryImportId) {
       const id = new Types.ObjectId();
       try {
         job = await this.transactions.run(
           async (session) => {
+            // Serialize owner-history reuse across replicas before reading it.
+            await this.access.assertActive(owner, session);
+            const delivery = shared.deliveryImportId
+              ? await this.jobs.db
+                  .model<MediaImport>(MediaImport.name)
+                  .findOne({
+                    _id: shared.deliveryImportId,
+                    userId: owner,
+                    jobRequestId: requestId,
+                  })
+                  .session(session)
+                  .lean()
+              : null;
+            if (shared.deliveryImportId && !delivery)
+              throw jobError('JOB_STATE_CONFLICT');
+            if (
+              delivery &&
+              !ACTIVE_IMPORT_STATES.some(
+                (state) => state === delivery.status,
+              ) &&
+              !(delivery.status === 'submitted' && delivery.jobId)
+            )
+              throw jobError('JOB_STATE_CONFLICT');
+            if (delivery?.jobId) {
+              // The import is the durable receipt for a reused history job.
+              // Deletion after delivery must never resurrect that request.
+              const bound = await this.jobs
+                .findOne({ _id: delivery.jobId, userId: owner })
+                .session(session)
+                .lean();
+              if (!bound || bound.deletedAt) throw jobError('JOB_NOT_FOUND');
+              if (bound.requestId === requestId && bound.requestHash !== hash)
+                throw jobError('IDEMPOTENCY_CONFLICT');
+              if (shared.importReservationId)
+                await this.usage.releaseImport(
+                  shared.importReservationId,
+                  owner,
+                  session,
+                );
+              return bound;
+            }
+            const bindDelivery = async (id: Types.ObjectId) => {
+              if (!shared.deliveryImportId || !delivery) return;
+              const attached = await this.jobs.db
+                .model<MediaImport>(MediaImport.name)
+                .updateOne(
+                  {
+                    _id: shared.deliveryImportId,
+                    userId: owner,
+                    jobRequestId: requestId,
+                    jobId: null,
+                    status: delivery.status,
+                  },
+                  { $set: { jobId: id } },
+                  { session, runValidators: true },
+                );
+              if (attached.modifiedCount !== 1)
+                throw jobError('JOB_STATE_CONFLICT');
+            };
             if (diagnostics) diagnostics.step = 'idempotency-read';
             const repeated = await this.jobs
               .findOne({ userId: owner, requestId })
               .session(session)
               .lean();
-            if (repeated) return repeated;
+            if (repeated) {
+              if (repeated.requestHash !== hash)
+                throw jobError('IDEMPOTENCY_CONFLICT');
+              if (repeated.deletedAt) throw jobError('JOB_NOT_FOUND');
+              await bindDelivery(repeated._id);
+              return repeated;
+            }
             if (diagnostics) diagnostics.step = 'purged-request-check';
             await assertJobRequestNotPurged(
               this.jobs,
@@ -207,6 +279,29 @@ export class JobsService {
               hash,
               session,
             );
+            if (shared.outputObject) {
+              const retained = await this.jobs
+                .findOne({
+                  userId: owner,
+                  deletedAt: null,
+                  sourceKind: 'url',
+                  status: 'ready',
+                  'inputObject.key': shared.inputObject.key,
+                  'outputObject.key': shared.outputObject.key,
+                })
+                .session(session)
+                .lean();
+              if (retained) {
+                if (shared.importReservationId)
+                  await this.usage.releaseImport(
+                    shared.importReservationId,
+                    owner,
+                    session,
+                  );
+                await bindDelivery(retained._id);
+                return retained;
+              }
+            }
             if (diagnostics) diagnostics.step = 'admission';
             const { admissionSnapshot, policy } = shared.outputObject
               ? await this.admission.assertCachedWorkWithPolicy(
@@ -354,6 +449,7 @@ export class JobsService {
                   { session, upsert: true, setDefaultsOnInsert: true },
                 );
             }
+            await bindDelivery(result._id);
             if (diagnostics) diagnostics.step = 'commit';
             return { ...result, inputObject: shared.inputObject };
           },
@@ -361,12 +457,13 @@ export class JobsService {
           { serializeHandoff: true },
         );
       } catch (error) {
-        if (!isDuplicateKey(error)) throw error;
+        if (!isDuplicateKey(error) || shared.deliveryImportId) throw error;
         job = await this.jobs.findOne({ userId: owner, requestId }).lean();
       }
     }
     if (!job) throw new Error('Shared job reservation unavailable');
-    if (job.requestHash !== hash) throw jobError('IDEMPOTENCY_CONFLICT');
+    if (job.requestId === requestId && job.requestHash !== hash)
+      throw jobError('IDEMPOTENCY_CONFLICT');
     if (job.deletedAt) throw jobError('JOB_NOT_FOUND');
     const current = await this.findOwned(userId, job._id.toHexString());
     if (current.status === 'queued')

@@ -81,6 +81,7 @@
 		BB060074C0DDAA7F8FAD6D64 /* AudioPipelineCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70591739DBFFDD36AA63F5B4 /* AudioPipelineCoordinator.swift */; };
 		BE4669CE51159FD7BEE65FB2 /* AppleCredentialProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72CC2088B44D9567BC3F3910 /* AppleCredentialProvider.swift */; };
 		BE472D7FEEDCEAB0D5F83E9C /* ArtifactDownloadTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75185DC91480E7C2759D176B /* ArtifactDownloadTransport.swift */; };
+		BED17B8B238A1536921BA167 /* LocalDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE0CB8327C4CB112DC6D606 /* LocalDiagnostics.swift */; };
 		C1CB1334933D5000555E5EE2 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F7E2EB87C8F8E439FFF7ABB /* LibraryView.swift */; };
 		C3982929D49FD6E9B2850594 /* URLImportCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ADD1F848DFB2397EFF31905 /* URLImportCard.swift */; };
 		C5DA95F71D04FE6C1037C414 /* InstallationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFD4BE9A9D7E74A9769D0047 /* InstallationStore.swift */; };
@@ -89,6 +90,7 @@
 		C98A88C16EF8318CC72744B5 /* ProcessingHistoryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A136CA71F7E1F4B758D6BA76 /* ProcessingHistoryModel.swift */; };
 		CEE8FF959604183568D7BDBC /* AuthSessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23328842D2992A6AE71E1989 /* AuthSessionModel.swift */; };
 		D21B422E0E3EF259E323EEC0 /* AudioImportReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2B3AE5A5024BDEBCF5D2D57 /* AudioImportReview.swift */; };
+		D8FF7C81BDCD6923B75040CE /* LocalDiagnosticsSmoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B6E7CE55FC8DBCE61CEC07B /* LocalDiagnosticsSmoke.swift */; };
 		D95EF16EED3D0B45129C923A /* ProcessingAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2295DDCB883FDCD273D94AA3 /* ProcessingAppDelegate.swift */; };
 		DB4F773FE8F5B0ED7D1B7850 /* AudioPreparationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B21DB31733EAC4F370CDBE1A /* AudioPreparationEngine.swift */; };
 		DF2612B7FF5D7B68FB37B43A /* ProcessingUsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B1494E87D1F6A1DA14E70EF /* ProcessingUsageView.swift */; };
@@ -101,6 +103,7 @@
 		EC2B1ADE7E3E3FB261A0C095 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 23FA53994AE59BE9C2307305 /* GoogleService-Info.plist */; };
 		ED2D46D59795BD55D63C8A5F /* AudioInputPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7C1E16DD3FDBEC754CCF00 /* AudioInputPreparer.swift */; };
 		ED73E7172B5765ADBE1EA042 /* ClientErrorOutboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFCB20A0300F96084C683D0 /* ClientErrorOutboxTests.swift */; };
+		EFA8B0FB49FCEFB8A095D3B0 /* LocalDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 677BABCFAD12AAE689DCCDC0 /* LocalDiagnosticsTests.swift */; };
 		F091FA14C2D5D1A4F3A2D119 /* MediaPreparationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 423C1004122E9D9621D7C843 /* MediaPreparationEngineTests.swift */; };
 		F3944753E2713C455F49A6E8 /* AudioTaskCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B691A016F2DF435B5F5167BD /* AudioTaskCard.swift */; };
 		F402CC1EE12F857C40D99EBF /* ProcessingMediaPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0507B818F5E35B2AE9780409 /* ProcessingMediaPolicyTests.swift */; };
@@ -175,6 +178,7 @@
 		5FBF687D2C109DB9598F47DA /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		607F7C8EAF0CADB10866A904 /* DevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicesView.swift; sourceTree = "<group>"; };
 		660B23C25F82DB727CE4A181 /* ProcessedAudioShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessedAudioShareSheet.swift; sourceTree = "<group>"; };
+		677BABCFAD12AAE689DCCDC0 /* LocalDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDiagnosticsTests.swift; sourceTree = "<group>"; };
 		68AAAA6193E31D32189D0E3F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		69D5D602750F0D9EA916F5A3 /* AudioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
 		6D3B46976552B6DC3124085E /* ProcessingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingStore.swift; sourceTree = "<group>"; };
@@ -184,6 +188,7 @@
 		759FA4CFE70388F34934B289 /* ClientErrorOutbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientErrorOutbox.swift; sourceTree = "<group>"; };
 		76376826C31F15253D9E8C69 /* UnavailableJobsAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnavailableJobsAPI.swift; sourceTree = "<group>"; };
 		7A6F407449B25F154EAA256B /* ProcessingRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingRepository.swift; sourceTree = "<group>"; };
+		7B6E7CE55FC8DBCE61CEC07B /* LocalDiagnosticsSmoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDiagnosticsSmoke.swift; sourceTree = "<group>"; };
 		7BA22436E9B199E6A917A2CA /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		7F339EF5BDC8C77D36A07977 /* ProcessingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingModel.swift; sourceTree = "<group>"; };
 		7F7E2EB87C8F8E439FFF7ABB /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
@@ -198,6 +203,7 @@
 		94B3A5AF9D67799A1735839F /* JobModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobModels.swift; sourceTree = "<group>"; };
 		9A092C9DF86849A843297BED /* PushRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistrationCoordinator.swift; sourceTree = "<group>"; };
 		9ADD1F848DFB2397EFF31905 /* URLImportCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLImportCard.swift; sourceTree = "<group>"; };
+		9DE0CB8327C4CB112DC6D606 /* LocalDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDiagnostics.swift; sourceTree = "<group>"; };
 		9E9E5C9EC10CD8456BA6AD69 /* Previews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Previews.swift; sourceTree = "<group>"; };
 		9FA3F1D8A9DFDD9080314470 /* JobsAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobsAPIClient.swift; sourceTree = "<group>"; };
 		A136CA71F7E1F4B758D6BA76 /* ProcessingHistoryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingHistoryModel.swift; sourceTree = "<group>"; };
@@ -288,6 +294,15 @@
 			path = "web-client";
 			sourceTree = "<group>";
 		};
+		299E37E14A74B27542D5E25A /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				9DE0CB8327C4CB112DC6D606 /* LocalDiagnostics.swift */,
+				7B6E7CE55FC8DBCE61CEC07B /* LocalDiagnosticsSmoke.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
 		3C54F23AB25F68A0EA9B24F7 /* music_remover */ = {
 			isa = PBXGroup;
 			children = (
@@ -373,6 +388,7 @@
 				5A45D3D33E71AE46C4E4C7D1 /* Vocal.entitlements */,
 				D63078CD230292193F890DCD /* VocalApp.swift */,
 				ECDFFE6BBDA5663DB492228B /* Auth */,
+				299E37E14A74B27542D5E25A /* Diagnostics */,
 				CE203F564B8B0323EA8BEA1C /* Playback */,
 				4466121E88377D8BE702BDFE /* Processing */,
 				1537FB4E6F82A8D131650382 /* Resources */,
@@ -397,6 +413,7 @@
 				51CCBDCF585514BE0A44E115 /* JobActionsTests.swift */,
 				8B81AB703DDF99EDEE557757 /* JobArtifactTests.swift */,
 				C980C7A93C7540A94BFD96F0 /* JobsAPIClientTests.swift */,
+				677BABCFAD12AAE689DCCDC0 /* LocalDiagnosticsTests.swift */,
 				423C1004122E9D9621D7C843 /* MediaPreparationEngineTests.swift */,
 				090B752712F13C3505D78A5E /* PersistenceTests.swift */,
 				C657428FEB820748C566BF92 /* PreparedMediaCleanupTests.swift */,
@@ -656,6 +673,7 @@
 				ABAC876F26CD8EBF548725E1 /* JobActionsTests.swift in Sources */,
 				9CCB23ED317978675875F423 /* JobArtifactTests.swift in Sources */,
 				58696552B87E210C46905E87 /* JobsAPIClientTests.swift in Sources */,
+				EFA8B0FB49FCEFB8A095D3B0 /* LocalDiagnosticsTests.swift in Sources */,
 				F091FA14C2D5D1A4F3A2D119 /* MediaPreparationEngineTests.swift in Sources */,
 				850168031F88A3D626A47BB4 /* PersistenceTests.swift in Sources */,
 				11D4B5BEADC34F44C7E83E47 /* PreparedMediaCleanupTests.swift in Sources */,
@@ -707,6 +725,8 @@
 				16752085083F81AE3C3B7FF8 /* JobsAPIClient.swift in Sources */,
 				C1CB1334933D5000555E5EE2 /* LibraryView.swift in Sources */,
 				7B76E31FBC4907A85B3C45DB /* LinkedMethodsView.swift in Sources */,
+				BED17B8B238A1536921BA167 /* LocalDiagnostics.swift in Sources */,
+				D8FF7C81BDCD6923B75040CE /* LocalDiagnosticsSmoke.swift in Sources */,
 				A718ECBF775DC25127F426AA /* MediaPhotoPicker.swift in Sources */,
 				51EFF7EE83C23DC1FEBA49DE /* MediaPreparationCoordinator.swift in Sources */,
 				7D8C31C53860CFE69A34CB9D /* MediaSourceInspector.swift in Sources */,
@@ -835,7 +855,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -849,7 +869,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.2;
+				MARKETING_VERSION = 0.1.4;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				MUSICMUTE_ACCOUNT_DELETION_URL = "https://api.music-mute.com/delete-account";
@@ -973,7 +993,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -993,7 +1013,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.1.2;
+				MARKETING_VERSION = 0.1.4;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				MUSICMUTE_ACCOUNT_DELETION_URL = "https://api.music-mute.com/delete-account";

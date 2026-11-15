@@ -20,6 +20,9 @@ import { getAccountPolicy, updateAccountPolicy } from "./settings-api";
 
 const toDraft = (value: AccountPolicy): AccountPolicyDraft => ({
   acceptNewJobs: value.acceptNewJobs,
+  linkImportEnabled: value.linkImportEnabled ?? false,
+  linkImportDisabledCountries: value.linkImportDisabledCountries ?? [],
+  linkImportDisabledUserIds: value.linkImportDisabledUserIds ?? [],
   maintenanceMessageEn: value.maintenanceMessageEn,
   maintenanceMessageAr: value.maintenanceMessageAr,
   values: value.values,
@@ -53,6 +56,11 @@ export function ProcessingSettingsPage() {
         throw new Error("Account policy is unavailable.");
       return updateAccountPolicy(client, {
         acceptNewJobs: draft.acceptNewJobs,
+        linkImportEnabled: draft.linkImportEnabled,
+        linkImportDisabledCountries: [
+          ...draft.linkImportDisabledCountries,
+        ].sort(),
+        linkImportDisabledUserIds: [...draft.linkImportDisabledUserIds].sort(),
         maintenanceMessageEn: draft.maintenanceMessageEn,
         maintenanceMessageAr: draft.maintenanceMessageAr,
         ...draft.values,
@@ -66,8 +74,8 @@ export function ProcessingSettingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["account-policy"] });
     },
   });
-  if (policy.isLoading || !draft) return <LoadingState />;
-  if (policy.isError || !policy.data)
+  if (policy.isLoading) return <LoadingState />;
+  if (policy.isError || !policy.data || !draft)
     return (
       <ErrorState error={policy.error} retry={() => void policy.refetch()} />
     );
@@ -105,7 +113,9 @@ export function ProcessingSettingsPage() {
           <AccountPolicyForm
             value={draft}
             onChange={setEditedDraft}
-            disabled={!manage}
+            disabled={!manage || save.isPending}
+            linkImportForcedOff={policy.data.linkImportForcedOff}
+            canReadUsers={can("users.read")}
           />
           {!manage ? (
             <p className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
@@ -123,10 +133,27 @@ export function ProcessingSettingsPage() {
         freshAuth
         onReauthenticate={reauthenticate}
         summary={
-          <div className="grid gap-1 font-mono text-xs">
+          <div className="grid max-h-72 gap-1 overflow-y-auto break-all font-mono text-xs">
             <p>
               Accept jobs: {String(policy.data.acceptNewJobs)} →{" "}
               {String(draft.acceptNewJobs)}
+            </p>
+            <p>
+              Native link import:{" "}
+              {String(policy.data.linkImportEnabled ?? false)} →{" "}
+              {String(draft.linkImportEnabled)}
+            </p>
+            <p>
+              Hidden countries:{" "}
+              {(policy.data.linkImportDisabledCountries ?? []).join(", ") ||
+                "none"}{" "}
+              → {draft.linkImportDisabledCountries.join(", ") || "none"}
+            </p>
+            <p>
+              Hidden users:{" "}
+              {(policy.data.linkImportDisabledUserIds ?? []).join(", ") ||
+                "none"}{" "}
+              → {draft.linkImportDisabledUserIds.join(", ") || "none"}
             </p>
             <p>
               Monthly processing: {policy.data.values.monthlyProcessingSeconds}{" "}

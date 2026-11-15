@@ -141,6 +141,7 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
         val player = controller
         if (player == null) { pendingQueue = queue to startKey; return }
+        markPlaybackStart(startKey)
         player.setMediaItems(queue.map { it.mediaItem(appContext) }, queue.indexOfFirst { it.key == startKey }, 0)
         player.prepare(); player.play()
         mutableState.update { it.copy(failed = false) }
@@ -159,13 +160,17 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         refresh()
     }
     fun togglePlayback() {
+        com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("action.playback_toggle", "action", data = mapOf("trackId" to mutableState.value.trackId, "playing" to mutableState.value.playing, "result" to "requested"))
         controller?.let { player ->
             if (player.playerError != null) {
                 player.prepare()
                 player.play()
             } else if (player.playWhenReady) player.pause() else {
                 if (player.playbackState == Player.STATE_IDLE) player.prepare()
-                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                if (player.playbackState == Player.STATE_ENDED) {
+                    player.currentMediaItem?.queueTrack()?.key?.let(::markPlaybackStart)
+                    player.seekTo(0)
+                }
                 player.play()
             }
         }
@@ -218,11 +223,20 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         controller?.let { player ->
             val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).queueTrack()?.key == key }
                 ?: return@let
+            markPlaybackStart(key)
             player.seekToDefaultPosition(index)
             player.prepare()
             player.play()
         }
         refresh()
+    }
+
+    private fun markPlaybackStart(key: LibraryKey) {
+        val expected = dependencies?.currentPlaybackSession() ?: return
+        if (key.ownerUid != expected.uid) return
+        controller?.sendCustomCommand(SessionCommand(PLAY_START_COMMAND, Bundle.EMPTY), Bundle().apply {
+            putString("owner", expected.uid); putLong("epoch", expected.epoch); putString("job", key.jobId)
+        })
     }
 
     /** Update the existing media items so queue, notification and Player titles agree. */

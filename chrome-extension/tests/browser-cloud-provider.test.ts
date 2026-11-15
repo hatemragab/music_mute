@@ -165,6 +165,7 @@ async function fixture() {
       source_url: "https://www.youtube.com/watch?v=abcdefghijk",
       source_title: null,
       display_name: null,
+      thumbnail_url: null,
       recipe_digest: FULL_TIMELINE_RECIPE_DIGEST,
       local_profile_id: null,
       trim_enabled: false,
@@ -216,6 +217,7 @@ async function fixture() {
     trim_enabled: false,
     job_id: jobId,
     cache_hit: false,
+    thumbnail_url: null,
   };
   const cache = vi
     .spyOn(accountCache, "cacheAccountResult")

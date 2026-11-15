@@ -1,10 +1,13 @@
 import { build } from "esbuild";
-import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { buildSharedExtension } from "./build-extension.mjs";
 const root = resolve(import.meta.dirname, "..");
 const execute = promisify(execFile);
+const localDebug =
+  process.argv.includes("--local-debug") && !process.argv.includes("--release");
 await mkdir(resolve(root, "dist/extension"), { recursive: true });
 await build({
   entryPoints: [
@@ -23,6 +26,7 @@ await build({
   target: "node24",
   format: "esm",
   bundle: true,
+  define: { __MUSICMUTE_LOCAL_DEBUG__: JSON.stringify(localDebug) },
   sourcemap: true,
   absWorkingDir: root,
 });
@@ -53,6 +57,7 @@ if (process.platform === "darwin") {
       "-warnings-as-errors",
       "-O",
       "-parse-as-library",
+      ...(localDebug ? ["-D", "DEBUG"] : []),
       "-D",
       "MUSICMUTE_NATIVE_TESTS",
       "-D",
@@ -63,6 +68,7 @@ if (process.platform === "darwin") {
       "AppKit",
       ...[
         "Models.swift",
+        "LocalUIDebugSession.swift",
         "DesktopWorker.swift",
         "DesktopWorkerView.swift",
         "DesktopCloudHandoff.swift",
@@ -110,27 +116,10 @@ await execute(
     maxBuffer: 1024 * 1024,
   },
 );
-await build({
-  entryPoints: [
-    "src/extension/background.ts",
-    "src/extension/content.ts",
-    "src/extension/offscreen.ts",
-    "src/extension/popup.ts",
-    "src/extension/privacy.ts",
-  ],
-  outdir: "dist/extension",
-  platform: "browser",
-  target: "chrome116",
-  format: "iife",
-  bundle: true,
-  sourcemap: true,
-  absWorkingDir: root,
+await buildSharedExtension({
+  output: resolve(root, "dist/extension"),
+  localDebug,
 });
-await cp(
-  resolve(root, "src/extension/static"),
-  resolve(root, "dist/extension"),
-  { recursive: true },
-);
 if (process.argv.includes("--fixture")) {
   const path = resolve(root, "dist/extension/manifest.json");
   const manifest = JSON.parse(await readFile(path, "utf8"));

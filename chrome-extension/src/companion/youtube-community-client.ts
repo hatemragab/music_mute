@@ -1,3 +1,4 @@
+import { localDiagnostics } from "./local-debug.js";
 import { randomUUID } from "node:crypto";
 import {
   canonicalYouTubeUrl,
@@ -15,7 +16,7 @@ import {
   validGuestCredential,
   type GuestCredential,
   type GuestCredentialStore,
-} from "./guest-credentials.js";
+} from "./guest-credential-model.js";
 
 export const YOUTUBE_COMMUNITY_PROFILE = "kim-vocal-2-full-timeline-v1";
 const ID = /^[a-f0-9]{24}$/;
@@ -202,7 +203,7 @@ export class YouTubeCommunityClient {
     private readonly store: GuestCredentialStore,
     private readonly fetcher: typeof fetch = fetch,
     private readonly socketFactory: (url: string) => CommunitySocket = (url) =>
-      new WebSocket(url),
+      localDiagnostics.observeSocket(new WebSocket(url)),
   ) {
     this.origin = accountApiOrigin(origin);
   }
@@ -324,7 +325,7 @@ export class YouTubeCommunityClient {
   }
   async lookupOriginal(
     view: CommunityContribution,
-    duration: number,
+    duration: number | undefined,
     signal: AbortSignal,
   ): Promise<CommunityArtifact | null> {
     if (
@@ -334,6 +335,13 @@ export class YouTubeCommunityClient {
       !ID.test(view.contribution_id)
     )
       throw new DesktopApiError("COMMUNITY_LEASE_INVALID");
+    if (
+      duration !== undefined &&
+      (!Number.isFinite(duration) ||
+        duration <= 0 ||
+        duration > MVP_MAX_DURATION_SECONDS)
+    )
+      throw new DesktopApiError("TIMELINE_MISMATCH");
     try {
       const value = await this.request(
         `/youtube-contributions/${view.contribution_id}/source-deliveries`,
@@ -348,7 +356,10 @@ export class YouTubeCommunityClient {
       )
         throw new DesktopApiError("COMMUNITY_REPLY_INVALID");
       const original = artifact(value.original);
-      if (Math.abs(original.declaration.duration_seconds - duration) > 2)
+      if (
+        duration !== undefined &&
+        Math.abs(original.declaration.duration_seconds - duration) > 2
+      )
         throw new DesktopApiError("TIMELINE_MISMATCH");
       return original;
     } catch (error) {

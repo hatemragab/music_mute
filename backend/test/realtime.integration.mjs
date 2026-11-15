@@ -11,10 +11,18 @@ import { IsolatedServices, until } from './helpers/isolated-services.mjs';
 import { RealtimeFeedService } from '../dist/realtime/realtime-feed.service.js';
 import { RealtimeSocketService } from '../dist/realtime/realtime-socket.service.js';
 import { RealtimeAuthService } from '../dist/realtime/realtime-auth.service.js';
+import { AccountPolicyService } from '../dist/admin-settings/account-policy.service.js';
+import { AppPolicyService } from '../dist/app-policy/app-policy.service.js';
+import { defaultPolicy } from '../dist/app-policy/access-policy.js';
+import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../dist/admin-settings/account-policy.schema.js';
 import { RealtimeResourcesService } from '../dist/realtime/realtime-resources.service.js';
 import { QueueProjectionService } from '../dist/realtime/queue-projection.service.js';
 import { UsersService } from '../dist/users/users.service.js';
+import { AdminUserDevicesService } from '../dist/admin-users/admin-user-devices.service.js';
+import { DevicesService } from '../dist/devices/devices.service.js';
+import { DeviceInstallationOwnersService } from '../dist/devices/device-installation-owners.service.js';
 import { WebSocket } from 'ws';
+import { forwardFixtureDiagnostics } from './helpers/local-logging-fixture.mjs';
 
 // Owned loopback infrastructure only. Real Mongo transactions/change streams, Redis,
 // tickets, authorization registry and socket transport; Firebase is a local double.
@@ -22,6 +30,7 @@ test(
   'two independent API feeds push committed queue changes and fence access',
   { timeout: 60000 },
   async () => {
+    await forwardFixtureDiagnostics();
     const services = await IsolatedServices.create();
     const close = [];
     try {
@@ -41,7 +50,14 @@ test(
           }),
         );
       const jobs = model('FixtureJob', 'audio_jobs');
+      const appPolicies = model('FixtureAppPolicy', 'app_policies', true);
       const users = model('FixtureUser', 'users');
+      const devices = model('FixtureDevice', 'user_devices');
+      const installationOwners = model(
+        'FixtureDeviceOwner',
+        'device_installation_owners',
+        true,
+      );
       const reservations = model(
         'FixtureReservation',
         'processing_reservations',
@@ -50,6 +66,11 @@ test(
       const slots = model('FixtureSlot', 'worker_slots');
       const fleet = model('FixtureFleet', 'worker_fleet_policies', true);
       const admins = model('FixtureAdmin', 'admin_access');
+      const accountPolicies = model(
+        'FixtureAccountPolicy',
+        'account_policies',
+        true,
+      );
       const owner = new Types.ObjectId(),
         other = new Types.ObjectId();
       await users.collection.insertMany(
@@ -114,6 +135,7 @@ test(
       });
       const config = new ConfigService({
         AUDIO_PROCESSING_ENABLED: true,
+        URL_IMPORT_ENABLED: true,
         CORS_ORIGINS: '',
         TRUST_PROXY: false,
       });
@@ -122,7 +144,14 @@ test(
           uid,
           exp: Math.floor(Date.now() / 1000) + 3600,
         }),
-        getProfile: async (uid) => ({ uid, disabled: false }),
+        getProfile: async (uid) => ({
+          uid,
+          disabled: false,
+          email: 'support@example.test',
+          providerData: [
+            { providerId: 'google.com', email: 'support@example.test' },
+          ],
+        }),
       };
       const auth = new RealtimeAuthService(
         redis,
@@ -130,15 +159,16 @@ test(
         firebase,
         users,
         admins,
+        { observeLocation: async () => {} },
       );
       const identity = {
         uid: String(owner),
         authTimeSec: Math.floor(Date.now() / 1000),
       };
-      const mint = (userId = owner) =>
+      const mint = (userId = owner, country = 'US') =>
         auth.mint(
           {
-            headers: {},
+            headers: { 'cf-ipcountry': country },
             identity: { ...identity, uid: String(userId) },
             bearer: String(userId),
             user: { _id: userId },
@@ -146,6 +176,14 @@ test(
           'owner',
         );
       const clients = [];
+      const policyService = new AccountPolicyService(
+        accountPolicies,
+        model('FixturePolicyOverrides', 'account_policy_overrides'),
+        {},
+        users,
+        {},
+        config,
+      );
       for (let index = 0; index < 2; index++) {
         const feed = new RealtimeFeedService(db);
         feed.onModuleInit();
@@ -184,7 +222,7 @@ test(
           reads,
           {},
           {},
-          {},
+          policyService,
           {},
           {},
           {},
@@ -196,6 +234,16 @@ test(
           {},
           {},
           new UsersService(users, {}),
+          new AppPolicyService(appPolicies),
+          new AdminUserDevicesService(
+            users,
+            devices,
+            new DevicesService(
+              devices,
+              new DeviceInstallationOwnersService(installationOwners),
+              {},
+            ),
+          ),
         );
         const transport = new RealtimeSocketService(
           auth,
@@ -213,7 +261,7 @@ test(
           await transport.onModuleDestroy();
           await new Promise((resolve) => server.close(resolve));
         });
-        const grant = await mint();
+        const grant = await mint(owner, index === 0 ? 'EG' : 'US');
         const url = `ws://127.0.0.1:${server.address().port}/realtime/socket`;
         const socket = new WebSocket(url, [
           grant.protocol,
@@ -239,6 +287,292 @@ test(
         );
         clients.push({ socket, frames, feed, url, grant });
       }
+      // Both independent change feeds observe device metadata and installation
+      // ownership, and both sockets enforce the existing administrator fence.
+      const installationId = '06b6540a-7e55-4cc3-bba5-a54f9311979b';
+      const deviceId = new Types.ObjectId();
+      const authenticatedAtSec = Math.floor(Date.now() / 1000) - 10;
+      const deviceRecord = {
+        _id: deviceId,
+        userId: owner,
+        installationId,
+        platform: 'android',
+        appVersion: '1.0.0',
+        buildNumber: 1,
+        metadataRevision: 1,
+        osVersion: '16',
+        deviceModel: 'Fixture phone',
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+        lastAuthenticatedAtSec: authenticatedAtSec,
+        historyHiddenAt: null,
+        location: {
+          country: 'US',
+          source: 'cloudflare',
+          observedAt: new Date(),
+        },
+        versionHistory: [],
+      };
+      await devices.collection.insertMany([
+        deviceRecord,
+        {
+          ...deviceRecord,
+          _id: new Types.ObjectId(),
+          userId: other,
+          installationId: '1e631f70-bcc9-4b0c-8e08-0319570943ae',
+        },
+      ]);
+      await installationOwners.collection.insertOne({
+        _id: installationId,
+        userId: owner,
+      });
+      await admins.collection.insertOne({
+        uid: 'fixture-support',
+        verifiedEmail: 'support@example.test',
+        role: 'support',
+        revision: 0,
+        active: true,
+      });
+      const adminClients = [];
+      for (const client of clients) {
+        const adminIdentity = {
+          uid: 'fixture-support',
+          authTimeSec: Math.floor(Date.now() / 1000),
+          provider: 'google.com',
+          tokenEmailVerified: true,
+        };
+        const grant = await auth.mint(
+          {
+            headers: {},
+            identity: adminIdentity,
+            bearer: adminIdentity.uid,
+            adminActor: {
+              ...adminIdentity,
+              verifiedEmail: 'support@example.test',
+              role: 'support',
+              permissions: ['users.read'],
+              accessRevision: 0,
+            },
+          },
+          'admin',
+        );
+        const socket = new WebSocket(client.url, [
+          grant.protocol,
+          `ticket.${grant.ticket}`,
+        ]);
+        close.push(async () => socket.terminate());
+        const frames = [];
+        socket.on('message', (data) => frames.push(JSON.parse(String(data))));
+        await until(
+          () => frames.some((f) => f.type === 'ready'),
+          'admin ready',
+        );
+        socket.send(
+          JSON.stringify({
+            type: 'subscribe',
+            subscription_id: 'device-page',
+            resource: 'admin.user_devices',
+            params: { id: owner.toHexString(), limit: '20' },
+          }),
+        );
+        adminClients.push({ socket, frames });
+      }
+      const deviceSnapshot = (client) =>
+        client.frames
+          .filter(
+            (f) => f.type === 'snapshot' && f.subscription_id === 'device-page',
+          )
+          .at(-1)?.data;
+      await until(
+        () => adminClients.every((c) => deviceSnapshot(c)?.items.length === 1),
+        'scoped device pages on both feeds',
+      );
+      for (const client of adminClients) {
+        const item = deviceSnapshot(client).items[0];
+        assert.equal(item.installation_id, installationId);
+        assert.equal(item.session_status, 'unknown');
+        assert.equal(
+          item.last_authenticated_at,
+          new Date(authenticatedAtSec * 1000).toISOString(),
+        );
+      }
+      await devices.collection.updateOne(
+        { _id: deviceId },
+        { $set: { 'location.country': 'EG', 'location.city': 'Cairo' } },
+      );
+      await until(
+        () =>
+          adminClients.every(
+            (c) => deviceSnapshot(c)?.items[0]?.location.country === 'EG',
+          ),
+        'device location changes reach both feeds',
+      );
+      await installationOwners.collection.updateOne(
+        { _id: installationId },
+        { $set: { userId: other } },
+      );
+      await until(
+        () =>
+          adminClients.every(
+            (c) => deviceSnapshot(c)?.items[0]?.session_status === 'signed_out',
+          ),
+        'installation ownership change updates session status',
+      );
+      const adminClosed = adminClients.map((c) => once(c.socket, 'close'));
+      await admins.collection.updateOne(
+        { uid: 'fixture-support' },
+        { $set: { active: false } },
+      );
+      for (const result of await Promise.all(adminClosed))
+        assert.equal(result[0], 4001);
+
+      const policySnapshot = (frames) =>
+        frames
+          .filter(
+            (frame) =>
+              frame.type === 'snapshot' &&
+              frame.subscription_id === 'native-policy',
+          )
+          .at(-1)?.data;
+      for (const c of clients)
+        c.socket.send(
+          JSON.stringify({
+            type: 'subscribe',
+            subscription_id: 'native-policy',
+            resource: 'policy',
+            params: { schema_version: '2' },
+          }),
+        );
+      await until(
+        () =>
+          clients.every(
+            (c) => policySnapshot(c.frames)?.link_import_visible === false,
+          ),
+        'legacy policies hide native link entry',
+      );
+      await accountPolicies.collection.insertOne({
+        _id: 'standard',
+        ...DEFAULT_ACCOUNT_POLICY_VALUES,
+        revision: 1,
+        acceptNewJobs: true,
+        maintenanceMessageEn: '',
+        maintenanceMessageAr: null,
+        updatedBy: 'fixture',
+        updatedAt: new Date(),
+        linkImportEnabled: true,
+        linkImportDisabledCountries: [],
+      });
+      await until(
+        () =>
+          clients.every(
+            (c) =>
+              policySnapshot(c.frames)?.link_import_policy_revision === 1 &&
+              policySnapshot(c.frames)?.link_import_visible === true,
+          ),
+        'committed switch reaches both feeds',
+      );
+      await appPolicies.collection.insertOne({
+        ...defaultPolicy(),
+        revision: 1,
+        platforms: {
+          ...defaultPolicy().platforms,
+          windows: { minimumBuild: 42 },
+        },
+      });
+      await until(
+        () =>
+          clients.every(
+            (c) =>
+              policySnapshot(c.frames)?.app_policy?.revision === 1 &&
+              policySnapshot(c.frames)?.app_policy?.platforms.windows
+                .minimum_build === 42,
+          ),
+        'committed app-policy gate reaches both feeds without processing-policy change',
+      );
+      for (const c of clients) {
+        assert.equal(policySnapshot(c.frames).revision, 1);
+        assert.equal(policySnapshot(c.frames).link_import_visible, true);
+        assert.equal(
+          'release_selection' in
+            policySnapshot(c.frames).app_policy.platforms.android,
+          false,
+        );
+      }
+      await appPolicies.collection.updateOne(
+        { _id: 'global' },
+        {
+          $set: {
+            'platforms.windows.minimumBuild': null,
+            revision: 2,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      await until(
+        () =>
+          clients.every(
+            (c) =>
+              policySnapshot(c.frames)?.app_policy?.revision === 2 &&
+              policySnapshot(c.frames)?.app_policy?.platforms.windows
+                .minimum_build === null,
+          ),
+        'gate clear publishes a fresh full snapshot on both established connections',
+      );
+      await accountPolicies.collection.updateOne(
+        { _id: 'standard' },
+        {
+          $set: {
+            linkImportDisabledCountries: ['EG'],
+            revision: 2,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      await until(
+        () =>
+          clients.every(
+            (c) => policySnapshot(c.frames)?.link_import_policy_revision === 2,
+          ),
+        'country list reaches both feeds',
+      );
+      assert.equal(policySnapshot(clients[0].frames).visitor_country, 'EG');
+      assert.equal(
+        policySnapshot(clients[0].frames).link_import_visible,
+        false,
+      );
+      assert.equal(
+        policySnapshot(clients[0].frames).link_import_reason,
+        'country_hidden',
+      );
+      assert.equal(policySnapshot(clients[1].frames).visitor_country, 'US');
+      assert.equal(policySnapshot(clients[1].frames).link_import_visible, true);
+      await accountPolicies.collection.updateOne(
+        { _id: 'standard' },
+        {
+          $set: {
+            linkImportEnabled: false,
+            revision: 3,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      await until(
+        () =>
+          clients.every(
+            (c) =>
+              policySnapshot(c.frames)?.link_import_policy_revision === 3 &&
+              policySnapshot(c.frames)?.link_import_visible === false,
+          ),
+        'hide propagates without restarting work',
+      );
+      assert.equal(
+        (await jobs.findById(queued[1]._id).lean()).status,
+        'queued',
+      );
+      assert.equal(
+        (await reservations.findById(queued[1]._id).lean()).state,
+        'reserved',
+      );
       // Approval rides the existing owner socket, on both API feed instances.
       // No account ID or secret is carried by this read-only subscription.
       const subscribeRegistration = (socket) =>
@@ -279,6 +613,111 @@ test(
         () => otherFrames.some((f) => f.type === 'ready'),
         'other owner ready',
       );
+      const subscribePolicy = (socket) =>
+        socket.send(
+          JSON.stringify({
+            type: 'subscribe',
+            subscription_id: 'native-policy',
+            resource: 'policy',
+            params: { schema_version: '2' },
+          }),
+        );
+      subscribePolicy(otherSocket);
+      await accountPolicies.collection.updateOne(
+        { _id: 'standard' },
+        {
+          $set: {
+            linkImportEnabled: true,
+            linkImportDisabledUserIds: [String(owner)],
+            revision: 4,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      await until(
+        () =>
+          clients.every(
+            (client) =>
+              policySnapshot(client.frames)?.link_import_policy_revision === 4,
+          ) && policySnapshot(otherFrames)?.link_import_policy_revision === 4,
+        'selected-user visibility reaches both feeds and the other account',
+      );
+      for (const client of clients) {
+        assert.equal(
+          policySnapshot(client.frames).link_import_reason,
+          'user_hidden',
+        );
+        assert.equal(policySnapshot(client.frames).link_import_visible, false);
+        assert.equal(
+          'link_import_disabled_user_ids' in policySnapshot(client.frames),
+          false,
+        );
+      }
+      assert.equal(policySnapshot(clients[1].frames).visitor_country, 'US');
+      assert.equal(policySnapshot(otherFrames).visitor_country, 'US');
+      assert.equal(policySnapshot(otherFrames).link_import_visible, true);
+      assert.equal(
+        JSON.stringify(policySnapshot(otherFrames)).includes(String(owner)),
+        false,
+      );
+      assert.equal(
+        (await jobs.findById(queued[1]._id).lean()).status,
+        'queued',
+      );
+      assert.equal(
+        (await reservations.findById(queued[1]._id).lean()).state,
+        'reserved',
+      );
+
+      const reconnectGrant = await mint(owner, 'US');
+      const reconnectSocket = new WebSocket(clients[1].url, [
+        reconnectGrant.protocol,
+        `ticket.${reconnectGrant.ticket}`,
+      ]);
+      const reconnectFrames = [];
+      reconnectSocket.on('message', (data) =>
+        reconnectFrames.push(JSON.parse(String(data))),
+      );
+      await until(
+        () => reconnectFrames.some((frame) => frame.type === 'ready'),
+        'selected account reconnects',
+      );
+      subscribePolicy(reconnectSocket);
+      await until(
+        () =>
+          policySnapshot(reconnectFrames)?.link_import_reason === 'user_hidden',
+        'reconnect receives current account visibility',
+      );
+      await accountPolicies.collection.updateOne(
+        { _id: 'standard' },
+        {
+          $set: {
+            linkImportDisabledUserIds: [],
+            revision: 5,
+            updatedAt: new Date(),
+          },
+        },
+      );
+      await until(
+        () =>
+          clients.every(
+            (client) =>
+              policySnapshot(client.frames)?.link_import_policy_revision === 5,
+          ) &&
+          policySnapshot(otherFrames)?.link_import_policy_revision === 5 &&
+          policySnapshot(reconnectFrames)?.link_import_policy_revision === 5,
+        'removing the user restores the existing global and country rules',
+      );
+      assert.equal(
+        policySnapshot(clients[0].frames).link_import_reason,
+        'country_hidden',
+      );
+      assert.equal(policySnapshot(clients[1].frames).link_import_visible, true);
+      assert.equal(policySnapshot(otherFrames).link_import_visible, true);
+      assert.equal(policySnapshot(reconnectFrames).link_import_visible, true);
+      const reconnectClosed = once(reconnectSocket, 'close');
+      reconnectSocket.close();
+      await reconnectClosed;
       subscribeRegistration(otherSocket);
       await until(
         () => registration(otherFrames)?.worker_registration_allowed === false,

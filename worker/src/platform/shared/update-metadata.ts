@@ -19,6 +19,7 @@ export interface UpdateArtifact {
 }
 
 export interface UpdateMetadata {
+  installationProfile?: "windows-user";
   schemaVersion: 1;
   sequence: number;
   platform: UpdatePlatform;
@@ -83,6 +84,7 @@ export function verifyUpdateMetadata(
     platform: UpdatePlatform;
     publicKeys: Readonly<Record<string, string>>;
     minimumSequence: number;
+    installationProfile?: "windows-user";
     now?: Date;
   },
 ): UpdateMetadata {
@@ -103,7 +105,11 @@ export function verifyUpdateMetadata(
     !/^[A-Za-z0-9_-]{86}$/u.test(envelope.signature)
   )
     throw new TypeError("Update signature is invalid");
-  const metadata = parseMetadata(envelope.metadata, options.platform);
+  const metadata = parseMetadata(
+    envelope.metadata,
+    options.platform,
+    options.installationProfile,
+  );
   const publicKey = options.publicKeys[envelope.keyId];
   if (publicKey === undefined)
     throw new TypeError("Update signing key is not trusted");
@@ -143,6 +149,7 @@ export function canonicalUpdateMetadata(metadata: UpdateMetadata): string {
 function parseMetadata(
   value: unknown,
   platform: UpdatePlatform,
+  installationProfile?: "windows-user",
 ): UpdateMetadata {
   assertPlatform(platform);
   const record = strictRecord(
@@ -155,6 +162,7 @@ function parseMetadata(
       "publishedAt",
       "expiresAt",
       "release",
+      "installationProfile",
     ]),
     "Update metadata",
   );
@@ -169,6 +177,12 @@ function parseMetadata(
     typeof record.expiresAt !== "string"
   )
     throw new TypeError("Update metadata is invalid");
+  if (
+    record.installationProfile !== installationProfile ||
+    (installationProfile !== undefined &&
+      (installationProfile !== "windows-user" || platform !== "windows-amd64"))
+  )
+    throw new TypeError("Update installation profile does not match");
   const release = strictRecord(
     record.release,
     new Set(["filename", "bytes", "sha256", "contentType"]),
@@ -193,6 +207,7 @@ function parseMetadata(
     schemaVersion: 1,
     sequence: record.sequence as number,
     platform,
+    ...(installationProfile === undefined ? {} : { installationProfile }),
     releaseVersion: record.releaseVersion,
     publishedAt: record.publishedAt,
     expiresAt: record.expiresAt,

@@ -15,6 +15,11 @@ from urllib.parse import unquote, urlsplit
 
 from diagnostics import clean_context, clean_timings, exception_context
 
+# Deployment bundles common modules; local execution reads their single source.
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'router'))
+from acquisition_metadata import clean_thumbnail_url
+
 
 MAX_BYTES = 100_000_000
 MAX_DURATION_SECONDS = 1800
@@ -57,6 +62,9 @@ def clean_metadata(value, secrets=()):
         number = value.get(key)
         if finite(number) and 0 < number <= maximum:
             result[key] = number
+    thumbnail = clean_thumbnail_url(value.get('thumbnail_url'), secrets)
+    if thumbnail:
+        result['thumbnail_url'] = thumbnail
     return result
 
 
@@ -311,6 +319,9 @@ def _metadata(info, fmt, size, secrets):
         metadata[target] = fmt.get(source)
     for source, target in [('title', 'title'), ('channel', 'channel'), ('uploader', 'artist'), ('duration', 'duration_seconds')]:
         metadata[target] = info.get(source)
+    # The pinned extractor's thumbnail comes from original platform metadata;
+    # its thumbnails list also contains speculative URLs. Never guess or probe.
+    metadata['thumbnail_url'] = clean_thumbnail_url(info.get('thumbnail'), secrets, info.get('id'))
     return clean_metadata(metadata, secrets)
 
 

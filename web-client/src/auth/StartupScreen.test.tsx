@@ -7,6 +7,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { StrictMode } from "react";
 import { I18nProvider } from "../i18n";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import { StartupScreen } from "./StartupScreen";
@@ -18,10 +19,12 @@ const authEvents = vi.hoisted(() => ({
         user: { uid: string; getIdToken: () => Promise<string> } | null,
       ) => void),
   unsubscribed: 0,
+  redirect: vi.fn(),
 }));
 vi.mock("firebase/app", () => ({ initializeApp: () => ({}) }));
 vi.mock("firebase/auth", () => ({
   getAuth: () => ({}),
+  getRedirectResult: authEvents.redirect,
   onAuthStateChanged: (
     _auth: unknown,
     callback: typeof authEvents.callback,
@@ -50,10 +53,17 @@ vi.mock("./installation", () => ({
 
 function Phase() {
   const { state } = useAuth();
-  return <span data-testid="phase">{state.phase}</span>;
+  return (
+    <>
+      <span data-testid="phase">{state.phase}</span>
+      {state.phase === "signedOut" && state.message && (
+        <span data-testid="redirect-error">{state.message}</span>
+      )}
+    </>
+  );
 }
-function mount() {
-  return render(
+function mount(strict = false) {
+  const element = (
     <QueryClientProvider client={new QueryClient()}>
       <I18nProvider>
         <AuthProvider>
@@ -61,13 +71,15 @@ function mount() {
           <Phase />
         </AuthProvider>
       </I18nProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  return render(strict ? <StrictMode>{element}</StrictMode> : element);
 }
 beforeEach(() => {
   vi.useFakeTimers();
   authEvents.callback = null;
   authEvents.unsubscribed = 0;
+  authEvents.redirect.mockReset().mockResolvedValue(null);
   localStorage.clear();
 });
 afterEach(() => {
@@ -150,4 +162,154 @@ test("a completed session opens the app before the timeout", async () => {
     await vi.advanceTimersByTimeAsync(15_000);
   });
   expect(screen.getByTestId("phase")).toHaveTextContent("signedIn");
+});
+
+test("signed-out startup waits for redirect completion and preserves its error", async () => {
+  let rejectRedirect: (error: unknown) => void = () => {};
+  authEvents.redirect.mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectRedirect = reject;
+      }),
+  );
+  mount();
+  await act(async () => {
+    authEvents.callback?.(null);
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("restoring");
+  await act(async () => {
+    rejectRedirect({ code: "auth/network-request-failed" });
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedOut");
+  expect(screen.getByTestId("redirect-error")).toHaveTextContent(
+    "auth/network-request-failed",
+  );
+});
+
+test("a pending redirect result keeps the 15-second startup bound", async () => {
+  let finishRedirect: () => void = () => {};
+  authEvents.redirect.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishRedirect = () => resolve(null);
+      }),
+  );
+  mount();
+  await act(async () => {
+    authEvents.callback?.(null);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Sign-in is taking longer than expected",
+  );
+  await act(async () => {
+    finishRedirect();
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("error");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await act(async () => {
+    authEvents.callback?.(null);
+    finishRedirect();
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedOut");
+});
+
+test("a successful redirect connects the session through the auth observer", async () => {
+  const user = { uid: "redirect-user", getIdToken: async () => "token" };
+  authEvents.redirect.mockResolvedValue({ user });
+  const fetchRequest = vi.fn(
+    async () => new Response('{"account_status":"active"}', { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetchRequest);
+  mount();
+  await act(async () => {
+    authEvents.callback?.(user);
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedIn");
+  expect(fetchRequest).toHaveBeenCalledOnce();
+});
+
+test("a late redirect error cannot replace an authenticated session", async () => {
+  let rejectRedirect: (error: unknown) => void = () => {};
+  authEvents.redirect.mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectRedirect = reject;
+      }),
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () => new Response('{"account_status":"active"}', { status: 200 }),
+    ),
+  );
+  mount();
+  await act(async () => {
+    authEvents.callback?.({ uid: "user", getIdToken: async () => "token" });
+  });
+  await act(async () => {
+    rejectRedirect({ code: "auth/network-request-failed" });
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedIn");
+  expect(screen.queryByTestId("redirect-error")).not.toBeInTheDocument();
+  await act(async () => {
+    authEvents.callback?.(null);
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedOut");
+  expect(screen.queryByTestId("redirect-error")).not.toBeInTheDocument();
+});
+
+test("startup retry reuses its pending redirect outcome and ignores the old observer", async () => {
+  let rejectRedirect: (error: unknown) => void = () => {};
+  authEvents.redirect.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectRedirect = reject;
+      }),
+  );
+  mount();
+  const oldObserver = authEvents.callback;
+  await act(async () => {
+    authEvents.callback?.(null);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await act(async () => {
+    oldObserver?.({ uid: "old-user", getIdToken: async () => "old-token" });
+    authEvents.callback?.(null);
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("restoring");
+  expect(authEvents.redirect).toHaveBeenCalledOnce();
+  await act(async () => {
+    rejectRedirect({ code: "auth/network-request-failed" });
+  });
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedOut");
+  expect(screen.getByTestId("redirect-error")).toHaveTextContent(
+    "auth/network-request-failed",
+  );
+});
+
+test("StrictMode preserves a cancelled redirect after the first effect cleans up", async () => {
+  let rejectRedirect: (error: unknown) => void = () => {};
+  authEvents.redirect.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectRedirect = reject;
+      }),
+  );
+  mount(true);
+  expect(authEvents.unsubscribed).toBe(1);
+  await act(async () => {
+    authEvents.callback?.(null);
+    rejectRedirect({ code: "auth/popup-closed-by-user" });
+  });
+  expect(authEvents.redirect).toHaveBeenCalledOnce();
+  expect(screen.getByTestId("phase")).toHaveTextContent("signedOut");
+  expect(screen.getByTestId("redirect-error")).toHaveTextContent(
+    "auth/popup-closed-by-user",
+  );
 });

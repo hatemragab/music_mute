@@ -42,7 +42,8 @@
     "test:packaging": "node --test scripts/*.test.mjs",
     "prepack": "pnpm run build && node scripts/check-package.mjs",
     "test:package": "pnpm run prepack && node scripts/test-package.mjs",
-    "prepublishOnly": "pnpm run verify && pnpm run test:package && pnpm audit --prod"
+    "prepublishOnly": "pnpm run verify && pnpm run test:package && pnpm audit --prod",
+    "build:debug": "node scripts/build.mjs --local-debug"
   },
   "devDependencies": {
     "@sentry/cli": "2.58.6",

@@ -1,10 +1,18 @@
-import { t, createLocalizer, createLanguageSelect, localizePage } from "./i18n";
+import "./local-debug";
+import {
+  t,
+  createLocalizer,
+  createLanguageSelect,
+  localizePage,
+  localizedStage,
+} from "./i18n";
 import type { ExtensionStatus } from "./messages";
 import { installErrorCapture } from "./diagnostics";
 import { failureGuidance } from "./error-guidance";
 import { localErrorReport } from "./local-error-report";
 import { isVideoId } from "../shared/protocol";
 import { cloudHandoffUrl } from "../shared/app-handoff";
+import { localProviderForHello } from "../shared/browser-platform";
 import { configureProductLink } from "../shared/product-links";
 import {
   isInstallationCheck,
@@ -15,8 +23,13 @@ localizePage(document, localizer);
 const companionDownload = document.querySelector<HTMLAnchorElement>(
   "#companion-download",
 );
-if (companionDownload)
-  configureProductLink(companionDownload, "companionRelease");
+const companionDownloadLabel = document.querySelector<HTMLSpanElement>(
+  "#companion-download [data-i18n]",
+);
+// A disconnected or unknown host cannot authorize a Mac artifact recommendation.
+if (companionDownload) configureProductLink(companionDownload, "downloads");
+if (companionDownloadLabel)
+  localizer.text(companionDownloadLabel, () => t("View MusicMute Downloads"));
 let latestState: ExtensionStatus = { hello: null, job: null, diagnostics: [] };
 const cloud = document.querySelector<HTMLButtonElement>("#cloud");
 const copy = document.querySelector<HTMLButtonElement>("#copy-errors");
@@ -124,11 +137,11 @@ function setupHint(code?: string): string {
       "Open the MusicMute app to repair its audio downloader, then check again.",
     );
   if (code?.includes("PLATFORM") || code?.includes("ARCH"))
-    return t("Local processing currently requires an Apple Silicon Mac.");
+    return t("Local processing requires a supported Mac or Windows x64 PC.");
   return code
-    ? failureGuidance(code).message
+    ? failureGuidance(code, undefined, Date.now(), latestState.hello).message
     : t(
-        "Install MusicMute if it is missing, then open it once and use Prepare my Mac. After setup, Chrome starts the helper even when the app window is closed.",
+        "Install MusicMute if it is missing, then open it once and prepare local processing. After setup, Chrome starts the helper even when the app window is closed.",
       );
 }
 async function refresh(): Promise<void> {
@@ -151,9 +164,75 @@ async function refresh(): Promise<void> {
       state.hello?.capabilities?.includes("processing_selection_v1") &&
       state.hello.processing_provider === "ONLINE_MUSICMUTE";
     const provider = document.querySelector<HTMLSelectElement>("#provider");
-    if (provider)
-      provider.value = selectedCloud ? "ONLINE_MUSICMUTE" : "LOCAL_MACOS";
+    const localProvider = localProviderForHello(state.hello);
+    const windows = localProvider === "LOCAL_WINDOWS";
+    const mac = localProvider === "LOCAL_MACOS";
+    if (provider) {
+      const local = document.querySelector<HTMLOptionElement>(
+        '#provider option[value="LOCAL_MACOS"],#provider option[value="LOCAL_WINDOWS"]',
+      );
+      if (local) {
+        local.value = localProviderForHello(state.hello) ?? "LOCAL_MACOS";
+        localizer.text(local, () =>
+          windows
+            ? t("On this PC")
+            : mac
+              ? t("On this Mac")
+              : t("On this computer"),
+        );
+      }
+      provider.value = selectedCloud
+        ? "ONLINE_MUSICMUTE"
+        : (localProviderForHello(state.hello) ?? "LOCAL_MACOS");
+    }
     latestState = state;
+    if (companionDownload)
+      configureProductLink(
+        companionDownload,
+        mac ? "companionRelease" : "downloads",
+      );
+    if (companionDownloadLabel)
+      localizer.text(companionDownloadLabel, () =>
+        mac
+          ? t("Download MusicMute for Mac (development release)")
+          : t("View MusicMute Downloads"),
+      );
+    const eyebrow =
+      document.querySelector<HTMLSpanElement>("#platform-eyebrow");
+    if (eyebrow)
+      localizer.text(eyebrow, () =>
+        windows
+          ? t("On this PC")
+          : mac
+            ? t("On this Mac")
+            : t("On this computer"),
+      );
+    const platformSummary =
+      document.querySelector<HTMLParagraphElement>("#platform-summary");
+    if (platformSummary)
+      localizer.text(platformSummary, () =>
+        mac
+          ? t("MusicMute runs locally on Apple Silicon.")
+          : windows
+            ? t(
+                "MusicMute runs locally on native x64 Windows using a qualified GPU.",
+              )
+            : t(
+                "Local processing uses installed tools and requires a supported GPU.",
+              ),
+      );
+    const openHelp =
+      document.querySelector<HTMLParagraphElement>("#app-open-help");
+    if (openHelp)
+      localizer.text(openHelp, () =>
+        mac
+          ? t(
+              "If the app doesn't open, install the local MusicMute Mac app first, then open it to complete setup. Return here and use Check again.",
+            )
+          : t(
+              "If the app doesn't open, install MusicMute for your supported computer first, then open it to complete setup. Return here and use Check again.",
+            ),
+      );
     document.body.dataset.helperState = ready ? "ready" : "setup";
     localizer.text(helperPill, () =>
       ready ? t("Connected") : t("Setup needed"),
@@ -176,24 +255,45 @@ async function refresh(): Promise<void> {
               ? t(
                   "Preparing vocals with MusicMute cloud. You can cancel from the video controls.",
                 )
-              : t(
-                  "Preparing vocals on this Mac. You can cancel from the video controls.",
-                )
+              : windows
+                ? t(
+                    "Preparing vocals on this PC. You can cancel from the video controls.",
+                  )
+                : mac
+                  ? t(
+                      "Preparing vocals on this Mac. You can cancel from the video controls.",
+                    )
+                  : t(
+                      "Preparing vocals on this computer. You can cancel from the video controls.",
+                    )
           : state.error
-            ? failureGuidance(state.error, state.error_context).message
+            ? failureGuidance(
+                state.error,
+                state.error_context,
+                Date.now(),
+                state.hello,
+              ).message
             : selectedCloud
               ? t(
                   "Ready — starting a video uses MusicMute cloud with your signed-in account and monthly allowance.",
                 )
-              : t(
-                  "Processing stays on this Mac using your installed tools. The app window can be closed.",
-                )
+              : windows
+                ? t(
+                    "Processing stays on this PC using your installed tools. The app window can be closed.",
+                  )
+                : mac
+                  ? t(
+                      "Processing stays on this Mac using your installed tools. The app window can be closed.",
+                    )
+                  : t(
+                      "Processing stays on this computer using your installed tools. The app window can be closed.",
+                    )
         : setupHint(state.hello?.error_code ?? state.error),
     );
     localizer.text(helperMeta, () =>
       state.hello
-        ? `${state.hello.platform === "darwin" ? "macOS" : state.hello.platform} · ${state.hello.arch === "arm64" ? "Apple Silicon" : state.hello.arch} · v${state.hello.version}`
-        : t("Apple Silicon · macOS"),
+        ? `${state.hello.platform === "darwin" ? "macOS" : state.hello.platform} · ${mac ? "Apple Silicon" : state.hello.arch} · v${state.hello.version}`
+        : t("Companion not connected"),
     );
     setup.open = !ready;
     renderCheck(state.installation_check);
@@ -203,14 +303,20 @@ async function refresh(): Promise<void> {
             state.diagnostics.length,
             state.diagnostics.length === 1 ? t("error") : t("errors"),
           ])
-        : t("Private on your Mac"),
+        : windows
+          ? t("Private on your PC")
+          : mac
+            ? t("Private on your Mac")
+            : t("Private on this computer"),
     );
     localizer.text(details, () =>
       [
         state.hello
           ? `${state.hello.platform} ${state.hello.arch} · v${state.hello.version}`
           : t("Companion unavailable"),
-        state.job ? t("Job: {0}", [state.job.stage]) : t("No active job"),
+        state.job
+          ? t("Job: {0}", [localizedStage(state.job.stage)])
+          : t("No active job"),
         state.error ? t("Last error: {0}", [state.error]) : "",
         state.diagnostics.length
           ? t("Saved local errors: {0}\n\n{1}", [
@@ -410,7 +516,12 @@ cloud?.addEventListener("click", () => {
           ? t(
               "Open a standard YouTube watch video in this window, then choose cloud processing again.",
             )
-          : failureGuidance(reply.error ?? "CLOUD_HANDOFF_FAILED").message,
+          : failureGuidance(
+              reply.error ?? "CLOUD_HANDOFF_FAILED",
+              undefined,
+              Date.now(),
+              latestState.hello,
+            ).message,
       );
     })
     .catch(() =>

@@ -200,7 +200,8 @@ enum AppValidation: Error { case invalidMessage, invalidPath }
 
 enum LocalPaths {
   static var support: URL {
-    FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+    if let session = LocalUIDebugSession.current { return session.support }
+    return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
       "Library/Application Support/MusicMuteLocal", isDirectory: true)
   }
   static var logs: URL { support.appendingPathComponent("logs", isDirectory: true) }

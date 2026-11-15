@@ -1,8 +1,18 @@
 import { loadLocalRuntimeStatus } from "../../runtime/local-runtime-status.js";
-import { readOperationalEvents } from "./operational-logs.js";
+import {
+  readOperationalEvents,
+  type OperationalEvent,
+  type OperationalLogFilter,
+} from "./operational-logs.js";
+import type { LocalRuntimeStatus } from "../../runtime/local-runtime-status.js";
 import type { OperatorLayout } from "./operator-layout.js";
 
 const MAX_EVENTS = 10_000;
+/** Consumer adapters supply ACL-validated descriptor reads; omitted preserves operator behavior. */
+export interface InvestigationSource {
+  events(filter: OperationalLogFilter): Promise<OperationalEvent[]>;
+  status(): Promise<LocalRuntimeStatus | null>;
+}
 
 interface HistoryScope {
   scope: "local-worker-history";
@@ -191,15 +201,19 @@ export async function investigateJob(
   layout: Pick<OperatorLayout, "workRoot" | "runtimeStatusPath">,
   jobId: string,
   since?: number,
+  source?: InvestigationSource,
 ): Promise<JobInvestigation> {
   if (!/^[0-9a-f]{24}$/iu.test(jobId))
     throw new TypeError("Job ID must be 24 hex characters");
-  const events = await readOperationalEvents(layout, {
+  const events = await (
+    source?.events ??
+    ((filter: OperationalLogFilter) => readOperationalEvents(layout, filter))
+  )({
     lines: MAX_EVENTS,
     jobId,
     ...(since === undefined ? {} : { since }),
   });
-  const scope = await historyScope(layout, events.length);
+  const scope = await historyScope(layout, events.length, source);
   const attempts = new Map<string, JobAttempt>();
   for (const item of events) {
     const event = item.event;
@@ -298,17 +312,21 @@ export async function investigateErrors(
   since: number,
   limit = 100,
   jobId?: string,
+  source?: InvestigationSource,
 ): Promise<ErrorInvestigation> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
     throw new TypeError("Error group limit must be between 1 and 100");
   if (jobId !== undefined && !/^[0-9a-f]{24}$/iu.test(jobId))
     throw new TypeError("Job ID must be 24 hex characters");
-  const events = await readOperationalEvents(layout, {
+  const events = await (
+    source?.events ??
+    ((filter: OperationalLogFilter) => readOperationalEvents(layout, filter))
+  )({
     lines: MAX_EVENTS,
     since,
     ...(jobId === undefined ? {} : { jobId }),
   });
-  const scope = await historyScope(layout, events.length);
+  const scope = await historyScope(layout, events.length, source);
   const groups = new Map<string, ErrorGroup>();
   for (const item of events) {
     if (item.level !== "error") continue;
@@ -397,10 +415,14 @@ export async function explainError(
   layout: Pick<OperatorLayout, "workRoot" | "runtimeStatusPath">,
   code: string,
   since: number,
+  source?: InvestigationSource,
 ): Promise<object> {
   if (!/^[A-Za-z0-9_-]{1,100}$/u.test(code))
     throw new TypeError("Error code is invalid");
-  const events = await readOperationalEvents(layout, {
+  const events = await (
+    source?.events ??
+    ((filter: OperationalLogFilter) => readOperationalEvents(layout, filter))
+  )({
     lines: MAX_EVENTS,
     code,
     since,
@@ -409,7 +431,7 @@ export async function explainError(
   return {
     schemaVersion: 1,
     code,
-    ...(await historyScope(layout, events.length)),
+    ...(await historyScope(layout, events.length, source)),
     definition: definition?.meaning ?? "No catalogue definition for this code.",
     likelyCauses: definition?.likelyCauses ?? [
       "The local event evidence does not identify a cause.",
@@ -446,10 +468,11 @@ function isWork(value: unknown): value is JobStage["lastWork"] & object {
 async function historyScope(
   layout: Pick<OperatorLayout, "runtimeStatusPath">,
   eventCount: number,
+  source?: InvestigationSource,
 ): Promise<HistoryScope> {
-  const status = await loadLocalRuntimeStatus(layout.runtimeStatusPath).catch(
-    () => null,
-  );
+  const status = source
+    ? await source.status()
+    : await loadLocalRuntimeStatus(layout.runtimeStatusPath).catch(() => null);
   return {
     scope: "local-worker-history",
     earliestAvailableAt: status?.diagnostics?.earliestAvailableAt ?? null,

@@ -2,11 +2,12 @@ import { watch, type FSWatcher, type Stats } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { sanitizeDiagnostic } from "../../agent/child-process.js";
+import { sanitizeDiagnostic } from "../../agent/diagnostic-redaction.js";
 import { WorkerEnrollmentError } from "../../enrollment/enrollment-client.js";
 import { ControlPlaneError } from "../../runtime/control-plane-client.js";
 import { workerVersions } from "../../cli/version.js";
 import { MacCommandBusyError } from "./command-lock.js";
+import { MacLaunchAgentError } from "./launch-agent.js";
 import { createMacUserLayout, type MacUserLayout } from "./user-paths.js";
 import { runMacUserCommand, type MacUserCommandContext } from "./user-cli.js";
 import {
@@ -16,6 +17,7 @@ import {
   hasControlCharacters,
   isRecord,
   parseAppControlRequest,
+  type AppControlEnrollmentErrorPayload,
   type AppControlErrorCode,
   type AppControlRequest,
   type AppControlResponse,
@@ -52,11 +54,17 @@ export async function executeAppControlCommand(
       payload,
     });
   } catch (error) {
+    const errorCode = appControlErrorCode(error, request.command);
+    const payload =
+      errorCode === "ENROLLMENT_FAILED"
+        ? enrollmentErrorPayload(error)
+        : undefined;
     send({
       protocol_version: 1,
       request_id: request.request_id,
       type: "ERROR",
-      error_code: appControlErrorCode(error, request.command),
+      error_code: errorCode,
+      ...(payload === undefined ? {} : { payload }),
     });
   }
 }
@@ -384,13 +392,66 @@ export function safePayload(
   return result;
 }
 
+// Backend errors may contain arbitrary codes. Only these reviewed identifiers
+// and a locally constructed HTTP status fallback may reach the desktop app.
+const ENROLLMENT_ERROR_CODES = new Set([
+  "WORKER_INVALID_REQUEST",
+  "WORKER_UNAUTHENTICATED",
+  "WORKER_MACHINE_DELETED",
+  "WORKER_FORBIDDEN",
+  "WORKER_NOT_FOUND",
+  "WORKER_CONFLICT",
+  "WORKER_EXPIRED",
+  "WORKER_RATE_LIMITED",
+  "WORKER_DEPENDENCY_UNAVAILABLE",
+  "NETWORK_UNAVAILABLE",
+  "RESPONSE_INVALID",
+  "RESPONSE_TOO_LARGE",
+]);
+
+function enrollmentError(error: unknown): WorkerEnrollmentError | undefined {
+  const visited = new Set<Error>();
+  let current = error;
+  for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+    if (current instanceof WorkerEnrollmentError) return current;
+    current = current.cause;
+  }
+  return undefined;
+}
+
+function enrollmentErrorPayload(
+  error: unknown,
+): AppControlEnrollmentErrorPayload | undefined {
+  const failure = enrollmentError(error);
+  if (!failure || typeof failure.retryable !== "boolean") return undefined;
+  const network =
+    failure.code === "NETWORK_UNAVAILABLE" && failure.status === 0;
+  if (
+    !network &&
+    (!Number.isSafeInteger(failure.status) ||
+      failure.status < 400 ||
+      failure.status > 599)
+  )
+    return undefined;
+  return {
+    backend_error_code: ENROLLMENT_ERROR_CODES.has(failure.code)
+      ? failure.code
+      : `HTTP_${failure.status}`,
+    http_status: failure.status,
+    retryable: failure.retryable,
+  };
+}
+
 export function appControlErrorCode(
   error: unknown,
   command?: string,
 ): AppControlErrorCode {
   if (error instanceof AppControlError) return error.errorCode;
   if (error instanceof MacCommandBusyError) return "COMMAND_BUSY";
-  if (error instanceof WorkerEnrollmentError) return "ENROLLMENT_FAILED";
+  if (error instanceof MacLaunchAgentError) return error.code;
+  if (enrollmentError(error)) return "ENROLLMENT_FAILED";
   if (error instanceof ControlPlaneError) return "BACKEND_UNAVAILABLE";
   if (
     error instanceof Error &&

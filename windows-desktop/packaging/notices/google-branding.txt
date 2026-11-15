@@ -1,0 +1,9 @@
+Google brand attribution
+
+The Google name and multicolor Google G are brand features of Google LLC.
+MusicMute displays the G beside Google sign-in and account-link actions.
+Use and appearance are governed by Google's Sign in with Google branding
+guidelines: https://developers.google.com/identity/branding-guidelines
+
+This attribution does not claim ownership of the Google brand, an open-source
+license for the logo, or completed Google OAuth/branding verification.

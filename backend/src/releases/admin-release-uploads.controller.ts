@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
-import type { AuthRequest } from '../auth/auth-request.js';
+import { Controller, Get, Param, Post } from '@nestjs/common';
 import {
   LimitAdmin,
   RequireAdminPermission,
   RequireFreshAdminAuth,
 } from '../admin/admin.decorators.js';
 import { ReleaseUploadService } from './release-upload.service.js';
+import { adminError } from '../admin/admin-errors.js';
 
 @Controller('admin/releases/:id/uploads')
 export class AdminReleaseUploadsController {
@@ -14,24 +14,15 @@ export class AdminReleaseUploadsController {
   @RequireAdminPermission('releases.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
-  reserve(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.uploads.reserve(request.adminActor!, id, body);
+  reserve() {
+    throw adminError('INVALID_REQUEST');
   }
   @Post(':uploadId/completions')
   @RequireAdminPermission('releases.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
-  complete(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Param('uploadId') uploadId: string,
-    @Body() body: Record<string, unknown>,
-  ) {
-    return this.uploads.complete(request.adminActor!, id, uploadId, body);
+  complete() {
+    throw adminError('INVALID_REQUEST');
   }
   @Get(':uploadId')
   @RequireAdminPermission('releases.read')

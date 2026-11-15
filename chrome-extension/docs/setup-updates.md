@@ -1,10 +1,187 @@
 # Setup, acquisition guidance, cloud handoff and updates
 
+## Isolated local DEBUG GUI checks — 2026-10-18
+
+The [private diagnostics instructions](../README.md#private-local-diagnostics)
+include a source-built, uniquely identified actual SwiftUI app with its support
+directory under the repository's private runtime directory. It does not install,
+prepare, register Chrome, enroll a worker or use real account state. It supports
+navigation, preferences and owned synthetic AVPlayer playback, with explicit
+limitations for processing and account operations.
+
+The updater guardian's quiet-period test now uses a separately compiled
+`MUSICMUTE_NATIVE_TESTS` helper and a private activity snapshot to exercise active,
+unknown and quiet process observations deterministically. Shipping helpers retain
+the conservative system process scan; they have no fixture-input branch. This
+resolves the historical test dependency on unrelated Rectangle/Codex Sparkle
+processes without changing production update-lock behavior. The ordinary helper
+still exercises invalid requests, bundle identity, parent lifetime and lease
+safety in the same suite.
+
 Implementation scope requested 2026-10-04: bundle Deno and the approved PO-token
 provider, prepare tools during Mac setup, explain failures safely, preserve
 app-closed extension processing, add explicit account cloud handoff and Sparkle
 updates. Apple account/certificate/notarization work and Chrome Web Store
 packaging/publication/deployment are deferred by the owner.
+
+## Resilient setup recovery — 2026-10-08
+
+Local development build `1791424182` adds bounded recovery to preparation:
+
+- Runtime components retry temporary transport failures and HTTP 408/425/429/5xx
+  up to three attempts, reusing only private strong-ETag-bound partials. Rejected
+  ranges restart cleanly once. A repeated full response replaces earlier bytes;
+  a repeated range cannot duplicate them. Complete verification is unchanged.
+- Model acquisition has three attempts sharing one twenty-minute budget and a
+  thirty-second idle deadline. It honors bounded Retry-After and retries a bad
+  transfer once from clean state. The approved source, exact size and SHA-256
+  remain pinned. Local disk/permission/write failures and known TLS trust failures
+  stay distinct from transport recovery. The parent deadline allows this budget.
+- A safe unchanged owned damaged model is preserved in one reserved quarantine
+  slot only after the replacement fully verifies. Publication/rollback respects
+  competing files and leaves detected replacement backups untouched. Foreign,
+  linked or unsafe entries and occupied quarantine slots require review.
+- Missing critical installed executables produce incomplete setup through cheap
+  status checks and automatically open Prepare. An actual model execution failure
+  permits one verified repair; failure/cancellation cannot loop or claim Ready.
+  No media job is automatically replayed.
+- Setup lock contention waits with capped backoff for at most five minutes;
+  temporary Setup probe failures get three attempts. After download exhaustion,
+  an initially offline network path can resume Setup once on a later connected
+  event. An already connected path keeps the error. Observation ends after five
+  minutes. No recurring HTTP/status polling or multiplied download retry budget
+  is introduced. Cancel and updater reservation fence pending waits/callbacks.
+- Worker setup retries explicit contention with the same private transaction and
+  credential, rechecking identity, Stop, pause, revoke and deletion. Generic
+  enrollment failures retain the HTTP client's existing bounded retries.
+- Interrupted worker installation reuses only independently reverified passing
+  qualification evidence bound to installation/release/model/fixture/report and
+  retained output. Missing output is allowed only after durable report acceptance
+  and safe ancestor/absence checks. Dead qualification processes fail promptly
+  after a fifteen-second startup grace. Reports are checked first, and cleanup
+  still requires positive teardown. Benchmark/update qualification remains fresh.
+
+Source checks passed: companion typecheck/lint/build/format and the full suite
+with 2,228 tests passed and four skipped (`npm test -- --maxWorkers=2`), plus all
+five affected native suites. Worker protocol/lint/format/build passed. Five selected
+worker suites passed 99 tests with one skipped before the final receipt edge fix;
+its full installer suite passed all 37 tests afterward. Selected worker suites used
+one test worker and a twenty-second deadline to avoid this Mac's unrelated
+compiler/Java load. Packaged-worker tests passed 47 with five opt-in cases skipped.
+
+Package and installed checks passed for build ID
+`bf7d0ae5-7a15-4256-a10d-52bc63b5bb07`: all 160 installed leaves match the package
+inventory and strict deep signatures pass. Installed Prepare completed at 100%.
+The GUI opens with Mac ready and concise Worker controls, Advanced collapsed;
+safe controller read-back confirms ready/model-ready/claim-eligible, active backend,
+no blockers and the existing completed backend job. The independent worker kept
+running while the GUI was replaced; no healthy-service upgrade/restart was needed.
+
+The exact package passed all 17 isolated packaged helper/worker checks at
+`output/packaged-tools-proof/ef69616f-cf7b-454c-ab49-4728b2548d65.noindex/result.json`.
+An empty disposable app-data test downloaded all seven R2 components and the
+approved upstream model, verified SHA-256, reached Ready and cleared download
+staging in 149 seconds with no stderr. Its report is
+`output/automatic-setup-proof.noindex/fresh-network-74f31a3c-1270-4ce2-8bb9-d001dcb87101.noindex/result.json`.
+The sandbox excluded real app/worker/browser/Keychain state; this was real download
+proof, not a clean OS user or actual network-toggle test.
+
+The local DMG passed `hdiutil verify`, mounted inventory and strict signature
+checks. It is at
+`output/automatic-setup-proof.noindex/delivery-build-1791424182.noindex/MusicMuteLocal-0.1.1-arm64-development-build-1791424182.dmg`,
+SHA-256 `773eb35a1988f9e8241783a9c2213737f1823d492b6af9ece6268652b0336cbb`.
+`installed-alignment.json`, `delivery-latest.json`, `fresh-network-latest.json`
+and `worker-status-after-update.json` in that proof directory record this build.
+
+Unchanged UpdaterTests remain blocked by Rectangle's Sparkle updater from the
+earlier check. Strict Swift lint still reports five pre-existing snake_case wire
+fields in ProcessBridge; other changed Swift files pass. Clean-OS onboarding,
+actual network toggling and fresh Google enrollment remain separate acceptance
+boundaries. This is an ad hoc signed, unnotarized build with no publication.
+
+## Automatic preparation and recovery — 2026-10-08
+
+The Mac app checks the installed setup when it opens. A supported Mac with missing
+processing tools, model, Chrome helper or app-data extension opens Setup and starts
+**Prepare my Mac** automatically. Preparation uses the sealed runtime downloads
+and approved upstream model, preserving checksum verification, staged activation,
+disk checks and cleanup. Local preparation works while signed out. An ordinary
+ready launch keeps the cheap status path and does not rerun installation audits.
+
+Cancellation or a setup failure leaves a visible retry action; it never starts an
+unbounded retry loop. A later processing failure that identifies missing runtime
+files requests a fresh setup status and returns to Setup. Actual source/network
+failures keep their existing guidance and do not trigger reinstallation.
+
+Approved Google accounts register new Macs automatically after preparation. An
+interrupted installation is recovered through the existing controller and its
+private transaction state. Existing machine credentials, Pause/Drain and the
+app’s deliberate Stop remain authoritative. Account sign-out or removal of registration approval
+never removes an existing machine. The Worker page shows short status and command
+controls; technical status, logs, reports and operator tools are in **Advanced**.
+macOS may still require the user to allow its background item in System Settings.
+
+Validation uses local development build `1791416707`, build ID
+`ab419cd1-cfea-4934-b6e4-9e0d5ac6de71`. The previously published download remains
+build `1791395910`; this correction has not been published.
+
+Executed checks:
+
+- `npm run typecheck`, `npm run lint`, `npm test`, `npm run build` and
+  `npm run format:check` passed: 2,180 tests passed, four skipped.
+- `npm run test:worker-package` passed: 47 passed, five skipped.
+- NativeTests, DesktopTests, WorkerTests, BrowserProcessingBridgeTests and
+  SettingsTests passed through `npm run test:native`. These cover bounded
+  preparation, missing-resource execution recovery, automatic enrollment/recovery,
+  backend start eligibility and preservation of Stop even after a lost reply.
+  Changed Swift files pass strict formatting/lint; English/Arabic localization
+  parses with matching unique keys. Forty offscreen worker UI fixtures rendered.
+- `node scripts/qualify-packaged-tools.mjs` with the exact package and verified
+  model passed all 17 isolated offline checks: packaged setup/status,
+  extension copy, missing-launcher repair, GUI-closed native HELLO and actual
+  packaged worker/controller execution. This fixture used no real account,
+  Keychain, browser profile, backend enrollment or inference.
+- An empty disposable app-data directory downloaded all seven runtime components
+  from the sealed R2 URLs and Kim Vocal 2 from its approved upstream, without
+  preseeded archives or model. Preparation and subsequent status both reached
+  Ready in 178 seconds, the model's exact SHA-256 matched, runtime staging was
+  empty, and the command exited successfully with no stderr. The sandbox denied
+  reads of real app/worker data, Chrome profiles and Keychain.
+- `npm run install:macos -- --applications-dir /Applications` installed the exact
+  package and preserved the previous app. All 160 installed file/symlink leaves
+  match its inventory, and strict deep code-signature verification passes.
+  The installed `MusicMuteLocal --prepare` finished at 100% with setup ready.
+- The new local DMG passed `hdiutil verify`, read-only mounted inventory comparison
+  of all 160 leaves, strict signature verification and Applications-link checking.
+- The installed native UI was opened and inspected: concise command controls are
+  visible and Advanced is collapsed. A backend check through the app confirmed
+  healthy service, ready model and claim eligibility. Separate safe controller
+  read-back confirmed no readiness blockers and a completed real backend job;
+  the independent worker stayed running while the GUI was closed for replacement.
+
+`npm run test:native -- UpdaterTests` still fails its unchanged updater quiet-lock
+assertion on this Mac: Rectangle has an active Sparkle updater, so the install
+helper correctly retains the update lock. Diagnosis preserved the assertion and
+confirmed `quietReleased=false`; neither updater sources nor Rectangle were
+modified. This is an environment-blocked check, not a passing suite.
+
+Local proof reports are under `output/automatic-setup-proof.noindex/`, including
+`installed-alignment.json`, `delivery-latest.json` and
+`worker-status-after-update.json`. The fresh-network report is
+`fresh-network-b4bb4cb6-410a-43c7-8787-d4f73ae99a3c.noindex/result.json`;
+`fresh-network-latest.json` points to it. The packaged-tool report is
+`output/packaged-tools-proof/13b25126-7951-43b7-a2f4-2b5fe2cd1fa8.noindex/result.json`.
+The delivered DMG is
+`delivery-build-1791416707.noindex/MusicMuteLocal-0.1.1-arm64-development-build-1791416707.dmg`
+within that directory, SHA-256
+`04002079558ec9b15fb35489666c4db95ef907bddde89dbfc3728f9758a86f57`.
+
+This remains an ad hoc signed, unnotarized development build. The checks do not
+establish a clean macOS install, reboot/login behavior, or a fresh Google OAuth
+enrollment of an entirely new machine. Chrome's unpacked-extension loading and
+macOS background approval remain user-controlled. A damaged bundled app requires
+reinstallation; a partial runtime whose executables are missing can still require
+the visible Prepare/Retry action. Older checkpoints below retain their dated scope.
 
 ## R2 download migration — 2026-10-07
 
@@ -651,3 +828,24 @@ two idle minutes and retires on cancellation/update identity changes. See
 [processing selection](processing-selection.md) for validation boundaries and diagnostics.
 Local ad-hoc DMGs remain for prepared Macs; a placeholder runtime download URL is
 not a fresh-user distribution or notarization proof.
+
+## Native link-import UI visibility — 2026-10-08
+
+The Mac app checks `/processing-policy?schema_version=2` when opened or activated
+and when the account session changes. Signed-in reads send the account token so
+global, country and selected-user hiding resolve through the same visible boolean.
+Public guest reads work while signed out, including without account configuration.
+Guest and per-owner payloads are cached separately in the installation's app
+preferences. Offline reopen restores only the matching identity's policy;
+a new installation or uncached owner starts with Audio File only. Signed-in policy
+snapshots update the visible Home and Settings source pickers immediately. Old
+payloads without the new visibility field default to hidden. A delayed HTTP reply
+cannot replace a policy snapshot received after that checkout began or a policy
+from a new account session.
+
+When hidden, the source picker resolves to Audio File, and Home omits the
+YouTube segment, URL field, and Paste button. History, processing functions,
+downloads, queued jobs, and retries continue as before. The Chrome extension
+browser UI and its processing bridge do not apply this native visibility setting.
+This changes native UI only; it does not enforce country or user restrictions on API
+imports or on the local downloader. Runtime/model paths survive ordinary updates.

@@ -115,6 +115,7 @@ interface PlaybackDependencies {
     suspend fun resolveOriginalFile(key: LibraryKey): File = throw IOException("Original unavailable")
     suspend fun comparisonJob(key: LibraryKey): com.hatem.musicmute.processing.Job = throw IOException("Comparison unavailable")
     suspend fun reportPlaybackFailure(key: LibraryKey, diagnostic: PlaybackFailureDiagnostic) {}
+    suspend fun recordPlaybackStart(key: LibraryKey, expected: ProcessingSession) {}
 }
 
 /** Fence both sides of a possibly long transfer, including same-user sign-out/sign-in epochs. */

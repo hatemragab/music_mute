@@ -87,6 +87,8 @@ export type AppControlErrorCode =
   | "DRAIN_FAILED"
   | "MAINTENANCE_RECOVERY_REQUIRED"
   | "WORKER_PERSONAL_BUSY"
+  | "WORKER_SERVICE_ENABLE_FAILED"
+  | "WORKER_SERVICE_START_FAILED"
   | "APP_RUNTIME_NOT_PREPARED"
   | "APP_RUNTIME_INCOMPATIBLE"
   | "APP_WORKER_RECOVERY_REQUIRED"
@@ -94,6 +96,12 @@ export type AppControlErrorCode =
   | "OUTPUT_INVALID"
   | "OUTPUT_TOO_LARGE"
   | "SUBSCRIPTION_FAILED";
+
+export interface AppControlEnrollmentErrorPayload {
+  backend_error_code: string;
+  http_status: number;
+  retryable: boolean;
+}
 
 export type AppControlResponse = {
   protocol_version: 1;
@@ -103,7 +111,11 @@ export type AppControlResponse = {
       type: "RESULT" | "PROGRESS" | "SNAPSHOT";
       payload: Record<string, unknown>;
     }
-  | { type: "ERROR"; error_code: AppControlErrorCode }
+  | {
+      type: "ERROR";
+      error_code: AppControlErrorCode;
+      payload?: AppControlEnrollmentErrorPayload;
+    }
 );
 
 export class AppControlError extends Error {

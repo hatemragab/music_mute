@@ -1,3 +1,7 @@
+import {
+  localDiagnostics,
+  withLocalLogContext,
+} from "../observability/local-debug.js";
 import type { ExecutionStageTiming } from "./stage-clock.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -29,7 +33,6 @@ import { fromWireCase, toWireCase } from "./wire-case.js";
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const WORKER_ERROR_CODES = new Set([
   "WORKER_INVALID_REQUEST",
   "WORKER_UNAUTHENTICATED",
@@ -524,6 +527,35 @@ export class WorkerControlPlaneClient {
     body: Record<string, unknown> | null,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    const identities: Record<string, unknown> = {};
+    for (const key of [
+      "sessionId",
+      "workerId",
+      "attemptId",
+      "jobId",
+      "requestId",
+      "claimRequestId",
+    ])
+      if (typeof body?.[key] === "string") identities[key] = body[key];
+    for (const [wire, key] of [
+      ["session_id", "sessionId"],
+      ["incarnation", "incarnation"],
+    ] as const) {
+      const value = new URL(path, this.baseUrl).searchParams.get(wire);
+      if (value && UUID_V4.test(value)) identities[key] = value;
+    }
+    return withLocalLogContext(
+      { operationId: randomUUID(), ...identities },
+      () => this.performRequest(path, method, body, signal),
+    );
+  }
+
+  private async performRequest(
+    path: string,
+    method: "GET" | "POST",
+    body: Record<string, unknown> | null,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const url = new URL(path, this.baseUrl);
     if (url.origin !== this.baseUrl.origin)
       throw new TypeError(
@@ -630,7 +662,13 @@ async function readJson(
     chunks.push(value);
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    localDiagnostics.emit("http.payload", { response: value }, "debug", {
+      requestId: response.headers.get("x-request-id") ?? undefined,
+      status: response.status,
+      phase: "body_consumed",
+    });
+    return value;
   } catch {
     throw new ControlPlaneError("RESPONSE_INVALID", response.status, false);
   }
@@ -657,7 +695,8 @@ async function responseError(response: Response): Promise<ControlPlaneError> {
   return new ControlPlaneError(
     code,
     response.status,
-    RETRYABLE_STATUS.has(response.status),
+    response.status === 429 ||
+      (response.status >= 500 && response.status <= 599),
     response.status === 429
       ? retryAfterMilliseconds(response.headers.get("retry-after"))
       : undefined,

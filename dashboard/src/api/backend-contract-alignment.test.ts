@@ -12,6 +12,7 @@ import { ROLE_DETAILS } from "@/features/administrators/role-permissions";
 import { requestMediaGrant } from "@/features/jobs/jobs-api";
 import {
   getReleaseProposal,
+  getUpdatePolicy,
   previewUpdatePolicy,
   publishRelease,
   updateRelease,
@@ -35,21 +36,66 @@ const policy = {
   revision: 7,
   android: {
     minimumBuild: 10,
-    source: "direct_apk" as const,
-    directReleaseId: "release-android",
-    storeReleaseId: null,
+    source: "google_play" as const,
+    directReleaseId: null,
+    storeReleaseId: "release-android",
   },
   ios: { minimumBuild: 11, storeReleaseId: "release-ios" },
 };
 
 describe("dashboard/backend contract alignment", () => {
+  it.each([null, "release-android"])(
+    "maps a legacy direct selection without changing minimum or store target %s",
+    async (storeReleaseId) => {
+      const api = client();
+      vi.mocked(api.get).mockResolvedValue({
+        ...policy,
+        android: {
+          ...policy.android,
+          source: "direct_apk",
+          directReleaseId: "legacy-release",
+          storeReleaseId,
+        },
+      });
+      const current = await getUpdatePolicy(api);
+      expect(current).toEqual({
+        ...policy,
+        android: { ...policy.android, storeReleaseId },
+      });
+      expect(api.post).not.toHaveBeenCalled();
+      expect(api.patch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("shows only Play examples for Android from a legacy backend preview", async () => {
+    const api = client();
+    const play = {
+      platform: "android",
+      distribution: "play",
+      installedBuild: 9,
+      decision: "required",
+      targetBuild: 20,
+    };
+    const ios = { ...play, platform: "ios", distribution: "app_store" };
+    vi.mocked(api.post).mockResolvedValue({
+      currentRevision: 7,
+      valid: true,
+      errors: [],
+      examples: [{ ...play, distribution: "direct" }, play, ios],
+    });
+    expect((await previewUpdatePolicy(api, policy)).examples).toEqual([
+      play,
+      ios,
+    ]);
+  });
+
   it("requests the release proposal for the selected channel", async () => {
     const api = client();
 
-    await getReleaseProposal(api, "android", "direct_apk");
+    await getReleaseProposal(api, "android", "google_play");
 
     expect(api.get).toHaveBeenCalledWith(
-      "/admin/releases/proposal?platform=android&source=direct_apk",
+      "/admin/releases/proposal?platform=android&source=google_play",
     );
   });
 
@@ -139,7 +185,7 @@ describe("dashboard/backend contract alignment", () => {
 
     await updateRelease(api, "release-1", {
       platform: "android",
-      source: "direct_apk",
+      source: "google_play",
       versionName: "2.0.0",
       buildNumber: 20,
       changelogEn: "Safer processing",

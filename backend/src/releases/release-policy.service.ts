@@ -5,7 +5,11 @@ import type { Model } from 'mongoose';
 import { AppPolicyService } from '../app-policy/app-policy.service.js';
 import { adminError } from '../admin/admin-errors.js';
 import { Release } from './release.schema.js';
-import { decideUpdate, parseDistribution } from './release-policy.js';
+import {
+  decideUpdate,
+  parseDistribution,
+  validateReleaseDraft,
+} from './release-policy.js';
 import type { UpdatePolicySnapshot } from './release.types.js';
 
 @Injectable()
@@ -28,10 +32,7 @@ export class ReleasePolicyService {
     const policy = await this.policies.current();
     const channel = policy.platforms[platform],
       selection = channel.releaseSelection;
-    const id =
-      distribution === 'direct' && selection.source === 'direct_apk'
-        ? selection.directReleaseId
-        : selection.storeReleaseId;
+    const id = selection.storeReleaseId;
     const snapshot: UpdatePolicySnapshot = {
       schemaVersion: 1,
       revision: policy.revision,
@@ -47,13 +48,18 @@ export class ReleasePolicyService {
         !release ||
         release.state !== 'published' ||
         release.platform !== platform ||
-        (distribution === 'direct' && release.source !== selection?.source) ||
         (distribution === 'play' && release.source !== 'google_play') ||
-        (distribution === 'app_store' && release.source !== 'app_store') ||
-        (release.source === 'direct_apk' &&
-          (release.artifactState !== 'verified' || !release.artifact))
+        (distribution === 'app_store' && release.source !== 'app_store')
       )
         throw adminError('DEPENDENCY_UNAVAILABLE');
+      try {
+        validateReleaseDraft(release, {
+          androidPackageId: this.config.get<string>('APK_EXPECTED_PACKAGE_ID'),
+          iosAppStoreId: this.config.get<string>('IOS_APP_STORE_ID'),
+        });
+      } catch {
+        throw adminError('DEPENDENCY_UNAVAILABLE');
+      }
       snapshot.target = {
         id: release._id.toString(),
         versionName: release.versionName,
@@ -61,14 +67,7 @@ export class ReleasePolicyService {
         changelogEn: release.changelogEn,
         source: release.source,
         storeUrl: release.storeUrl,
-        artifact:
-          release.source === 'direct_apk' && release.artifact
-            ? {
-                bytes: release.artifact.bytes,
-                sha256Hex: release.artifact.sha256Hex,
-                signerSha256Hex: release.artifact.signerSha256Hex,
-              }
-            : null,
+        artifact: null,
       };
     }
     try {

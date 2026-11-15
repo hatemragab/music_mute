@@ -73,13 +73,12 @@ use synthetic/mock fixtures. The separate `dashboard/` remains administrator-onl
 ### android/ (JDK 17, SDK 36)
 
 ```sh
-./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
-  :app:lintDirectDebug :app:lintPlayDebug \
-  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
-./gradlew :app:testDirectDebugUnitTest --tests "com.hatem.musicmute.SomeTest"   # single test
+./gradlew :app:assemblePlayDebug :app:lintPlayDebug \
+  :app:testPlayDebugUnitTest
+./gradlew :app:testPlayDebugUnitTest --tests "com.hatem.musicmute.SomeTest"   # single test
 ```
 
-Flavors: `direct` and `play`; plus an `authE2e` variant with a checked-in synthetic Firebase fixture. Local API override: `-PauthApiUrl=http://127.0.0.1:3000` + `adb reverse`.
+The `play` flavor is the only Android distribution; it installs updates through Google Play In-App Updates. The `authE2e` build type uses a checked-in synthetic Firebase fixture. Local API override: `-PauthApiUrl=http://127.0.0.1:3000` + `adb reverse`.
 
 ### ios/ (macOS, Xcode 26+)
 

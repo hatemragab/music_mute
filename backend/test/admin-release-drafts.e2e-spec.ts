@@ -16,7 +16,7 @@ describe('release administration HTTP admission', () => {
       list: vi.fn(async () => ({ items: [], nextCursor: null })),
       proposal: vi.fn(async () => ({
         platform: 'android',
-        source: 'direct_apk',
+        source: 'google_play',
         current: { versionName: '0.1.0', buildNumber: 1 },
         suggested: { versionName: '0.1.1', buildNumber: 2 },
       })),
@@ -33,11 +33,12 @@ describe('release administration HTTP admission', () => {
   }
   const body = {
     platform: 'android',
-    source: 'direct_apk',
+    source: 'google_play',
     versionName: '1',
     buildNumber: 1,
     changelogEn: 'Initial',
-    storeUrl: null,
+    storeUrl:
+      'https://play.google.com/store/apps/details?id=com.example.fixture',
     operationId: '97cb8747-2823-43e0-b333-66ab50ff751b',
     reason: 'Initial release',
   };
@@ -69,6 +70,16 @@ describe('release administration HTTP admission', () => {
       )
       .expect(400);
     expect(drafts.create).not.toHaveBeenCalled();
+    const retired = await harness
+      .request(
+        'post',
+        '/admin/releases',
+        wireJson({ ...body, source: 'direct_apk', storeUrl: null }),
+        token,
+      )
+      .expect(400);
+    expect(retired.body.code).toBe('INVALID_REQUEST');
+    expect(drafts.create).not.toHaveBeenCalled();
     const response = await harness
       .request('post', '/admin/releases', wireJson(body), token)
       .expect(201);
@@ -80,20 +91,20 @@ describe('release administration HTTP admission', () => {
     const response = await harness
       .request(
         'get',
-        '/admin/releases/proposal?platform=android&source=direct_apk',
+        '/admin/releases/proposal?platform=android&source=google_play',
         undefined,
         harness.signInAs('release_manager'),
       )
       .expect(200);
     expect(response.body).toEqual({
       platform: 'android',
-      source: 'direct_apk',
+      source: 'google_play',
       current: { version_name: '0.1.0', build_number: 1 },
       suggested: { version_name: '0.1.1', build_number: 2 },
     });
     expect(drafts.proposal).toHaveBeenCalledWith({
       platform: 'android',
-      source: 'direct_apk',
+      source: 'google_play',
     });
   });
 });

@@ -52,6 +52,37 @@ test(
         service.replace(stored, 1),
         (error) => error.status === 409,
       );
+      const desktop = await service.replace(
+        {
+          ...changed,
+          platforms: {
+            ...changed.platforms,
+            macos: { minimumBuild: 2 },
+            windows: { minimumBuild: 3 },
+          },
+        },
+        2,
+      );
+      assert.equal(desktop.revision, 3);
+      assert.deepEqual((await service.current()).platforms.windows, {
+        minimumBuild: 3,
+      });
+      assert.deepEqual((await service.current()).platforms.macos, {
+        minimumBuild: 2,
+      });
+      const preserved = await service.replace(
+        {
+          ...desktop,
+          requireVerifiedEmail: true,
+          platforms: {
+            android: desktop.platforms.android,
+            ios: desktop.platforms.ios,
+          },
+        },
+        3,
+      );
+      assert.deepEqual(preserved.platforms.windows, { minimumBuild: 3 });
+      assert.deepEqual(preserved.platforms.macos, { minimumBuild: 2 });
       await model.collection.updateOne(
         { _id: 'global' },
         { $set: { unknownRestriction: true } },

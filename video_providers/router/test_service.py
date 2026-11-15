@@ -301,6 +301,7 @@ class RouterHTTPTests(unittest.TestCase):
         encoded = base64.b64encode(json.dumps({
             'schema_version': 1, 'provider': 'jojapi', 'audio_codec': 'opus',
             'title': 'allowed title', 'channel': YOUTUBE_KEY,
+            'thumbnail_url': 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg',
             'artist': 'jk_synthetic_vendor_credential',
             'description': 'https://delivery.example/private', 'raw': 'private',
             'bitrate_kbps': 128, 'file_bytes': 200000000,
@@ -312,7 +313,9 @@ class RouterHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         metadata = json.loads(base64.b64decode(headers['X-Import-Extra-Data-Base64']))
         self.assertEqual(metadata, {'schema_version': 1, 'provider': 'jojapi', 'audio_codec': 'opus',
-                                    'title': 'allowed title', 'bitrate_kbps': 128})
+                                    'title': 'allowed title', 'bitrate_kbps': 128,
+                                    'thumbnail_url': 'https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg'})
+        self.assertEqual(len(self.youtube.calls), 1)
         for header in ('Location', 'X-Signed-URL', 'Set-Cookie'):
             self.assertNotIn(header, headers)
 

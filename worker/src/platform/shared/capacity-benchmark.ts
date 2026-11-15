@@ -17,6 +17,7 @@ export function parseCapacityBenchmarkReport(
     warmupRuns: number;
     measuredRuns: number;
     stored?: boolean;
+    expectedUserSid?: string;
   },
 ) {
   const report = record(value);
@@ -94,13 +95,21 @@ export function parseCapacityBenchmarkReport(
             )
               throw new TypeError("Capacity worker measurement changed");
             const benchmark = options.stored
-              ? parseStoredRepeatedBenchmarkReport(raw)
+              ? parseStoredRepeatedBenchmarkReport(
+                  raw,
+                  options.expectedUserSid === undefined
+                    ? {}
+                    : { expectedUserSid: options.expectedUserSid },
+                )
               : summarizeRepeatedBenchmarkReport(raw, {
                   provider: options.provider,
                   groupSize: Number(record(raw.audioSettings).groupSize),
                   warmupRuns: options.warmupRuns,
                   measuredRuns: options.measuredRuns,
                   processWallSeconds: positive(raw.taskWallSeconds),
+                  ...(options.expectedUserSid === undefined
+                    ? {}
+                    : { expectedUserSid: options.expectedUserSid }),
                 });
             if (
               benchmark.sourceMode !== "installed-engine" ||

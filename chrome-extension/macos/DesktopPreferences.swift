@@ -366,6 +366,9 @@ enum DesktopAppShortcut: String, CaseIterable, Identifiable {
 }
 
 enum DesktopImportSourcePreference: String, CaseIterable, Identifiable {
+  static func resolved(_ raw: String, linkImportVisible: Bool) -> Self {
+    linkImportVisible ? (Self(rawValue: raw) ?? .youtube) : .file
+  }
   case youtube
   case file
 
@@ -491,7 +494,7 @@ enum DesktopLanguagePreference: String, CaseIterable, Identifiable {
 }
 
 enum DesktopSettingsSection: String, CaseIterable, Identifiable {
-  case appearance, general, storage, shortcuts, updates
+  case appearance, general, storage, shortcuts, worker, updates
 
   var id: String { rawValue }
   var title: String {
@@ -500,6 +503,7 @@ enum DesktopSettingsSection: String, CaseIterable, Identifiable {
     case .general: "General"
     case .storage: "Storage"
     case .shortcuts: "Shortcuts"
+    case .worker: "Worker"
     case .updates: "App updates"
     }
   }
@@ -509,6 +513,7 @@ enum DesktopSettingsSection: String, CaseIterable, Identifiable {
     case .general: "gearshape"
     case .storage: "externaldrive"
     case .shortcuts: "keyboard"
+    case .worker: "server.rack"
     case .updates: "arrow.triangle.2.circlepath"
     }
   }
@@ -518,8 +523,11 @@ struct DesktopPreferencesView: View {
   let workspace: DesktopWorkspace
   @ObservedObject var visualPreferences: DesktopVisualPreferences
   @ObservedObject var updater: DesktopUpdater
+  let worker: DesktopWorkerModel
   @ObservedObject private var account: DesktopAccountModel
   let isPreview: Bool
+  let prepare: () -> Void
+  let workerVisibilityChanged: (Bool) -> Void
   let openAccount: () -> Void
   @State private var section: DesktopSettingsSection
   @StateObject private var storageState: DesktopStoragePreferencesState
@@ -535,13 +543,18 @@ struct DesktopPreferencesView: View {
 
   init(
     workspace: DesktopWorkspace, visualPreferences: DesktopVisualPreferences,
-    updater: DesktopUpdater, isPreview: Bool = false,
-    initialSection: DesktopSettingsSection = .appearance, openAccount: @escaping () -> Void = {}
+    updater: DesktopUpdater, worker: DesktopWorkerModel, isPreview: Bool = false,
+    initialSection: DesktopSettingsSection = .appearance, prepare: @escaping () -> Void = {},
+    workerVisibilityChanged: @escaping (Bool) -> Void = { _ in },
+    openAccount: @escaping () -> Void = {}
   ) {
     self.workspace = workspace
     self.visualPreferences = visualPreferences
     self.updater = updater
+    self.worker = worker
     self.isPreview = isPreview
+    self.prepare = prepare
+    self.workerVisibilityChanged = workerVisibilityChanged
     self.openAccount = openAccount
     _account = ObservedObject(wrappedValue: workspace.account)
     _section = State(initialValue: initialSection)
@@ -568,7 +581,8 @@ struct DesktopPreferencesView: View {
   private var importSource: Binding<DesktopImportSourcePreference> {
     Binding(
       get: {
-        DesktopPreferenceNormalizer.normalize(importSourceRaw, fallback: .youtube)
+        DesktopImportSourcePreference.resolved(
+          importSourceRaw, linkImportVisible: account.linkImportVisible)
       },
       set: { importSourceRaw = $0.rawValue })
   }
@@ -596,6 +610,18 @@ struct DesktopPreferencesView: View {
       }
       .task { await storageState.loadIfNeeded() }
       settingsPane(.shortcuts) { shortcutSettings }
+      ScrollView {
+        DesktopWorkerView(worker: worker, prepare: prepare, openAccount: openAccount)
+          .padding(20)
+          .disabled(updater.installationReserved || updater.installationPreparing)
+          .onAppear { workerVisibilityChanged(true) }
+          .onDisappear { workerVisibilityChanged(false) }
+      }
+      .tabItem {
+        Label(LocalizedStringKey(DesktopSettingsSection.worker.title), systemImage: "server.rack")
+      }
+      .tag(DesktopSettingsSection.worker)
+      .accessibilityIdentifier("desktopPreferences.pane.worker")
       settingsPane(.updates) {
         DesktopUpdatesPreferencesSection(updater: updater, isPreview: isPreview)
       }
@@ -705,13 +731,15 @@ struct DesktopPreferencesView: View {
       }
 
       Section("New imports") {
-        Picker("Default source", selection: importSource) {
-          ForEach(DesktopImportSourcePreference.allCases) { option in
-            Text(LocalizedStringKey(option.title)).tag(option)
+        if account.linkImportVisible {
+          Picker("Default source", selection: importSource) {
+            ForEach(DesktopImportSourcePreference.allCases) { option in
+              Text(LocalizedStringKey(option.title)).tag(option)
+            }
           }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("desktopPreferences.importSource")
         }
-        .pickerStyle(.segmented)
-        .accessibilityIdentifier("desktopPreferences.importSource")
 
         Picker("Process with", selection: processingMode) {
           ForEach(DesktopProcessingPreference.allCases) { option in
@@ -1040,12 +1068,17 @@ struct DesktopStorageLimitDraft {
   }
 }
 
-private struct DesktopStoragePreferencesSection: View {
+struct DesktopStoragePreferencesSection: View {
   @ObservedObject var workspace: DesktopWorkspace
   @ObservedObject var state: DesktopStoragePreferencesState
   @State private var confirmClearOfflineVoices = false
   @FocusState private var editingLimit: Bool
   @Environment(\.locale) private var locale
+
+  init(workspace: DesktopWorkspace, state: DesktopStoragePreferencesState) {
+    self.workspace = workspace
+    self.state = state
+  }
 
   private var storageBusy: Bool {
     state.loadingStorage || workspace.storageOperationBusy
@@ -1085,7 +1118,9 @@ private struct DesktopStoragePreferencesSection: View {
             .accessibilityIdentifier("desktopPreferences.retryStorage")
         }
 
-        LabeledContent("Offline voice storage limit") {
+        HStack(spacing: 8) {
+          Text("Offline voice storage limit")
+          Spacer()
           HStack(spacing: 8) {
             TextField("", text: $state.draft.text)
               .textFieldStyle(.roundedBorder)
@@ -1096,9 +1131,10 @@ private struct DesktopStoragePreferencesSection: View {
               .onSubmit { saveLimit() }
               .accessibilityLabel("Offline voice storage limit in GB")
               .accessibilityIdentifier("desktopPreferences.offlineStorageLimit")
-            Text("GB").foregroundStyle(Brand.secondary)
+            Text("GB").foregroundStyle(Brand.secondary).accessibilityHidden(true)
           }
         }
+        .accessibilityElement(children: .contain)
 
         ViewThatFits(in: .horizontal) {
           HStack(spacing: 8) { storageActions }

@@ -17,7 +17,7 @@ const dockerfile = readFileSync(
   'utf8',
 );
 const buildStage = dockerfile.split(
-  'FROM node:24.21.0-bookworm-slim AS apk-verifier',
+  'FROM node:24.21.0-bookworm-slim AS production',
 )[0];
 const buildRun = buildStage.match(/^RUN --mount=.*(?:\n[ \t]+.*)*/m)?.[0];
 
@@ -83,6 +83,13 @@ const buildCommands = [
 ];
 
 describe('backend Dockerfile build', () => {
+  it('does not package retired APK verifier tools', () => {
+    assert.doesNotMatch(
+      dockerfile,
+      /apk-verifier|android-sdk|openjdk|APK_AAPT2_PATH|APK_APKSIGNER_PATH/,
+    );
+  });
+
   it('resolves the optional file secret before one combined install and build', () => {
     assert.ok(buildRun);
     assert.match(buildRun, /^RUN --mount=type=secret,id=sentry_auth_token\s/);

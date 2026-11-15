@@ -162,6 +162,39 @@ async function persistedGrant(config: LocalConfig, owner = "owner-a") {
 }
 
 describe("account original playback cache", () => {
+  it.each([["sha256"], ["content_type"], ["sha256", "content_type"]])(
+    "rejects missing original metadata %j before grants, cache journals or transfers",
+    async (...missing) => {
+      const env = await fixture();
+      const incomplete: Record<string, unknown> = { ...env.job.input };
+      for (const field of missing) delete incomplete[field];
+      env.api.request.mockResolvedValueOnce({
+        ...env.job,
+        input: incomplete,
+      } as typeof env.job);
+      await expect(
+        prepareOriginalPlayback(
+          env.config,
+          env.api,
+          accountScope(),
+          env.id,
+          new AbortController().signal,
+          playbackDependencies(env),
+        ),
+      ).rejects.toMatchObject({ code: "CLOUD_REPLY_INVALID" });
+      expect(env.api.request).toHaveBeenCalledOnce();
+      expect(env.api.request.mock.calls[0]?.slice(1, 3)).toEqual([
+        `/jobs/${env.id}`,
+        "GET",
+      ]);
+      expect(await readdir(env.config.cache_root)).toEqual([]);
+      expect(env.grantBodies).toEqual([]);
+      expect(env.fetcher).not.toHaveBeenCalled();
+      expect(env.transcode).not.toHaveBeenCalled();
+      expect(env.probe).not.toHaveBeenCalled();
+    },
+  );
+
   it("downloads and prepares WebM once, then returns isolated compatible playback leases", async () => {
     const env = await fixture();
     const scope = {

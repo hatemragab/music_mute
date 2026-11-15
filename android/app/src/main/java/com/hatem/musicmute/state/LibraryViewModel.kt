@@ -28,17 +28,19 @@ data class LibraryUiState(
     val sort: LibrarySort = LibrarySort.NEWEST,
     val loadFailed: Boolean = false,
     val problem: LibraryProblem? = null,
+    val starredOnly: Boolean = false,
 )
 
 class LibraryViewModel(private val repository: DefaultLibraryRepository) : ViewModel() {
     private val selection = MutableStateFlow(LibraryUiState())
     val state = combine(repository.entries, repository.loadFailed, selection) { entries, failed, selected ->
-        selected.copy(entries = queryLibrary(entries, selected.query, selected.filter, selected.sort), loadFailed = failed)
+        selected.copy(entries = queryLibrary(entries, selected.query, selected.filter, selected.sort, selected.starredOnly), loadFailed = failed)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
     fun setQuery(value: String) { selection.update { it.copy(query = value) } }
     fun setFilter(value: LibraryFilter) { selection.update { it.copy(filter = value) } }
     fun setSort(value: LibrarySort) { selection.update { it.copy(sort = value) } }
+    fun setStarredOnly(value: Boolean) { selection.update { it.copy(starredOnly = value) } }
     fun clearProblem() { selection.update { it.copy(problem = null) } }
     fun refreshLocal() = repository.refreshLocal()
 

@@ -18,7 +18,13 @@ import {
   type ProcessingProvider,
   type StartPayload,
 } from "../shared/protocol.js";
-import { AccountApiClient, DesktopApiError } from "./account-api.js";
+import {
+  AccountApiClient,
+  DesktopApiError,
+  CloudReplyValidationError,
+  isCloudReplyValidationReason,
+  type CloudReplyValidationReason,
+} from "./account-api.js";
 import type { AccountTransport } from "./account-realtime.js";
 import {
   ACCOUNT_RESTORE_DEADLINE_MS,
@@ -42,7 +48,8 @@ import {
 import { CloudProcessingProvider, type CloudResult } from "./cloud-provider.js";
 import type { LocalConfig } from "./config.js";
 import { DesktopCatalog } from "./desktop-catalog.js";
-import { Diagnostics } from "./diagnostics.js";
+import { Diagnostics, type DesktopWarningStage } from "./diagnostics.js";
+import { isKnownDiagnosticCode } from "../shared/diagnostic-codes.js";
 import { resolveDiagnosticIdentity } from "./diagnostic-identity.js";
 import {
   FileLocalProvider,
@@ -345,6 +352,48 @@ export async function executeDesktopRequest(
     event: "companion_started",
     request_id: request.request_id,
   });
+  const warning = (error: unknown, stage: DesktopWarningStage): void => {
+    let code = "DESKTOP_OPERATION_FAILED";
+    let status = 0;
+    let validationReason: CloudReplyValidationReason | undefined;
+    try {
+      const candidate = safeDesktopCode(error);
+      if (isKnownDiagnosticCode(candidate)) code = candidate;
+      if (error instanceof DesktopApiError) {
+        const value: unknown = Object.getOwnPropertyDescriptor(
+          error,
+          "status",
+        )?.value;
+        if (typeof value === "number") status = value;
+      }
+      if (
+        error instanceof CloudReplyValidationError &&
+        code === "CLOUD_REPLY_INVALID"
+      ) {
+        const value: unknown = Object.getOwnPropertyDescriptor(
+          error,
+          "validationReason",
+        )?.value;
+        if (isCloudReplyValidationReason(value)) validationReason = value;
+      }
+    } catch {
+      // Untrusted error accessors must not turn diagnostics into a business failure.
+    }
+    diagnostics.record({
+      component: "companion",
+      severity: "warning",
+      event: "diagnostic_error",
+      request_id: request.request_id,
+      code,
+      metrics: {
+        stage,
+        ...(validationReason ? { validation_reason: validationReason } : {}),
+        ...(Number.isInteger(status) && status >= 400 && status <= 599
+          ? { http_status: status }
+          : {}),
+      },
+    });
+  };
   const progress = (stage: string, completed?: number, total?: number) => {
     assertCurrent();
     diagnostics.record({
@@ -542,12 +591,7 @@ export async function executeDesktopRequest(
           await communityOutbox
             .finishOwnerLink(owner!, link, false)
             .catch(() => {});
-          diagnostics.record({
-            component: "companion",
-            severity: "warning",
-            event: "diagnostic_error",
-            code: safeDesktopCode(error),
-          });
+          warning(error, "account_owner_link");
         }
       }
       const restore = await restores.claimOne(owner!);
@@ -646,19 +690,9 @@ export async function executeDesktopRequest(
             await restores.complete(restore, { state: "deferred" });
           } catch (completionError) {
             if (safeDesktopCode(completionError) !== "CANCELLED")
-              diagnostics.record({
-                component: "companion",
-                severity: "warning",
-                event: "diagnostic_error",
-                code: safeDesktopCode(completionError),
-              });
+              warning(completionError, "account_cache_restore_complete");
           }
-          diagnostics.record({
-            component: "companion",
-            severity: "warning",
-            event: "diagnostic_error",
-            code: safeDesktopCode(error),
-          });
+          warning(error, "account_cache_restore");
         } finally {
           remote.close();
         }
@@ -935,12 +969,7 @@ export async function executeDesktopRequest(
           } catch (error) {
             // A failed account lookup never changes local processing or consumes compute quota.
             assertCurrent();
-            diagnostics.record({
-              component: "companion",
-              severity: "warning",
-              event: "diagnostic_error",
-              code: safeDesktopCode(error),
-            });
+            warning(error, "account_youtube_reuse");
           }
         }
         if (!duration && provider instanceof SharedYouTubeProvider) {
@@ -1123,12 +1152,7 @@ export async function executeDesktopRequest(
               );
           } catch (error) {
             assertCurrent();
-            diagnostics.record({
-              component: "companion",
-              severity: "warning",
-              event: "diagnostic_error",
-              code: safeDesktopCode(error),
-            });
+            warning(error, "account_file_reuse");
           }
         }
       }
@@ -1162,12 +1186,7 @@ export async function executeDesktopRequest(
             knownJobId = shared.id;
         } catch (error) {
           assertCurrent();
-          diagnostics.record({
-            component: "companion",
-            severity: "warning",
-            event: "diagnostic_error",
-            code: safeDesktopCode(error),
-          });
+          warning(error, "account_shared_lookup");
         }
       }
       let pending:
@@ -1254,20 +1273,13 @@ export async function executeDesktopRequest(
                 try {
                   await retainLocalPairRecoverySource(config.cache_root, pair);
                 } catch {
-                  diagnostics.record({
-                    component: "companion",
-                    severity: "warning",
-                    event: "diagnostic_error",
-                    code: "LOCAL_SYNC_RECOVERY_FAILED",
-                  });
+                  warning(
+                    new DesktopApiError("LOCAL_SYNC_RECOVERY_FAILED"),
+                    "local_file_pair_recovery",
+                  );
                 }
               }
-              diagnostics.record({
-                component: "companion",
-                severity: "warning",
-                event: "diagnostic_error",
-                code: safeDesktopCode(error),
-              });
+              warning(error, "local_file_pair_staging");
             }
           } else if (
             result.cache_hit &&
@@ -1294,12 +1306,7 @@ export async function executeDesktopRequest(
                 ).state;
               } catch (error) {
                 stagingFailed = true;
-                diagnostics.record({
-                  component: "companion",
-                  severity: "warning",
-                  event: "diagnostic_error",
-                  code: safeDesktopCode(error),
-                });
+                warning(error, "local_url_capture_staging");
               }
             } else captureState = "rejected";
           }

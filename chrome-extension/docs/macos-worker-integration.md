@@ -1,5 +1,208 @@
 # macOS worker application integration
 
+## Expired registration recovery — 2026-10-16
+
+The local controller preserves `ENROLLMENT_FAILED` and may include an error
+`payload` containing only `backend_error_code`, `http_status` and `retryable`.
+Codes use a reviewed allowlist or a locally generated `HTTP_<status>` fallback;
+raw backend messages, URLs, stack traces and credentials are excluded. Existing
+version-1 clients already accept the `payload` envelope key and can ignore these
+details. The native Advanced view shows the safe backend code and status.
+
+An expired one-use invitation remains distinct from an expired exchanged
+installation. A preserved installation resumes with its own credential after
+the invitation expires. **Retry registration** is offered only for a controller-
+validated pre-exchange transaction, or for `WORKER_EXPIRED`/410 with a locally
+verified transaction that never reached report acceptance or activation.
+
+For a progressed transaction, `install --new-code` independently confirms
+expiration with the original installation credential. It requires no accepted
+report revision, machine identity, finalization, installed configuration or
+credential, or loaded service. It rechecks private transaction identity and
+service state before atomically moving the transaction to a private
+`state/transactions/expired-install-<UUID>` archive. Unknown or unsafe state,
+changed files, other backend failures and uncertain activation preserve the
+original transaction. Runtime, model, qualification evidence and credentials
+are retained; a fresh registration runs qualification again.
+
+The native view rechecks the local replacement hint before requesting another
+one-use credential. An old controller without that hint keeps the replacement
+action unavailable. This is a source/controller change; rebuilding an app and
+checking a running worker are separate from publishing an installer.
+
+The underlying report rejection was independently reproduced after a fresh
+session: qualification, result upload and confirmation succeeded, then report
+submission returned `400 WORKER_INVALID_REQUEST`. Backend DTO transformation
+created an own `installationProfile: undefined` property for macOS. Report
+normalization passed that value to strict canonical digest serialization, which
+rejects undefined values before reading the installation. Backend normalization
+now omits an absent optional profile while preserving a supplied Windows profile.
+The regression uses actual DTO transformation/validation and verifies identical
+plain/transformed report replay plus profile-sensitive conflict detection.
+
+Source validation passed 1,465 worker tests (21 skipped), 2,341 companion tests
+(four skipped), 47 packaged-worker tests (five opt-in skips), native WorkerTests
+and SettingsTests, and the relevant type, lint, format and build checks. These
+source/fixture checks do not establish a backend rollout or installed-app update.
+Backend validation passed 1,723 unit tests and 233 E2E tests. The first broad E2E
+run had one `/auth/sessions` test return 404 instead of 400; its isolated 11-test
+suite and the complete 233-test rerun passed unchanged. That intermittent result
+was not reproduced, and no unrelated authentication code was changed.
+
+The current official [Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-10-16. Compatibility (106/108), exclusion of stack traces (177)
+and sensitive event data (200) shaped the controller extension. HTTP route and
+OpenAPI registration rules do not apply to the private process envelope; the
+backend report wire schema remains unchanged.
+
+### Authorized deployment and recovery proof
+
+With explicit owner approval, a four-file overlay extended active API image
+`img-captain-api:137` and replaced only the compiled `normalizeReport` function.
+The build required an exact match of the previous function and verified the
+patched module SHA-256 against the locally tested build:
+`c7a92e006ce98ba65c97c0f90d794a60978082dbb9e678c6278e1954dba9798e`.
+CapRover activated `img-captain-api:138`, with one instance, completed build and
+an unchanged configuration fingerprint. Live `/health/live` and `/health/ready`
+returned 200 after the rolling replacement; unauthenticated realtime ticket
+creation at `/realtime-tickets` retained its 401 boundary.
+
+The already qualified registration resumed through the rebuilt source controller
+with the installed app's preparation context. Report submission and activation
+both returned 201, and local finalization loaded the per-user service. Checked
+status confirmed active lifecycle, running service, ready model, local readiness,
+backend claim eligibility and no blockers. The worker then accepted and completed
+one existing backend job and returned to Ready with no last failed job. The
+installed native UI showed **Running**, **Model ready Yes** and zero active jobs
+after its backend check cleared the old registration error.
+
+Runtime/model bytes and the existing app bundle were reused. The expired
+transaction and retired registration remain privately archived. That recovery
+preceded the separately requested app update below.
+
+### Local DMG and installed update — 2026-10-17
+
+With explicit approval for an unsigned DMG and locally ad hoc-signed app, version
+`0.1.3`, build `1792186033` (build ID
+`31eb5f7b-246d-4296-af9b-6f0306fa5032`) was built from a fixed source snapshot and
+installed at `/Applications/MusicMute Local.app`. The snapshot includes the
+controller error details, expired-registration recovery and native retry UI.
+All 821 snapshot source hashes stayed unchanged through packaging. The seven
+sealed public runtime ZIPs matched their pinned sizes and SHA-256 hashes; runtime
+import also verified the complete 18,031-entry inventory and native signatures.
+
+The exact app passed all 17 disposable packaged-tools checks. `hdiutil verify`,
+mounted-DMG inventory comparison, installed inventory comparison (160 leaves)
+and strict deep app signature verification passed. Installed `--prepare` completed
+successfully. The existing worker process stayed running; worker configuration,
+credential, registration, lifecycle, LaunchAgent, runtime selection, model and
+public app configuration remained byte-for-byte unchanged. Installed controller
+readback returned Ready, model/local readiness, active backend, claims allowed
+and no blockers. The updated native UI showed **Worker Ready**, **Phase Ready**,
+**Model ready Yes** and **Backend eligibility Yes** after its explicit check.
+
+The 15,483,227-byte local artifact is
+`output/macos-dmg/MusicMuteLocal-0.1.3-arm64-development-build-1792186033.dmg`,
+SHA-256 `eb33e87d1d508a388b7780fbb8100595f92aafb2edc31668960396311de9e2d4`.
+Build, qualification, mounted/installed inventory and preservation records are in
+`output/worker-recovery-20261017.noindex/`. The previous app is preserved by the
+installer. This is a local compatible update, unnotarized and unpublished;
+fresh-OS onboarding and Gatekeeper acceptance were not tested.
+
+## Reinstall after a disabled LaunchAgent — 2026-10-09
+
+Deleting the app, worker data and LaunchAgent plist does not clear launchd's
+persistent disabled override. On this Mac, `com.musicmute.worker` remained
+disabled in the current user's domain after removal. Fresh preparation verified
+the runtime, model and installation artifacts, but qualification could not load
+its LaunchAgent: `launchctl bootstrap` failed with exit 5. Installation therefore
+remained interrupted, with no service or runtime status. The controller previously
+reduced that system error to `OPERATION_FAILED`.
+
+Every intentional service bootstrap now enables only
+`gui/<uid>/com.musicmute.worker` before registering the plist. Failed enablement
+prevents bootstrap. Existing app/installer lifecycle guards still decide when
+startup is allowed, including deliberate Stop, Pause, Drain and removal. This
+does not change other services or replace machine credentials. macOS background
+approval remains controlled by the operating system.
+
+The local protocol retains its version-1 envelope and adds safe
+`WORKER_SERVICE_ENABLE_FAILED` / `WORKER_SERVICE_START_FAILED` error codes. The
+native app accepts these codes and displays localized background-settings/retry
+guidance. Raw launchctl output and exception causes never enter the IPC reply.
+
+The official [Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/)
+were read on 2026-10-09 for this additive IPC change: rules 106/108 (compatibility
+and tolerant clients), 177 (no stack traces) and 200 (private event data). REST
+URLs, HTTP status codes and OpenAPI endpoint registration do not apply to this
+private process transport.
+
+Validation for local development build `1791497904`:
+
+- Worker tests: 791 passed, 21 skipped; typecheck, lint and build passed. Focused
+  LaunchAgent tests cover the retained disabled flag, exact user/label targeting,
+  startup ordering and safe failures. Existing installer/lifecycle regressions pass.
+- Companion `npm run verify`: 2,252 passed, four skipped; typecheck, lint, build
+  and formatting passed. `npm run test:worker-package`: 47 passed, five skipped.
+  Native WorkerTests, strict Swift formatting and both localization parsers passed.
+- Disposable packaged qualification passed all 17 checks, including actual
+  packaged setup/status and worker controller execution. It uses offline fixtures
+  and does not establish real launchd or enrollment behavior.
+- Separately, this Mac's existing installation transaction completed with the fixed
+  controller: actual MPS qualification and backend activation succeeded. The
+  service's authoritative status reached healthy, running, model ready, local ready
+  and claim eligible with no blockers. Runtime/model bytes were reused.
+- The corrected app was installed to `/Applications/MusicMute Local.app`; all 160
+  installed inventory leaves match the package, and deep strict signature checks
+  pass. Its automatic Prepare completed; the native Worker UI shows **Running**
+  with Pause/Stop and collapsed Advanced, without the interrupted-setup error.
+- The replacement DMG passed `hdiutil verify`, read-only mounted 160-leaf inventory
+  comparison, deep strict signature and Applications-link checks. It is
+  `output/worker-reinstall-proof.noindex/delivery-build-1791497904.noindex/`
+  `MusicMuteLocal-0.1.2-arm64-worker-reinstall-fix-build-1791497904.dmg`,
+  15,395,443 bytes, SHA-256
+  `1b1e9d62a5facb938ad7b30796e205a4688704e8840fd425f5a80ba469fa4a09`.
+
+Private local proof records are under `output/worker-reinstall-proof.noindex/`;
+the package qualification is
+`output/packaged-tools-proof/a69940f7-c73e-4c37-aa70-6c85e6fe9e0d.noindex/result.json`.
+Older DMGs retain their old controller. This corrected DMG has not been published
+and remains ad hoc signed, unnotarized and updater-unconfigured. Reboot/login and
+a clean OS user were not tested. Existing runtime/model, browser and account state
+were preserved during this repair; no additional full data reset was performed.
+
+## Interrupted setup recovery — 2026-10-08
+
+Setup retries explicit contention within three attempts and rechecks machine,
+operator and backend fences before replay. Uncertain controller completion is
+reconciled against the original private transaction; a lost reply never issues a
+replacement credential. Generic enrollment errors retain the existing HTTP
+client's bounded retry policy.
+
+Interrupted installs can reuse exact privately retained passing qualification
+evidence. Reuse freshly verifies installation/release/model/fixture/report/output
+identities and obtains GPU handover before startup. A durably accepted report may
+outlive cleaned scratch, but dangling output links or unsafe ancestors cannot
+masquerade as cleanup. Benchmarks and updates still qualify afresh. A dead
+qualification LaunchAgent stops waiting after its startup grace; a complete report
+is checked first and cleanup stays fenced by positive teardown.
+
+## Automatic setup and compact controls — 2026-10-08
+
+The app prepares missing local tools and the model automatically, then reconciles
+approved-account registration independently of the visible page. Safe interrupted
+installation/activation recovery belongs to the existing worker controller. A
+failed attempt keeps a retry action rather than repeatedly issuing credentials or
+commands. Deliberate stop/pause/drain/removal and existing machine identity remain
+authoritative. The default Worker view contains concise status and controls;
+operator diagnostics and detailed reports are available under Advanced.
+
+The app records Stop before invoking its controller, so a lost reply or app crash
+cannot undo that choice at the next launch. Successful explicit Start, Resume or
+Restart clears the app’s stop fence. The standalone CLI still has its existing
+Stop semantics; it does not write the app’s preference. Pause/Drain remains the
+shared durable lifecycle choice.
+
 Initial integration branch: `hatem/macos-worker-app`, based on remote `main`
 `bf8eddba12199f0fe8a4c37c3c1575d899936e0b`. Work is local until separately
 authorized installation/publication. Existing app accounts, Chrome profiles,

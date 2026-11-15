@@ -10,9 +10,10 @@ class UpdateGateTest {
         val states = listOf(
             UpdateInstallState.Idle,
             UpdateInstallState.Downloading(50),
-            UpdateInstallState.Verifying,
-            UpdateInstallState.PermissionNeeded,
-            UpdateInstallState.AwaitingInstaller,
+            UpdateInstallState.CheckingPlay,
+            UpdateInstallState.PlayFlow,
+            UpdateInstallState.Downloaded,
+            UpdateInstallState.Installing,
             UpdateInstallState.StoreOpened,
             UpdateInstallState.Failed(UpdateProblem.INSTALL_CANCELLED),
         )
@@ -53,6 +54,15 @@ class UpdateGateTest {
         assertFalse(prompt.blocksContent)
         assertTrue(prompt.allowLater)
         assertTrue(prompt.dismissible)
+    }
+
+    @Test
+    fun deferredFlexibleDownloadAndRestartStayVisibleWithoutBlockingContent() {
+        for (install in listOf(UpdateInstallState.Downloading(50), UpdateInstallState.Downloaded)) {
+            val prompt = updatePromptPresentation(UpdateUiState(restoring = false), install)
+            assertTrue(prompt.visible)
+            assertFalse(prompt.blocksContent)
+        }
     }
 
     @Test

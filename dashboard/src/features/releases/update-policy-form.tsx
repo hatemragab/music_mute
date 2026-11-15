@@ -1,14 +1,6 @@
 import type { UpdatePolicy } from "@/api/contracts";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
 const nullableInteger = (value: string) =>
   value === "" ? null : Number(value);
 
@@ -29,6 +21,7 @@ export function UpdatePolicyForm({
           <Label htmlFor="android-minimum">Minimum supported build</Label>
           <Input
             id="android-minimum"
+            aria-describedby="android-minimum-help"
             type="number"
             min="1"
             value={value.android.minimumBuild ?? ""}
@@ -37,50 +30,21 @@ export function UpdatePolicyForm({
                 ...value,
                 android: {
                   ...value.android,
+                  source: "google_play",
+                  directReleaseId: null,
                   minimumBuild: nullableInteger(event.target.value),
                 },
               })
             }
           />
-        </div>
-        <div className="space-y-2">
-          <Label>Distribution source</Label>
-          <Select
-            value={value.android.source}
-            onValueChange={(source) =>
-              onChange({
-                ...value,
-                android: {
-                  ...value.android,
-                  source: source as UpdatePolicy["android"]["source"],
-                },
-              })
-            }
+          <p
+            id="android-minimum-help"
+            className="text-sm text-muted-foreground"
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="direct_apk">Direct APK</SelectItem>
-              <SelectItem value="google_play">Google Play</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="android-direct">Direct release ID</Label>
-          <Input
-            id="android-direct"
-            value={value.android.directReleaseId ?? ""}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                android: {
-                  ...value.android,
-                  directReleaseId: event.target.value || null,
-                },
-              })
-            }
-          />
+            Builds below this version code must update from Google Play before
+            they can continue. Builds at or above it may be offered the latest
+            Play release. The app file stays in Play Console.
+          </p>
         </div>
         <div className="space-y-2">
           <Label htmlFor="android-store">Play release ID</Label>
@@ -92,6 +56,8 @@ export function UpdatePolicyForm({
                 ...value,
                 android: {
                   ...value.android,
+                  source: "google_play",
+                  directReleaseId: null,
                   storeReleaseId: event.target.value || null,
                 },
               })

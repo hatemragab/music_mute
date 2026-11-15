@@ -191,3 +191,22 @@ python3.12 -B -m unittest discover -s video_providers/tests -v
 
 This test requires locally installed Node, FFmpeg and ffprobe to create/probe its
 fixture. It makes no real SaaS call. The deployed adapters contain no FFmpeg.
+
+## Private local diagnostics
+
+`local_logging.py` adds source-tree-only HTTP observations for the router and all
+four adapters. It requires `APP_ENV=local`, `NODE_ENV=development`,
+`MUSICMUTE_LOG_ENABLED=1` and the private collector's `provider` source key in
+`MUSICMUTE_LOG_KEY`. Launch the existing service with its ordinary local settings;
+no vendor call is needed for a `/health` smoke check. The optional helper is
+deliberately excluded from deployment allowlists, making deployed fallback mixins
+inert without a production payload override.
+
+Records carry adapter service, process identity, validated existing import request
+UUID, method, allowlisted route, HTTP status, duration and content framing. A
+returned handler does not establish client delivery or validated audio. Raw
+provider JSON, media URLs, bytes, credentials and arbitrary error text are
+explicitly omitted to preserve this component's contract. The daemon queue holds
+at most 128 records; `local_logging.status()` reports delivery, drops and failures.
+See the [local logging guide](../docs/local-logging/README.md) for retained capture,
+Logdy and read-only MCP. No paid acquisition is retried or introduced by logging.

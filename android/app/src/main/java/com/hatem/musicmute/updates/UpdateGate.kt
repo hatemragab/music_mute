@@ -48,7 +48,7 @@ fun updatePromptPresentation(
     state: UpdateUiState,
     install: UpdateInstallState,
 ): UpdatePromptPresentation {
-    val visible = state.decision != UpdateDecision.NONE
+    val visible = state.decision != UpdateDecision.NONE || install is UpdateInstallState.Downloading || install.restartAvailable || install == UpdateInstallState.Installing
     val required = state.decision == UpdateDecision.REQUIRED
     return UpdatePromptPresentation(
         visible = visible,
@@ -70,7 +70,8 @@ fun UpdateGate(
     onUpdate: () -> Unit,
     onLater: () -> Unit,
     onRetryPolicy: () -> Unit,
-    onCancelInstall: () -> Unit,
+    onRestart: () -> Unit,
+    onOpenStore: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     if (state.restoring) {
@@ -91,7 +92,7 @@ fun UpdateGate(
                     Icon(Icons.Outlined.CloudDownload, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                     Text(stringResource(R.string.update_required_title), style = MaterialTheme.typography.headlineMedium)
                     UpdateCardContent(state, install, currentVersion, currentBuild, false,
-                        onUpdate, onLater, onRetryPolicy, onCancelInstall)
+                        onUpdate, onLater, onRetryPolicy, onRestart, onOpenStore)
                 }
             }
         }
@@ -105,7 +106,7 @@ fun UpdateGate(
                     CreativeCard {
                         Text(stringResource(R.string.update_available_title), style = MaterialTheme.typography.titleMedium)
                         UpdateCardContent(state, install, currentVersion, currentBuild, true,
-                            onUpdate, onLater, onRetryPolicy, onCancelInstall)
+                            onUpdate, onLater, onRetryPolicy, onRestart, onOpenStore)
                     }
                 }
             }
@@ -126,14 +127,15 @@ private fun UpdateCardContent(
     onUpdate: () -> Unit,
     onLater: () -> Unit,
     onRetryPolicy: () -> Unit,
-    onCancelInstall: () -> Unit,
+    onRestart: () -> Unit,
+    onOpenStore: () -> Unit,
 ) {
     val target = state.snapshot?.target
     val busy =
         install is UpdateInstallState.Downloading ||
-            install == UpdateInstallState.Verifying ||
-            install == UpdateInstallState.PermissionNeeded ||
-            install == UpdateInstallState.AwaitingInstaller
+            install == UpdateInstallState.CheckingPlay ||
+            install == UpdateInstallState.PlayFlow ||
+            install == UpdateInstallState.Installing
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (target == null) {
             Text(stringResource(R.string.update_loading_details))
@@ -159,20 +161,20 @@ private fun UpdateCardContent(
                 )
                 Text(stringResource(R.string.update_downloading, install.percent))
             }
-            UpdateInstallState.Verifying -> {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(stringResource(R.string.update_verifying))
-            }
-            UpdateInstallState.PermissionNeeded -> Text(stringResource(R.string.update_permission_needed))
-            UpdateInstallState.AwaitingInstaller -> Text(stringResource(R.string.update_installer_waiting))
+            UpdateInstallState.CheckingPlay -> Text(stringResource(R.string.update_checking_play))
+            UpdateInstallState.PlayFlow -> Text(stringResource(R.string.update_play_flow))
+            UpdateInstallState.Downloaded -> Text(stringResource(R.string.update_downloaded))
+            UpdateInstallState.Installing -> Text(stringResource(R.string.update_installing_play))
             UpdateInstallState.StoreOpened -> Text(stringResource(R.string.update_store_opened))
             is UpdateInstallState.Failed -> CreativeFeedback(updateProblemText(install.problem), error = true)
             UpdateInstallState.Idle -> state.failure?.let { CreativeFeedback(updateProblemText(it), error = true) }
         }
         if (state.checking) CircularProgressIndicator(Modifier.padding(top = 4.dp))
     }
-    CreativePrimaryButton(onClick = onUpdate, modifier = Modifier.fillMaxWidth(), enabled = !state.checking && !busy && target != null) {
-        Text(stringResource(if (state.failure != null || install is UpdateInstallState.Failed) R.string.retry else R.string.update_now))
+    CreativePrimaryButton(onClick = if (install.restartAvailable) onRestart else onUpdate,
+        modifier = Modifier.fillMaxWidth(), enabled = !state.checking && !busy && (target != null || install.restartAvailable)) {
+        Text(stringResource(if (install == UpdateInstallState.Downloaded) R.string.update_restart
+            else if (state.failure != null || install is UpdateInstallState.Failed) R.string.retry else R.string.update_now))
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap)) {
         if (state.failure != null) {
@@ -180,8 +182,11 @@ private fun UpdateCardContent(
                 Text(stringResource(R.string.update_check_again))
             }
         }
-        if (optional) {
-            TextButton(onClick = { if (busy) onCancelInstall(); onLater() }) {
+        if (target != null && (install is UpdateInstallState.Failed || install == UpdateInstallState.StoreOpened)) {
+            TextButton(onClick = onOpenStore) { Text(stringResource(R.string.update_open_play)) }
+        }
+        if (optional && state.decision == UpdateDecision.OPTIONAL && !install.restartAvailable && install != UpdateInstallState.Installing) {
+            TextButton(onClick = onLater) {
                 Text(stringResource(R.string.update_later))
             }
         }
@@ -195,15 +200,6 @@ private fun updateProblemText(problem: UpdateProblem): String =
             UpdateProblem.OFFLINE -> R.string.update_error_offline
             UpdateProblem.RATE_LIMITED -> R.string.update_error_rate_limited
             UpdateProblem.RELEASE_UNAVAILABLE -> R.string.update_error_release_unavailable
-            UpdateProblem.INSUFFICIENT_STORAGE -> R.string.update_error_storage
-            UpdateProblem.APK_CHECKSUM_MISMATCH,
-            UpdateProblem.APK_SIZE_MISMATCH,
-            UpdateProblem.APK_PACKAGE_MISMATCH,
-            UpdateProblem.APK_BUILD_MISMATCH,
-            UpdateProblem.APK_SIGNER_MISMATCH,
-            UpdateProblem.APK_INVALID -> R.string.update_error_invalid_apk
-            UpdateProblem.INSTALL_PERMISSION_REQUIRED -> R.string.update_permission_needed
-            UpdateProblem.INSTALLER_UNAVAILABLE -> R.string.update_error_installer_unavailable
             UpdateProblem.INSTALL_CANCELLED -> R.string.update_error_install_cancelled
             UpdateProblem.PLAY_UPDATE_UNAVAILABLE -> R.string.update_error_play_unavailable
             else -> R.string.update_error_service

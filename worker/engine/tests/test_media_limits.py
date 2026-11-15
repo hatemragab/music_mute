@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import io
+import subprocess
 import tempfile
 import time
 import threading
@@ -9,8 +11,9 @@ import unittest
 import numpy as np
 import soundfile as sf
 from pathlib import Path
+from types import SimpleNamespace
 from subprocess import CompletedProcess
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from musicmute_engine.limits import (
     MAX_INPUT_BYTES,
@@ -52,6 +55,39 @@ class OversizedSoundFile:
 
 
 class MediaLimitTests(unittest.TestCase):
+    def test_console_tool_detach_is_windows_only_and_preserves_capture_and_environment(self) -> None:
+        for system in ("win32", "darwin"):
+            for capture in (True, False):
+                with self.subTest(system=system, capture=capture):
+                    process = SimpleNamespace(stdout=io.BytesIO(b"ok\n"), stderr=io.BytesIO(b""),
+                                              wait=Mock(return_value=0), poll=Mock(return_value=0),
+                                              kill=Mock(), returncode=0)
+                    arguments = ["private-tool", "--fixture"]
+                    with patch("musicmute_engine.media.sys.platform", system), patch("musicmute_engine.media.subprocess.Popen", return_value=process) as spawn:
+                        result = _run(arguments, 5, "failed", capture_output=capture)
+                    self.assertEqual(result.stdout, "ok\n" if capture else "")
+                    options = spawn.call_args.kwargs
+                    self.assertEqual(spawn.call_args.args, (arguments,))
+                    self.assertEqual(options["creationflags"], 0x8 if system == "win32" else 0)
+                    self.assertEqual(options["creationflags"] & 0x01000000, 0)
+                    self.assertFalse(options["shell"])
+                    pipe = subprocess.PIPE if capture else subprocess.DEVNULL
+                    self.assertEqual(options["stdout"], pipe); self.assertEqual(options["stderr"], pipe)
+                    self.assertLessEqual(set(options["env"]), {"PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR"})
+                    process.kill.assert_not_called()
+                    if capture:
+                        self.assertTrue(process.stdout.closed); self.assertTrue(process.stderr.closed)
+
+    def test_detached_console_tool_timeout_keeps_kill_wait_and_sanitized_failure(self) -> None:
+        process = SimpleNamespace(stdout=io.BytesIO(b"partial"), stderr=io.BytesIO(b""),
+                                  wait=Mock(side_effect=[subprocess.TimeoutExpired("fixture", 5), 0]),
+                                  poll=Mock(return_value=None), kill=Mock(), returncode=0)
+        with patch("musicmute_engine.media.sys.platform", "win32"), patch("musicmute_engine.media.subprocess.Popen", return_value=process), self.assertRaisesRegex(MediaProcessingError, "timed out"):
+            _run(["private-tool"], 5, "timed out")
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.wait.call_count, 2)
+        self.assertTrue(process.stdout.closed); self.assertTrue(process.stderr.closed)
+
     def test_noisy_tool_is_killed_before_its_timeout(self) -> None:
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):

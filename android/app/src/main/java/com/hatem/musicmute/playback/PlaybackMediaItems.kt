@@ -11,6 +11,7 @@ import com.hatem.musicmute.library.LibraryKey
 
 internal const val AUTO_NEXT_COMMAND = "com.hatem.musicmute.AUTO_NEXT"
 internal const val LISTENING_COMMAND = "com.hatem.musicmute.LISTENING"
+internal const val PLAY_START_COMMAND = "com.hatem.musicmute.PLAY_START"
 internal const val AUTO_NEXT_KEY = "autoNext"
 
 internal fun QueueTrack.mediaItem(context: Context, original: Boolean = this.original): MediaItem = MediaItem.Builder()

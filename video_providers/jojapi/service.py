@@ -550,7 +550,16 @@ class Provider:
                      response_headers_ms=headers_ms, **self.diagnostics())
 
 
-class Handler(BaseHTTPRequestHandler):
+# The source-only logger is intentionally absent from deployment allowlists.
+try:
+    from local_logging import LocalLoggingHandlerMixin
+except ModuleNotFoundError:
+    class LocalLoggingHandlerMixin:
+        pass
+
+
+class Handler(LocalLoggingHandlerMixin, BaseHTTPRequestHandler):
+    local_log_service = 'jojapi'
     protocol_version = 'HTTP/1.1'
     server_version = 'AudioAcquisition/1'
 

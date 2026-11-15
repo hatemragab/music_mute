@@ -1,4 +1,5 @@
 import type { NotificationCampaign } from "@/features/notifications/notifications-api";
+import type { AdminUserDevicePage } from "@/features/users/user-device-types";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { ApiError } from "@/api/api-client";
@@ -11,8 +12,8 @@ import type {
   JobSummary,
   OverviewSnapshot,
   Page,
+  ReleaseUploadStatus,
 } from "@/api/contracts";
-import type { ReleaseUploadStatus } from "@/features/releases/releases-api";
 import type {
   WorkerDiagnosticPage,
   WorkerMachineDetail,
@@ -20,6 +21,7 @@ import type {
 } from "@/features/workers/worker-types";
 import { RealtimeClient } from "./client";
 interface Resources {
+  "admin.user_devices": AdminUserDevicePage;
   "admin.notifications": Page<NotificationCampaign>;
   "admin.jobs": Page<JobSummary>;
   "admin.job": JobDetail;

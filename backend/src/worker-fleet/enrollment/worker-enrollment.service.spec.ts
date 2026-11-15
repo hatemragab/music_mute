@@ -1,6 +1,10 @@
+import 'reflect-metadata';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { describe, expect, it, vi } from 'vitest';
 import type { AdminActor } from '../../admin/admin.types.js';
 import { WORKER_RECIPE_IDS } from '../protocol/v1/protocol.js';
+import { ReportWorkerInstallationDto } from './worker-enrollment.dto.js';
 import { WorkerEnrollmentService } from './worker-enrollment.service.js';
 
 const actor = {
@@ -109,6 +113,62 @@ function fixture() {
   };
 }
 
+it('fresh invitation namespaces a preserved exchange UUID after an expired lost exchange ACK; no old restricted session or machine is adopted', async () => {
+  const f = fixture(),
+    requestId = '32410a14-e85a-4a1d-bb99-61fa54b07eaa',
+    oldId = '790fb01e-6026-4fd1-8f77-8c584aa10f37',
+    newId = '890fb01e-6026-4fd1-8f77-8c584aa10f38',
+    oldInstallation = '690fb01e-6026-4fd1-8f77-8c584aa10f39';
+  f.invitations.findById.mockImplementation((id: string) =>
+    chain(
+      id === oldId
+        ? {
+            _id: oldId,
+            state: 'consumed',
+            exchangeRequestId: requestId,
+            installationSessionId: oldInstallation,
+            expiresAt: new Date(Date.now() - 1),
+            useCount: 1,
+            revision: 1,
+          }
+        : {
+            _id: newId,
+            state: 'active',
+            expiresAt: new Date(Date.now() + 60000),
+            useCount: 0,
+            revision: 0,
+          },
+    ),
+  );
+  f.invitations.updateOne.mockResolvedValue({ modifiedCount: 1 });
+  f.installations.create.mockImplementation(async ([value]) => [
+    { toObject: () => value },
+  ]);
+  await expect(
+    f.service.exchange(
+      { kind: 'enrollment', subjectId: oldId, credential: 'e'.repeat(43) },
+      { requestId },
+    ),
+  ).rejects.toMatchObject({ response: { code: 'WORKER_EXPIRED' } });
+  const fresh = await f.service.exchange(
+    { kind: 'enrollment', subjectId: newId, credential: 'n'.repeat(43) },
+    { requestId },
+  );
+  expect(fresh).toMatchObject({ phase: 'restricted', replayed: false });
+  expect(fresh.installationId).not.toBe(oldInstallation);
+  expect(f.installations.findById).not.toHaveBeenCalled();
+  expect(f.installations.create.mock.calls[0][0][0]).toMatchObject({
+    invitationId: newId,
+    exchangeRequestId: requestId,
+    phase: 'restricted',
+  });
+  expect(f.savedMachine).not.toHaveBeenCalled();
+  expect(f.invitations.updateOne).toHaveBeenCalledWith(
+    expect.objectContaining({ _id: newId }),
+    expect.any(Object),
+    expect.any(Object),
+  );
+});
 describe('worker enrollment lifecycle', () => {
   const registeredByUserId = '64b000000000000000000001';
   const googleIdentity = {
@@ -457,102 +517,130 @@ describe('worker enrollment lifecycle', () => {
     expect(f.transaction.endSession).toHaveBeenCalledOnce();
   });
 
-  it('makes an identical installation report replay safe', async () => {
-    const f = fixture();
-    const id = 'bfcd61be-0dd8-47af-889e-5c4aa035fa84';
-    const requestId = 'a3c95e06-711f-4cd2-8d4f-f54528993a36';
-    f.installations.findById.mockReturnValue(
-      chain({
-        _id: id,
-        phase: 'reported',
-        reportRequestId: requestId,
-        reportDigest:
-          '6459690228452861472c1efb7996674137ca752d5dd771d645e9d109d7683a46',
-        outcomeCode: null,
-        revision: 1,
-      }),
-    );
-    const dto = {
-      requestId,
-      expectedRevision: 0,
-      label: 'M4 worker',
-      hardware: {
-        os: 'Darwin',
-        osBuild: '25.6',
-        architecture: 'arm64',
-        cpu: 'Apple M4 Pro',
-        memoryBytes: 24_000_000_000,
-        gpus: [
+  it.each([undefined, 'windows-user'] as const)(
+    'accepts transformed reports and preserves replay identity for profile %s',
+    async (installationProfile) => {
+      const f = fixture();
+      const id = 'bfcd61be-0dd8-47af-889e-5c4aa035fa84';
+      const requestId = 'a3c95e06-711f-4cd2-8d4f-f54528993a36';
+      f.installations.findById.mockReturnValue(
+        chain({
+          _id: id,
+          phase: 'reported',
+          reportRequestId: requestId,
+          reportDigest:
+            '6459690228452861472c1efb7996674137ca752d5dd771d645e9d109d7683a46',
+          outcomeCode: null,
+          revision: 1,
+        }),
+      );
+      const dto = {
+        requestId,
+        expectedRevision: 0,
+        label: 'M4 worker',
+        hardware: {
+          os: 'Darwin',
+          osBuild: '25.6',
+          architecture: 'arm64',
+          cpu: 'Apple M4 Pro',
+          memoryBytes: 24_000_000_000,
+          gpus: [
+            {
+              id: 'gpu0',
+              name: 'Apple M4 Pro',
+              driverVersion: 'system',
+            },
+          ],
+        },
+        runtime: {
+          ...(installationProfile === undefined ? {} : { installationProfile }),
+          workerVersion: '0.1.0',
+          protocolVersion: 1,
+          manifestDigest: 'a'.repeat(64),
+          modelDigest:
+            'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
+          providerRuntimeVersion: 'onnxruntime 1.30.0',
+        },
+        capabilities: [
           {
-            id: 'gpu0',
-            name: 'Apple M4 Pro',
-            driverVersion: 'system',
+            platform: 'darwin-arm64' as const,
+            provider: 'mps' as const,
+            gpuId: 'gpu0',
+            recipeIds: ['kim-vocals-v2' as const],
+            maxSlots: 1,
           },
         ],
-      },
-      runtime: {
-        workerVersion: '0.1.0',
-        protocolVersion: 1,
-        manifestDigest: 'a'.repeat(64),
-        modelDigest:
-          'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
-        providerRuntimeVersion: 'onnxruntime 1.30.0',
-      },
-      capabilities: [
-        {
-          platform: 'darwin-arm64' as const,
-          provider: 'mps' as const,
-          gpuId: 'gpu0',
-          recipeIds: ['kim-vocals-v2' as const],
-          maxSlots: 1,
-        },
-      ],
-      summary: 'qualified',
-    };
-    // Capture the canonical digest through the first update, then replay it.
-    f.installations.findById.mockReturnValueOnce(
-      chain({ _id: id, phase: 'restricted', revision: 0 }),
-    );
-    f.installations.findOneAndUpdate.mockReturnValue(
-      chain({
-        _id: id,
-        phase: 'reported',
-        outcomeCode: null,
-        revision: 1,
-      }),
-    );
-    await f.service.report(
-      { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
-      id,
-      dto,
-    );
-    const storedDigest =
-      f.installations.findOneAndUpdate.mock.calls[0][1].$set.reportDigest;
-    f.installations.findById.mockReturnValue(
-      chain({
-        _id: id,
-        phase: 'reported',
-        reportRequestId: requestId,
-        reportDigest: storedDigest,
-        outcomeCode: null,
-        revision: 1,
-      }),
-    );
-    const replay = await f.service.report(
-      { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
-      id,
-      dto,
-    );
-    expect(replay.replayed).toBe(true);
-    expect(f.installations.findOneAndUpdate).toHaveBeenCalledOnce();
-    await expect(
-      f.service.report(
+        summary: 'qualified',
+      };
+      const transformed = plainToInstance(ReportWorkerInstallationDto, dto);
+      expect(
+        await validate(transformed, {
+          whitelist: true,
+          forbidNonWhitelisted: true,
+        }),
+      ).toEqual([]);
+      expect(Object.hasOwn(transformed.runtime, 'installationProfile')).toBe(
+        true,
+      );
+      // Capture the canonical digest through the first update, then replay it.
+      f.installations.findById.mockReturnValueOnce(
+        chain({ _id: id, phase: 'restricted', revision: 0 }),
+      );
+      f.installations.findOneAndUpdate.mockReturnValue(
+        chain({
+          _id: id,
+          phase: 'reported',
+          outcomeCode: null,
+          revision: 1,
+        }),
+      );
+      await f.service.report(
         { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
         id,
-        { ...dto, summary: 'conflicting replay' },
-      ),
-    ).rejects.toThrow('Worker resource changed');
-  });
+        transformed,
+      );
+      expect(
+        f.installations.findOneAndUpdate.mock.calls[0][1].$set.runtimeIdentity,
+      ).toEqual(dto.runtime);
+      const storedDigest =
+        f.installations.findOneAndUpdate.mock.calls[0][1].$set.reportDigest;
+      f.installations.findById.mockReturnValue(
+        chain({
+          _id: id,
+          phase: 'reported',
+          reportRequestId: requestId,
+          reportDigest: storedDigest,
+          outcomeCode: null,
+          revision: 1,
+        }),
+      );
+      const replay = await f.service.report(
+        { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
+        id,
+        dto,
+      );
+      expect(replay.replayed).toBe(true);
+      expect(f.installations.findOneAndUpdate).toHaveBeenCalledOnce();
+      const changedRuntime = { ...dto.runtime };
+      if (installationProfile === undefined)
+        changedRuntime.installationProfile = 'windows-user';
+      else delete changedRuntime.installationProfile;
+      await expect(
+        f.service.report(
+          { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
+          id,
+          { ...dto, runtime: changedRuntime },
+        ),
+      ).rejects.toThrow('Worker resource changed');
+      await expect(
+        f.service.report(
+          { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
+          id,
+          { ...dto, summary: 'conflicting replay' },
+        ),
+      ).rejects.toThrow('Worker resource changed');
+    },
+  );
 
   it('revocation invalidates the machine and expires current ownership', async () => {
     const f = fixture();
@@ -656,6 +744,171 @@ describe('worker enrollment lifecycle', () => {
     expect(f.MachineModel).not.toHaveBeenCalled();
     expect(f.installations.updateOne).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      profile: 'windows-user',
+      osBuild: '10.0.19045.6456',
+      architecture: 'x64',
+      provider: 'directml',
+      gpuId: 'gpu1',
+      allowed: true,
+    },
+    {
+      profile: 'windows-user',
+      osBuild: '26100',
+      architecture: 'amd64',
+      provider: 'directml',
+      gpuId: 'gpu1',
+      allowed: true,
+    },
+    {
+      profile: undefined,
+      osBuild: '17763',
+      architecture: 'x64',
+      provider: 'directml',
+      gpuId: 'gpu1',
+      allowed: true,
+    },
+    {
+      profile: 'windows-user',
+      osBuild: '19044',
+      architecture: 'x64',
+      provider: 'directml',
+      gpuId: 'gpu1',
+      allowed: false,
+    },
+    {
+      profile: 'windows-user',
+      osBuild: '19045',
+      architecture: 'arm64',
+      provider: 'directml',
+      gpuId: 'gpu1',
+      allowed: false,
+    },
+    {
+      profile: 'windows-user',
+      osBuild: '19045',
+      architecture: 'x64',
+      provider: 'mps',
+      gpuId: 'gpu1',
+      allowed: false,
+    },
+    {
+      profile: 'windows-user',
+      osBuild: '19045',
+      architecture: 'x64',
+      provider: 'directml',
+      gpuId: 'forged-gpu',
+      allowed: false,
+    },
+    {
+      profile: 'legacy-service',
+      osBuild: '19045',
+      architecture: 'x64',
+      provider: 'directml',
+      gpuId: 'gpu1',
+      allowed: false,
+    },
+  ])(
+    'keeps consumer qualification and legacy installation fences for %j',
+    async (scenario) => {
+      const f = fixture();
+      const id = 'e3f4f07b-cdf0-42ef-a9aa-7bf8e5532604';
+      const installation = {
+        _id: id,
+        phase: 'reported',
+        revision: 1,
+        registeredByUserId,
+        label: 'Windows user GPU',
+        groupId: null,
+        hardwareReport: {
+          os: 'Microsoft Windows 11 Pro',
+          osBuild: scenario.osBuild,
+          architecture: scenario.architecture,
+          cpu: 'fixture CPU',
+          memoryBytes: 16_000_000_000,
+          gpus: [
+            {
+              id: 'gpu1',
+              name: 'fixture GPU',
+              driverVersion: 'fixture-driver',
+              memoryBytes: 4_000_000_000,
+            },
+          ],
+        },
+        runtimeIdentity: {
+          workerVersion: '0.1.0',
+          protocolVersion: 1,
+          manifestDigest: 'a'.repeat(64),
+          modelDigest:
+            'ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b',
+          providerRuntimeVersion: 'onnxruntime-directml 1.24.4',
+          ...(scenario.profile
+            ? { installationProfile: scenario.profile }
+            : {}),
+        },
+        capabilities: [
+          {
+            platform: 'windows-amd64',
+            provider: scenario.provider,
+            gpuId: scenario.gpuId,
+            recipeIds: [...WORKER_RECIPE_IDS],
+            maxSlots: 1,
+          },
+        ],
+        qualificationObject: {
+          key: `worker-installation-results/${id}/qualification.mp3`,
+          etag: '"fixture"',
+          bytes: 1234,
+          sha256: Buffer.alloc(32, 1).toString('base64'),
+          contentType: 'audio/mpeg',
+        },
+      };
+      f.installations.findById.mockReturnValue(chain(installation));
+      f.installations.updateOne.mockResolvedValue({ modifiedCount: 1 });
+      f.savedMachine.mockImplementation(async (value) => ({
+        toObject: () => ({ ...value, credentialRevision: 1 }),
+      }));
+      const operation = f.service.activate(
+        { kind: 'installation', subjectId: id, credential: 'x'.repeat(43) },
+        id,
+        {
+          requestId: '91e36646-b142-498e-821f-b2fbc07432ad',
+          expectedRevision: 1,
+          credentialDigest: 'b'.repeat(64),
+        },
+      );
+      if (scenario.allowed) {
+        await expect(operation).resolves.toMatchObject({ status: 'active' });
+        expect(
+          (f.MachineModel.mock.calls[0][0] as { runtimeIdentity: unknown })
+            .runtimeIdentity,
+        ).toEqual(installation.runtimeIdentity);
+      } else {
+        await expect(operation).rejects.toMatchObject({
+          response: { code: 'WORKER_FORBIDDEN' },
+        });
+        expect(f.MachineModel).not.toHaveBeenCalled();
+        expect(f.installations.updateOne).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            $set: { phase: 'failed', outcomeCode: 'qualification_failed' },
+          }),
+          expect.anything(),
+        );
+      }
+      expect(f.users.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: registeredByUserId,
+          status: 'active',
+          workerRegistrationAllowed: true,
+        }),
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
 
   it('activates only a recorded qualified MVP runtime and stores a credential digest', async () => {
     const f = fixture();

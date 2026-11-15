@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { Download, Music2, Star } from "lucide-react";
+import { Download, Star } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useSignedIn } from "../auth/AuthProvider";
 import { friendlyError, useI18n } from "../i18n";
@@ -8,6 +8,8 @@ import { useJobs } from "../jobs/JobsUI";
 import { trackTitle } from "../player/playback";
 import { usePlayer } from "../player/PlayerProvider";
 import { useLibraryPreferences } from "./preferences";
+import { queryLibrary, type LibraryFilter, type LibrarySort } from "./query";
+import { LibraryArtwork } from "./LibraryArtwork";
 
 export function LibraryPage() {
   const { api, user } = useSignedIn();
@@ -17,8 +19,9 @@ export function LibraryPage() {
   const { preferences, toggle } = useLibraryPreferences(user.uid);
   const [actionError, setActionError] = useState("");
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<"newest" | "title">("newest");
-  const [filter, setFilter] = useState<"all" | "favorites" | "removed">("all");
+  const [sort, setSort] = useState<LibrarySort>("newest");
+  const [filter, setFilter] = useState<LibraryFilter>("all");
+  const [starredOnly, setStarredOnly] = useState(false);
   const all = useMemo(
     () =>
       query.data?.pages
@@ -27,27 +30,8 @@ export function LibraryPage() {
     [query.data],
   );
   const shown = useMemo(
-    () =>
-      all
-        .filter((job) => {
-          const name = job.displayName || job.sourceTitle || "";
-          return (
-            name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) &&
-            (filter !== "favorites" ||
-              preferences.favorites.includes(job.id)) &&
-            (filter === "removed"
-              ? preferences.hidden.includes(job.id)
-              : !preferences.hidden.includes(job.id))
-          );
-        })
-        .sort((left, right) =>
-          sort === "title"
-            ? (left.displayName || left.sourceTitle || "").localeCompare(
-                right.displayName || right.sourceTitle || "",
-              )
-            : Date.parse(right.createdAt) - Date.parse(left.createdAt),
-        ),
-    [all, search, sort, filter, preferences],
+    () => queryLibrary(all, preferences, { search, sort, filter, starredOnly }),
+    [all, search, sort, filter, starredOnly, preferences],
   );
   async function download(jobId: string) {
     setActionError("");
@@ -76,20 +60,20 @@ export function LibraryPage() {
           />
         </label>
         <label>
-          <span className="sr-only">{t("titleSort")}</span>
+          <span className="sr-only">{t("sortTracks")}</span>
           <select
-            value={sort}
-            onChange={(event) =>
-              setSort(event.target.value as "newest" | "title")
-            }
+            value={filter === "mostPlayed" ? "mostPlayed" : sort}
+            disabled={filter === "mostPlayed"}
+            onChange={(event) => setSort(event.target.value as LibrarySort)}
           >
             <option value="newest">{t("newest")}</option>
             <option value="title">{t("titleSort")}</option>
+            <option value="mostPlayed">{t("mostPlayed")}</option>
           </select>
         </label>
       </div>
       <div className="filter-row" role="group" aria-label={t("library")}>
-        {(["all", "favorites", "removed"] as const).map((value) => (
+        {(["all", "mostPlayed", "removed"] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -100,13 +84,29 @@ export function LibraryPage() {
             {t(
               value === "all"
                 ? "filterAll"
-                : value === "favorites"
-                  ? "showFavorites"
+                : value === "mostPlayed"
+                  ? "mostPlayed"
                   : "removed",
             )}
           </button>
         ))}
+        <label className="check library-star-filter">
+          <input
+            type="checkbox"
+            checked={starredOnly}
+            onChange={(event) => setStarredOnly(event.target.checked)}
+          />
+          <Star
+            aria-hidden="true"
+            fill={starredOnly ? "currentColor" : "none"}
+          />
+          <span>{t("showFavorites")}</span>
+        </label>
       </div>
+      {query.hasNextPage &&
+        (filter === "mostPlayed" || sort === "mostPlayed") && (
+          <small>{t("mostPlayedLoadMore")}</small>
+        )}
       {query.isPending && <p>{t("loading")}</p>}
       {query.isError && (
         <p role="alert" className="notice">
@@ -119,14 +119,20 @@ export function LibraryPage() {
         </p>
       )}
       {!query.isPending && shown.length === 0 && (
-        <div className="empty-state">{t("noLibrary")}</div>
+        <div className="empty-state">
+          {t(
+            search.trim() || starredOnly || filter === "removed"
+              ? "noMatchingTracks"
+              : filter === "mostPlayed"
+                ? "noMostPlayed"
+                : "noLibrary",
+          )}
+        </div>
       )}
       <div className="library-list">
         {shown.map((job) => (
           <article key={job.id} className="library-item">
-            <div className="library-cover" aria-hidden="true">
-              <Music2 />
-            </div>
+            <LibraryArtwork url={job.thumbnailUrl} trackId={job.id} />
             <div className="library-meta">
               <h2>
                 <Link to={`/jobs/${job.id}`} dir="auto">

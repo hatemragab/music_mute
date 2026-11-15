@@ -10,7 +10,7 @@ export const PROTOCOL_VERSION = 1 as const;
 export const NATIVE_HOST = "com.musicmute.local";
 /** Match Android's inclusive 20-minute processing ceiling. */
 export const MVP_MAX_DURATION_SECONDS = 1_200;
-export const VERSION = "0.1.1";
+export const VERSION = "0.1.3";
 
 export type ProviderId = "LOCAL_MACOS" | "LOCAL_WINDOWS" | "ONLINE_MUSICMUTE";
 export type JobState =
@@ -147,9 +147,11 @@ export interface HelloPayload {
   /** Discovery is separate so legacy clients keep their bounded capability list. */
   background_publication_supported?: boolean;
   /** Saved app choice; trusted only with processing_selection_v1. */
-  processing_provider?: "LOCAL_MACOS" | "ONLINE_MUSICMUTE";
+  processing_provider?: "LOCAL_MACOS" | "LOCAL_WINDOWS" | "ONLINE_MUSICMUTE";
   /** Token-free confirmation fence for the selected account and session. */
   processing_scope?: string;
+  /** Cache-only restoration metadata is sent only after this discovery. */
+  cache_recovery_supported?: boolean;
   /** Explicit manual diagnostics discovery; old clients ignore these optional fields. */
   installation_check_supported?: boolean;
   installation_id?: string;
@@ -159,8 +161,14 @@ export type NativeCommand = {
   request_id: string;
 } & (
   | {
-      type: "STATUS" | "DIAGNOSTICS" | "CLEAR_CACHE" | "CHECK";
+      type: "DIAGNOSTICS" | "CLEAR_CACHE" | "CHECK";
       payload: Record<string, never>;
+    }
+  | {
+      type: "STATUS";
+      payload:
+        | Record<string, never>
+        | { video_id: string; duration_seconds: number; job_id: string };
     }
   | { type: "HELLO"; payload: { capabilities?: NativeCapability[] } }
   | { type: "START"; payload: StartPayload }

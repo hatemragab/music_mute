@@ -83,8 +83,12 @@ class JobsApiClient(
         }
     }
 
+    /** Successful checkouts only; the UI cache must survive a failed/offline request. */
+    suspend fun checkoutMediaPolicy(authenticated: Boolean = true): ProcessingMediaPolicy =
+        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schema_version=2", authenticated = authenticated))
+
     override suspend fun mediaPolicy(): ProcessingMediaPolicy = try {
-        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schema_version=2"))
+        checkoutMediaPolicy()
     } catch (error: JobsFailure) {
         if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.STANDARD else throw error
     }
@@ -155,12 +159,12 @@ class JobsApiClient(
         )))
     }
 
-    private suspend fun request(method: String, path: String, body: String? = null, processingAccess: Boolean = false): String = requests.withLock {
+    private suspend fun request(method: String, path: String, body: String? = null, processingAccess: Boolean = false, authenticated: Boolean = true): String = requests.withLock {
         val remaining = retryNotBeforeNanos?.minus(nowNanos()) ?: 0
         if (remaining > 0) throw JobsFailure(JobsProblem.RATE_LIMITED, (remaining + 999_999_999) / 1_000_000_000)
         val headers = if (processingAccess) mapOf("X-Installation-Id" to installationId().also(::uuid)) else emptyMap()
         try {
-            auth.request(method, path, body, additionalHeaders = headers, responseFailure = ::failure)
+            auth.request(method, path, body, authenticated = authenticated, additionalHeaders = headers, responseFailure = ::failure)
         } catch (failure: AuthFailure) {
             throw JobsFailure(when (failure.problem) {
                 AuthProblem.UNAUTHENTICATED, AuthProblem.REAUTH_REQUIRED -> JobsProblem.UNAUTHENTICATED

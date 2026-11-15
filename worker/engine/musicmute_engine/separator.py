@@ -207,6 +207,7 @@ class KimSeparator:
         self.directml_device_id = directml_device_id
         self.profile_directory = profile_directory
         self._profile_sessions: list[Any] = []
+        self._timing_sessions: list[Any] = []
         self._profiles_finished = False
         self._warmed_up = False
         self._separator = self._load()
@@ -225,6 +226,7 @@ class KimSeparator:
                 self.provider,
                 self.directml_device_id,
                 profile_directory=self.profile_directory,
+                on_session=self._timing_sessions.append,
             ) as sessions:
                 separator = Separator(
                     log_level=logging.WARNING,
@@ -258,6 +260,12 @@ class KimSeparator:
             return separator
         except Exception as error:  # third-party errors are sanitized at this boundary
             raise SeparatorError("Kim model could not be loaded") from error
+
+    @property
+    def first_inference_seconds(self) -> float | None:
+        if self.provider != "directml" or len(self._timing_sessions) != 1:
+            return None
+        return getattr(self._timing_sessions[0], "musicmute_first_inference_seconds", None)
 
     def separate(
         self,
@@ -342,6 +350,36 @@ class KimSeparator:
             if isinstance(error, SeparatorError):
                 raise
             raise SeparatorError("Kim model could not be warmed up") from error
+
+    def detach_job(self) -> None:
+        """Remove source/output/callback state without releasing the ORT graph."""
+        model = getattr(self._separator, "model_instance", None)
+        reset = getattr(model, "clear_file_specific_paths", None)
+        if model is None or not callable(reset):
+            raise SeparatorError("Kim job state could not be detached")
+        try:
+            reset()
+            model.on_window_progress = None
+            model.output_dir = ""
+            self._separator.output_dir = ""
+            for name in ("input_subtype", "input_bit_depth"):
+                if hasattr(model, name):
+                    setattr(model, name, None)
+            # The pinned upstream reset owns these exact six job fields. Check
+            # them explicitly so a changed upstream contract fails closed.
+            fields = ("audio_file_path", "audio_file_base", "primary_source", "secondary_source",
+                      "primary_stem_output_path", "secondary_stem_output_path")
+            if any(getattr(model, name, None) is not None for name in fields):
+                raise SeparatorError("Kim job state remains attached")
+            model.separation_timings = {}
+            self.last_separation_timings = {}
+            for name in ("grouped_windows", "grouped_model_calls", "grouped_max_batch"):
+                if hasattr(model, name):
+                    setattr(model, name, 0)
+        except Exception as error:
+            if isinstance(error, SeparatorError):
+                raise
+            raise SeparatorError("Kim job state could not be detached") from error
 
     def mps_dispatch_evidence(self) -> dict[str, object]:
         if self.provider != "mps" or not self._warmed_up:

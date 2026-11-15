@@ -16,6 +16,8 @@ import { Optional } from '@nestjs/common';
 import { importExecutionJobId } from './import-retry.js';
 import { RealtimeFeedService } from '../realtime/realtime-feed.service.js';
 import type { MediaImport } from './media-import.schema.js';
+import { localDiagnostics } from '../observability/local-diagnostics.js';
+import { observeRedisClient } from '../observability/local-service-diagnostics.js';
 
 @Injectable()
 export class ImportRuntime
@@ -41,6 +43,48 @@ export class ImportRuntime
   ) {}
 
   async onApplicationBootstrap() {
+    if (localDiagnostics.isEnabled) {
+      // Observe the existing BullMQ clients; no duplicate Redis clients or reads.
+      void this.queue
+        .getBackend()
+        .client.then((client) =>
+          observeRedisClient(
+            client as unknown as Parameters<typeof observeRedisClient>[0],
+            'bullmq-queue',
+          ),
+        )
+        .catch(() => undefined);
+      void this.processor.worker
+        .getBackend()
+        .client.then((client) =>
+          observeRedisClient(
+            client as unknown as Parameters<typeof observeRedisClient>[0],
+            'bullmq-worker',
+          ),
+        )
+        .catch(() => undefined);
+      this.processor.worker.on('stalled', (id) =>
+        localDiagnostics.event({
+          category: 'queue',
+          name: 'import.stalled',
+          summary: 'BullMQ import execution stalled',
+          level: 'warn',
+          result: 'stalled',
+          data: { queueJobId: id },
+        }),
+      );
+      this.processor.worker.on('failed', (job) =>
+        localDiagnostics.event({
+          category: 'queue',
+          name: 'import.failed',
+          summary: 'BullMQ import execution failed',
+          level: 'error',
+          result: 'failed',
+          importId: job?.data?.importId,
+          data: { queueJobId: job?.id, attemptsMade: job?.attemptsMade },
+        }),
+      );
+    }
     this.queue.on('error', () =>
       this.logger.warn('URL import queue unavailable'),
     );

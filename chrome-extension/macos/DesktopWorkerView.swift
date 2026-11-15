@@ -14,11 +14,33 @@ private enum WorkerSection: String, CaseIterable {
   case advanced = "Advanced worker actions"
 }
 
+enum DesktopWorkerControlState {
+  case unavailable, stopped, active, paused
+
+  init(
+    registration: DesktopWorkerRegistrationState, connected: Bool,
+    snapshot: DesktopWorkerSnapshot?
+  ) {
+    if registration == .preserved {
+      self = .stopped
+    } else if registration != .registered || !connected || snapshot == nil {
+      self = .unavailable
+    } else if snapshot?.installed != true || snapshot?.running != true {
+      self = .stopped
+    } else if ["paused", "draining"].contains(snapshot?.raw["lifecycle"].string ?? "") {
+      self = .paused
+    } else {
+      self = .active
+    }
+  }
+}
+
 struct DesktopWorkerView: View {
   @ObservedObject var worker: DesktopWorkerModel
   let prepare: () -> Void
   let openAccount: () -> Void
   @State private var section = WorkerSection.overview
+  @State private var advancedExpanded = false
   @State private var force = false
   @State private var purge = false
   @State private var jobID = ""
@@ -50,8 +72,9 @@ struct DesktopWorkerView: View {
     self.worker = worker
     self.prepare = prepare
     self.openAccount = openAccount
-    _section = State(
-      initialValue: initialSection.flatMap(WorkerSection.init(rawValue:)) ?? .overview)
+    let initialSection = initialSection.flatMap(WorkerSection.init(rawValue:)) ?? .overview
+    _section = State(initialValue: initialSection)
+    _advancedExpanded = State(initialValue: initialSection != .overview)
   }
 
   private struct WorkerAction: Identifiable {
@@ -62,70 +85,74 @@ struct DesktopWorkerView: View {
     let detail: String
   }
   var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
+    VStack(alignment: .leading, spacing: 16) {
       statusCard
-      if worker.registrationState != .registered, section != .setup { registrationCard }
-      if let failure = worker.failure {
+      if worker.registrationState != .registered { registrationCard }
+      if worker.failure != nil {
         VStack(alignment: .leading, spacing: 8) {
-          Label("Worker needs attention", systemImage: "exclamationmark.triangle").desktopFont(
+          Label("Needs attention", systemImage: "exclamationmark.triangle").desktopFont(
             .headline)
-          Text(LocalizedStringKey(failure.guidance)).fixedSize(horizontal: false, vertical: true)
-          Text(failure.code).desktopFont(.caption, design: .monospaced).textSelection(.enabled)
           HStack {
-            Button("Reconnect worker status") { worker.reconnect() }.disabled(worker.busy)
+            Button("Retry") { worker.reconnect() }.disabled(worker.busy)
             Button("Open Setup", action: prepare)
           }
         }.workerCard().accessibilityIdentifier("worker_failure")
       }
-      if worker.busy {
+      DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
         VStack(alignment: .leading, spacing: 8) {
-          HStack {
-            ProgressView().controlSize(.small)
-            Text("Worker operation in progress").desktopFont(.headline)
+          statusDetails
+          if let failure = worker.failure {
+            VStack(alignment: .leading, spacing: 8) {
+              Text(LocalizedStringKey(failure.guidance)).fixedSize(
+                horizontal: false, vertical: true)
+              Text(failure.diagnosticCode).desktopFont(.caption, design: .monospaced).textSelection(
+                .enabled)
+            }.workerCard().accessibilityIdentifier("worker_failure_details")
           }
-          if let stage = worker.progress["stage"].string,
-            DesktopWorkerSnapshot.safeIdentifier(stage)
-          {
-            Text(LocalizedStringKey(DesktopWorkerReport.label(stage))).foregroundStyle(
-              Brand.secondary)
+          if worker.busy {
+            VStack(alignment: .leading, spacing: 8) {
+              if let stage = worker.progress["stage"].string,
+                DesktopWorkerSnapshot.safeIdentifier(stage)
+              {
+                Text(LocalizedStringKey(DesktopWorkerReport.label(stage))).foregroundStyle(
+                  Brand.secondary)
+              }
+              if let index = worker.progress["index"].number, index >= 0, index < 100 {
+                Text("Run \(Int(index))").desktopFont(.caption)
+              }
+            }.workerCard()
           }
-          if let index = worker.progress["index"].number, index >= 0, index < 100 {
-            Text("Run \(Int(index))").desktopFont(.caption)
+          Picker("Worker section", selection: $section) {
+            ForEach(WorkerSection.allCases, id: \.self) {
+              Text(LocalizedStringKey($0.rawValue)).tag($0)
+            }
+          }.pickerStyle(.menu).accessibilityIdentifier("worker_section")
+          Group {
+            switch section {
+            case .overview: overview
+            case .setup: setup
+            case .jobs: jobs
+            case .health: health
+            case .storage: storage
+            case .performance: performance
+            case .updates: updates
+            case .advanced: advanced
+            }
+          }.disabled(worker.busy)
+          if worker.reportCommand != nil {
+            WorkerReportView(value: worker.report, title: "Worker operation result")
+            if worker.reportCommand == .diagnostics, let path = worker.report["path"].string,
+              path == requestedExportPath, path.hasPrefix("/"),
+              FileManager.default.fileExists(atPath: path)
+            {
+              Button("Show diagnostic bundle in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+              }
+            }
           }
-          Text(
-            "Keep the app open until this operation finishes. Backend jobs continue independently."
-          )
-          .desktopFont(.caption).foregroundStyle(Brand.secondary)
-        }.workerCard().accessibilityIdentifier("worker_operation")
-      }
-      Picker("Worker section", selection: $section) {
-        ForEach(WorkerSection.allCases, id: \.self) {
-          Text(LocalizedStringKey($0.rawValue)).tag($0)
         }
-      }.pickerStyle(.menu).accessibilityIdentifier("worker_section")
-      Group {
-        switch section {
-        case .overview: overview
-        case .setup: setup
-        case .jobs: jobs
-        case .health: health
-        case .storage: storage
-        case .performance: performance
-        case .updates: updates
-        case .advanced: advanced
-        }
-      }.disabled(worker.busy)
-      if worker.reportCommand != nil {
-        WorkerReportView(value: worker.report, title: "Worker operation result")
-        if worker.reportCommand == .diagnostics, let path = worker.report["path"].string,
-          path == requestedExportPath, path.hasPrefix("/"),
-          FileManager.default.fileExists(atPath: path)
-        {
-          Button("Show diagnostic bundle in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-          }
-        }
-      }
+        .padding(.top, 12)
+      }.workerCard().accessibilityIdentifier("worker_advanced")
     }
     .task { worker.show() }
     .onDisappear { worker.hide() }
@@ -139,6 +166,76 @@ struct DesktopWorkerView: View {
     }
   }
   private var statusCard: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Label("Worker", systemImage: "server.rack").desktopFont(.headline)
+        Spacer()
+        if worker.busy {
+          ProgressView().controlSize(.small).accessibilityIdentifier("worker_operation")
+        }
+        Text(LocalizedStringKey(statusTitle)).foregroundStyle(
+          statusReady ? Brand.mint : Brand.secondary)
+      }
+      if controlState != .unavailable {
+        controls.disabled(worker.busy)
+      }
+    }.workerCard().accessibilityIdentifier("worker_status")
+  }
+  private var statusReady: Bool {
+    guard let snapshot = worker.snapshot, worker.connected,
+      worker.registrationState == .registered, snapshot.installed, snapshot.running
+    else { return false }
+    return snapshot.raw["readiness"]["modelReady"].bool == true
+      && snapshot.raw["readiness"]["localReady"].bool == true
+      && snapshot.raw["readiness"]["claimEligible"].bool == true
+  }
+  private var statusTitle: String {
+    if worker.registrationState == .preparing { return "Preparing…" }
+    if worker.busy { return "Working…" }
+    if worker.failure != nil { return "Needs attention" }
+    guard worker.registrationState == .registered else { return "Setup needed" }
+    guard worker.connected, let snapshot = worker.snapshot else { return "Connecting…" }
+    guard snapshot.installed else { return "Setup needed" }
+    guard snapshot.running else { return "Stopped" }
+    switch snapshot.raw["lifecycle"].string {
+    case "paused": return "Paused"
+    case "draining": return "Finishing jobs"
+    default: break
+    }
+    if !snapshot.jobs.isEmpty { return "Processing" }
+    if statusReady { return "Ready" }
+    if ["loading", "warming", "starting", "model-loading"].contains(snapshot.phase) {
+      return "Starting"
+    }
+    return snapshot.raw["readiness"]["localReady"].bool == true
+      && snapshot.raw["readiness"]["claimEligible"].bool == nil ? "Running" : "Needs attention"
+  }
+  private var controls: some View {
+    HStack {
+      switch controlState {
+      case .stopped:
+        Button("Start") { Task { await worker.startRegisteredWorker() } }
+          .accessibilityIdentifier("worker_start_app_action")
+      case .active:
+        action("Pause", .pause)
+        action("Stop", .stop)
+      case .paused:
+        action("Resume", .resume)
+        action("Stop", .stop)
+      case .unavailable: EmptyView()
+      }
+    }.accessibilityIdentifier("worker_controls")
+  }
+  private var controlState: DesktopWorkerControlState {
+    DesktopWorkerControlState(
+      registration: worker.registrationState, connected: worker.connected, snapshot: worker.snapshot
+    )
+  }
+  private var serviceRunning: Bool {
+    worker.connected && worker.registrationState == .registered
+      && worker.snapshot?.installed == true && worker.snapshot?.running == true
+  }
+  private var statusDetails: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack {
         Label("Background worker", systemImage: "server.rack").desktopFont(.headline)
@@ -217,7 +314,7 @@ struct DesktopWorkerView: View {
           .disabled(
             worker.registrationState != .registered && worker.registrationState != .preserved
           )
-          .accessibilityIdentifier("worker_start_app_action")
+          .accessibilityIdentifier("worker_start_app_advanced_action")
         action("Pause new jobs", .pause)
         action("Drain accepted jobs", .drain)
         action("Resume worker", .resume)
@@ -261,9 +358,64 @@ struct DesktopWorkerView: View {
     }.workerCard()
   }
   private var setup: some View {
-    registrationCard
+    registrationDetails
   }
   private var registrationCard: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      switch worker.registrationState {
+      case .checking:
+        ProgressView("Checking…")
+      case .signedOut:
+        Button {
+          Task { await worker.account?.signInGoogle() }
+        } label: {
+          GoogleSignInLabel("Continue with Google")
+        }
+        .buttonStyle(.bordered).disabled(worker.account?.googleConfigured != true)
+        .accessibilityIdentifier("worker_google_sign_in")
+      case .googleRequired:
+        Text("Sign in with Google to continue.")
+        Button("Open Account", action: openAccount)
+      case .waiting:
+        Label("Waiting for approval", systemImage: "clock")
+      case .unavailable:
+        Text("Could not connect")
+        Button("Retry") { Task { await worker.retryRegistration() } }
+          .disabled(worker.busy).accessibilityIdentifier("worker_registration_retry")
+      case .preparing, .deletingRegistration:
+        ProgressView("Preparing…")
+      case .registered:
+        Label("Ready", systemImage: "checkmark.circle")
+      case .authenticationRejected:
+        Text("Connection needs attention")
+        action("Check connection", .status)
+      case .preserved:
+        Text("Setup needed")
+      case .interrupted:
+        Text("Setup interrupted")
+        Button("Retry setup") { Task { await worker.retryRegistration() } }
+          .disabled(worker.busy).accessibilityIdentifier("worker_setup_retry")
+        if worker.canReplacePendingRegistration {
+          Button("Retry registration") {
+            Task { await worker.replacePendingRegistration() }
+          }.disabled(worker.busy)
+        }
+      case .unpaired:
+        Text("Registration needs attention")
+        Button("Open details") {
+          section = .health
+          advancedExpanded = true
+        }
+      case .removed:
+        Text("Setup needed")
+        Button("Set up") { Task { await worker.registerThisMacAgain() } }
+          .accessibilityIdentifier("worker_register_again")
+      case .setupRequired:
+        Button("Open Setup", action: prepare)
+      }
+    }.workerCard().accessibilityIdentifier("worker_registration")
+  }
+  private var registrationDetails: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Machine registration").desktopFont(.headline)
       Text(
@@ -289,7 +441,7 @@ struct DesktopWorkerView: View {
           GoogleSignInLabel("Continue with Google")
         }
         .buttonStyle(.bordered).disabled(worker.account?.googleConfigured != true)
-        .accessibilityIdentifier("worker_google_sign_in")
+        .accessibilityIdentifier("worker_google_sign_in_advanced")
       case .googleRequired:
         Text("Sign in with Google to register this Mac.")
         Button("Open Account", action: openAccount)
@@ -300,7 +452,7 @@ struct DesktopWorkerView: View {
       case .unavailable:
         Label("Could not check worker registration permission", systemImage: "wifi.exclamationmark")
         Button("Retry") { Task { await worker.retryRegistration() } }
-          .disabled(worker.busy).accessibilityIdentifier("worker_registration_retry")
+          .disabled(worker.busy).accessibilityIdentifier("worker_registration_retry_advanced")
       case .preparing:
         ProgressView("Registering this Mac and preparing its worker…")
       case .registered:
@@ -328,7 +480,7 @@ struct DesktopWorkerView: View {
       case .interrupted:
         Text("Worker setup was interrupted. Retry uses its existing recovery state.")
         Button("Retry worker setup") { Task { await worker.retryRegistration() } }
-          .disabled(worker.busy).accessibilityIdentifier("worker_setup_retry")
+          .disabled(worker.busy).accessibilityIdentifier("worker_setup_retry_advanced")
         if worker.canReplacePendingRegistration {
           Button("Retry worker registration") {
             Task { await worker.replacePendingRegistration() }
@@ -343,12 +495,12 @@ struct DesktopWorkerView: View {
           "The worker was removed on this Mac. Automatic registration remains off until you choose to register again."
         )
         Button("Register this Mac again") { Task { await worker.registerThisMacAgain() } }
-          .accessibilityIdentifier("worker_register_again")
+          .accessibilityIdentifier("worker_register_again_advanced")
       case .setupRequired:
         Text("Prepare this Mac before registering its worker.")
         Button("Open Setup", action: prepare)
       }
-    }.workerCard().accessibilityIdentifier("worker_registration")
+    }.workerCard().accessibilityIdentifier("worker_registration_advanced")
   }
   private var jobs: some View {
     VStack(alignment: .leading, spacing: 16) {

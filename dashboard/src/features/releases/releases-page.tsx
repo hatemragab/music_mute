@@ -82,7 +82,7 @@ export function ReleasesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Releases"
-        description="Draft, artifact verification and publication are separate lifecycle states."
+        description="Record store versions, then review update policy before publication."
         actions={
           can("releases.manage") ? (
             <Button onClick={() => setCreateOpen(true)}>
@@ -114,7 +114,6 @@ export function ReleasesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All distributions</SelectItem>
-            <SelectItem value="direct_apk">Direct APK</SelectItem>
             <SelectItem value="google_play">Google Play</SelectItem>
             <SelectItem value="app_store">App Store</SelectItem>
           </SelectContent>
@@ -169,7 +168,11 @@ export function ReleasesPage() {
                     <TableCell className="capitalize">
                       {release.platform}
                     </TableCell>
-                    <TableCell>{titleCase(release.source)}</TableCell>
+                    <TableCell>
+                      {release.source === "direct_apk"
+                        ? "Retired direct APK"
+                        : titleCase(release.source)}
+                    </TableCell>
                     <TableCell>
                       <StatusBadge value={release.state} />
                     </TableCell>

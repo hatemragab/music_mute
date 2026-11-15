@@ -20,6 +20,7 @@ import {
   type DiagnosticRecord,
 } from "../src/companion/diagnostics";
 import type { DiagnosticInput } from "../src/shared/protocol";
+import { CLOUD_REPLY_VALIDATION_REASONS } from "../src/companion/account-api.js";
 import {
   resolveDiagnosticIdentity,
   type DiagnosticIdentity,
@@ -53,6 +54,58 @@ afterEach(() => {
 });
 
 describe("native diagnostic identity and validation evidence", () => {
+  it("retains only closed parser reasons and never coerces untrusted values", () => {
+    const directory = root();
+    const writer = new Diagnostics(directory);
+    for (const reason of CLOUD_REPLY_VALIDATION_REASONS)
+      writer.record({
+        component: "companion",
+        severity: "warning",
+        event: "diagnostic_error",
+        code: "CLOUD_REPLY_INVALID",
+        metrics: { validation_reason: reason },
+      });
+    let coerced = 0;
+    for (const record of [
+      { event: "diagnostic_error", code: "COMMAND_FAILED" },
+      { event: "stage_completed", code: "CLOUD_REPLY_INVALID" },
+    ])
+      writer.record({
+        component: "companion",
+        severity: "warning",
+        ...record,
+        metrics: { validation_reason: "input_hash" },
+      });
+    for (const reason of [
+      "SYNTHETIC_OPAQUE_CREDENTIAL_MARKER",
+      null,
+      [],
+      {
+        toString() {
+          coerced++;
+          throw new Error("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER");
+        },
+      },
+    ])
+      writer.record({
+        component: "companion",
+        severity: "warning",
+        event: "diagnostic_error",
+        code: "CLOUD_REPLY_INVALID",
+        metrics: { validation_reason: reason },
+      } as unknown as DiagnosticInput);
+    const journal = readFileSync(join(directory, "events.jsonl"), "utf8");
+    const values = journal
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as DiagnosticRecord)
+      .map((row) => row.metrics?.validation_reason)
+      .filter((value) => value !== undefined);
+    expect(values).toEqual([...CLOUD_REPLY_VALIDATION_REASONS]);
+    expect(coerced).toBe(0);
+    expect(journal).not.toContain("SYNTHETIC_OPAQUE_CREDENTIAL_MARKER");
+  });
+
   it("retains bounded crash context without thrown text or source data", () => {
     const directory = root();
     const writer = new Diagnostics(directory);

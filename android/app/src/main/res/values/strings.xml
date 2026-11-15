@@ -282,17 +282,11 @@
     <string name="update_now">Update now</string>
     <string name="update_later">Later</string>
     <string name="update_check_again">Check again</string>
-    <string name="update_downloading">Downloading… %1$d%%</string>
-    <string name="update_verifying">Verifying the signed update…</string>
-    <string name="update_permission_needed">Allow MusicMute to install this update, then return to the app.</string>
-    <string name="update_installer_waiting">Complete the Android installation to continue.</string>
+    <string name="update_downloading">Google Play is downloading… %1$d%%</string>
     <string name="update_store_opened">Complete the update in Google Play, then return to MusicMute.</string>
     <string name="update_error_offline">You are offline. Connect to the internet and try again.</string>
     <string name="update_error_rate_limited">Too many update checks. Wait a moment and try again.</string>
     <string name="update_error_release_unavailable">This update is not available yet. Try again shortly.</string>
-    <string name="update_error_storage">Free some device storage, then try the update again.</string>
-    <string name="update_error_invalid_apk">The downloaded update could not be verified. It was not opened.</string>
-    <string name="update_error_installer_unavailable">Android could not open the update installer.</string>
     <string name="update_error_install_cancelled">The update was not installed. Update the app to continue.</string>
     <string name="update_error_play_unavailable">This update is not currently available in Google Play.</string>
     <string name="update_error_service">The update service is temporarily unavailable. Try again.</string>
@@ -385,4 +379,10 @@
     <string name="trim_silence">Trim silent gaps</string>
     <string name="save_original">Save original audio</string>
     <string name="original_unavailable">Original comparison is unavailable for this track. Please try again.</string>
+    <string name="update_checking_play">Checking Google Play…</string>
+    <string name="update_play_flow">Continue the update in Google Play.</string>
+    <string name="update_downloaded">Google Play downloaded the update. Restart to install it.</string>
+    <string name="update_installing_play">Google Play is installing the update…</string>
+    <string name="update_restart">Restart to update</string>
+    <string name="update_open_play">Open Google Play</string>
 </resources>

@@ -687,7 +687,12 @@ describe('retry state, ownership and reservation fences', () => {
     expect(Number.isSafeInteger(submission.durationMs)).toBe(true);
     expect(submission.durationMs).toBeGreaterThanOrEqual(0);
     expect(f.jobRecords.updateOne).toHaveBeenCalledWith(
-      { _id: f.stored.jobId, userId: f.stored.userId },
+      {
+        _id: f.stored.jobId,
+        userId: f.stored.userId,
+        requestId: f.stored.jobRequestId,
+        deletedAt: null,
+      },
       { $set: { importStageTimings: f.stored.stageTimings } },
       { runValidators: true },
     );
@@ -934,6 +939,30 @@ describe('durable confirmed-source handoff', () => {
     expect(f.downloader.download).not.toHaveBeenCalled();
     expect(f.usage.reserveForImport).not.toHaveBeenCalled();
     expect(f.usage.releaseImport).not.toHaveBeenCalled();
+  });
+  it('recovers an attached history job by its owned ID rather than the new import request', async () => {
+    const acceptedId = new Types.ObjectId();
+    const f = confirmed({
+      handoffPending: true,
+      handoffAttempt: 1,
+      acquisitionAttempt: 4,
+      jobId: acceptedId,
+      status: 'uploading',
+    });
+    f.jobRecords.findOne.mockReturnValue({
+      lean: async () => ({ _id: acceptedId, inputObject: {} }),
+    } as never);
+    await f.processor.reconcileFailure({ ...f.stored }, dependency());
+    expect(f.jobRecords.findOne).toHaveBeenCalledWith({
+      userId: f.stored.userId,
+      _id: acceptedId,
+    });
+    expect(f.stored.status).toBe('submitted');
+    expect(String(f.stored.jobId)).toBe(String(acceptedId));
+    expect(f.shared.inspect).not.toHaveBeenCalled();
+    expect(f.jobs.createFromCache).not.toHaveBeenCalled();
+    expect(f.jobs.createForSharedInput).not.toHaveBeenCalled();
+    expect(f.downloader.download).not.toHaveBeenCalled();
   });
   it('keeps dependency reads pending for runtime recovery without downloader replay', async () => {
     const f = confirmed({

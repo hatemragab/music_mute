@@ -14,12 +14,15 @@ import MediaPlayer
   var onFinished: (() -> Void)?
   var onNext: (() -> Void)?
   var onPrevious: (() -> Void)?
+  var onPlaybackStarted: ((UUID) -> Void)?
   private var player: AVAudioPlayer?
   private var title = ""
   private var timer: Timer?
   private var notifications: [NSObjectProtocol] = []
   private var remoteTargets: [(MPRemoteCommand, Any)] = []
   private var resumeAfterInterruption = false
+  private var pendingPlaybackStart = false
+  private var finishedPlayback = false
 
   override init() {
     super.init()
@@ -97,6 +100,11 @@ import MediaPlayer
   }
 
   func toggle(id: UUID, title: String, file: URL?) {
+    LocalDiagnostics.emit(
+      "action.playback_toggle", category: "action",
+      data: [
+        "trackId": id.uuidString.lowercased(), "fileAvailable": file != nil, "result": "requested",
+      ])
     guard let file else {
       failed = true
       return
@@ -118,17 +126,20 @@ import MediaPlayer
         self.title = title
         duration = audio.duration
         position = 0
+        pendingPlaybackStart = true
+        finishedPlayback = false
         loading = false
         resume()
       } catch {
         player = nil
+        pendingPlaybackStart = false
+        finishedPlayback = false
         loading = false
         failed = true
       }
     } else if playing {
       pause()
     } else {
-      if position >= duration - 0.1 { seek(to: 0) }
       resume()
     }
   }
@@ -156,10 +167,19 @@ import MediaPlayer
     do {
       try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
       try AVAudioSession.sharedInstance().setActive(true)
+      if finishedPlayback {
+        player.currentTime = 0
+        position = 0
+      }
       playing = player.play()
       failed = !playing
       timer?.invalidate()
       if playing {
+        finishedPlayback = false
+        if pendingPlaybackStart, let currentID {
+          pendingPlaybackStart = false
+          onPlaybackStarted?(currentID)
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
           Task { @MainActor in
             guard let self else { return }
@@ -171,6 +191,14 @@ import MediaPlayer
       updateNowPlaying()
     } catch { failed = true }
   }
+
+  func restart() {
+    guard player != nil else { return }
+    pendingPlaybackStart = true
+    seek(to: 0)
+    resume()
+  }
+
   func stopAndClear() {
     original = false
     player?.stop()
@@ -183,11 +211,15 @@ import MediaPlayer
     duration = 0
     title = ""
     resumeAfterInterruption = false
+    pendingPlaybackStart = false
+    finishedPlayback = false
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
   }
 
   func pause() {
+    LocalDiagnostics.emit(
+      "action.playback_pause", category: "action", data: ["result": "requested"])
     player?.pause()
     playing = false
     loading = false
@@ -220,6 +252,8 @@ import MediaPlayer
       self.playing = false
       self.position = self.duration
       self.failed = !flag
+      self.finishedPlayback = flag
+      self.pendingPlaybackStart = flag
       self.timer?.invalidate()
       self.timer = nil
       self.updateNowPlaying()
