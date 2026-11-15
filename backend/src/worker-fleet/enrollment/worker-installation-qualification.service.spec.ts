@@ -44,7 +44,7 @@ describe('worker installation qualification upload', () => {
       },
       { runValidators: true },
     );
-    expect(f.transfers.findUploadedObject).toHaveBeenCalledWith(reservation);
+    expect(f.transfers.findUploadedVersion).toHaveBeenCalledWith(reservation);
     expect(
       f.transfers.createWorkerInstallationUploadGrant,
     ).toHaveBeenCalledWith(reservation, expiresAt);
@@ -61,7 +61,6 @@ describe('worker installation qualification upload', () => {
         headers: {
           'Content-Type': 'audio/mpeg',
           'x-amz-checksum-sha256': digestBase64,
-          'x-amz-meta-sha256': digestBase64,
           'If-None-Match': '*',
         },
         expiresAt: '2099-09-20T11:00:00.000Z',
@@ -104,7 +103,7 @@ describe('worker installation qualification upload', () => {
 
   it('recovers an uploaded immutable object without issuing another grant', async () => {
     const f = fixture({ qualificationReservation: expectedReservation() });
-    f.transfers.findUploadedObject.mockResolvedValueOnce(expectedObject());
+    f.transfers.findUploadedVersion.mockResolvedValueOnce(expectedObject());
 
     await expect(
       f.service.createUploadGrant(principal, installationId, {
@@ -131,18 +130,18 @@ describe('worker installation qualification upload', () => {
     );
   });
 
-  it('verifies and confirms the exact R2 object idempotently', async () => {
+  it('verifies and confirms the exact S3 version idempotently', async () => {
     const f = fixture({ qualificationReservation: expectedReservation() });
 
     await expect(
       f.service.confirmUpload(principal, installationId, {
         requestId,
-        etag: '"version-1"',
+        versionId: 'version-1',
       }),
     ).resolves.toEqual({ requestId, confirmed: true, replayed: false });
-    expect(f.transfers.verifyUploadedObject).toHaveBeenCalledWith(
+    expect(f.transfers.verifyUploadedVersion).toHaveBeenCalledWith(
       expectedReservation(),
-      '"version-1"',
+      'version-1',
     );
 
     const replay = fixture({
@@ -152,29 +151,29 @@ describe('worker installation qualification upload', () => {
     await expect(
       replay.service.confirmUpload(principal, installationId, {
         requestId,
-        etag: '"version-1"',
+        versionId: 'version-1',
       }),
     ).resolves.toEqual({ requestId, confirmed: true, replayed: true });
-    expect(replay.transfers.verifyUploadedObject).not.toHaveBeenCalled();
+    expect(replay.transfers.verifyUploadedVersion).not.toHaveBeenCalled();
   });
 
   it('maps unready uploads and storage outages to worker-safe errors', async () => {
     const unready = fixture({
       qualificationReservation: expectedReservation(),
     });
-    unready.transfers.verifyUploadedObject.mockRejectedValueOnce(
+    unready.transfers.verifyUploadedVersion.mockRejectedValueOnce(
       jobError('UPLOAD_NOT_READY'),
     );
     await expect(
       unready.service.confirmUpload(principal, installationId, {
         requestId,
-        etag: '"version-1"',
+        versionId: 'version-1',
       }),
     ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
 
     const outage = fixture();
-    outage.transfers.findUploadedObject.mockRejectedValueOnce(
-      new Error('private storage failure'),
+    outage.transfers.findUploadedVersion.mockRejectedValueOnce(
+      new Error('private S3 failure'),
     );
     await expect(
       outage.service.createUploadGrant(principal, installationId, {
@@ -197,7 +196,7 @@ describe('worker installation qualification upload', () => {
       ),
     ).rejects.toMatchObject({ response: { code: 'WORKER_NOT_FOUND' } });
     expect(f.installations.findById).not.toHaveBeenCalled();
-    expect(f.transfers.findUploadedObject).not.toHaveBeenCalled();
+    expect(f.transfers.findUploadedVersion).not.toHaveBeenCalled();
   });
 });
 
@@ -217,19 +216,20 @@ function fixture(overrides: Record<string, unknown> = {}) {
     updateOne: vi.fn(async () => ({ modifiedCount: 1 })),
   };
   const transfers = {
-    findUploadedObject: vi.fn(async (): Promise<ObjectIdentity | null> => null),
+    findUploadedVersion: vi.fn(
+      async (): Promise<ObjectIdentity | null> => null,
+    ),
     createWorkerInstallationUploadGrant: vi.fn(async () => ({
       method: 'PUT' as const,
       url: 'https://storage.example.invalid/upload',
       headers: {
         'Content-Type': 'audio/mpeg',
         'x-amz-checksum-sha256': digestBase64,
-        'x-amz-meta-sha256': digestBase64,
         'If-None-Match': '*',
       },
       expiresAt: '2099-09-20T11:00:00.000Z',
     })),
-    verifyUploadedObject: vi.fn(async () => expectedObject()),
+    verifyUploadedVersion: vi.fn(async () => expectedObject()),
   };
   return {
     service: new WorkerInstallationQualificationService(
@@ -251,5 +251,5 @@ function expectedReservation() {
 }
 
 function expectedObject() {
-  return { ...expectedReservation(), etag: '"version-1"' };
+  return { ...expectedReservation(), versionId: 'version-1' };
 }

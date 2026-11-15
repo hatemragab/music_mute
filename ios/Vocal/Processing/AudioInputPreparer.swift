@@ -63,6 +63,7 @@ actor AudioInputPreparer {
     sourceURL: URL?, ownerUid: String, securityScoped: Bool = true,
     operationId: UUID = UUID(), sourceTitle: String? = nil, sourceKind: JobSourceKind? = nil,
     clientStartedAt: Date? = nil, displayName: String? = nil,
+    canonicalSourceURL: String? = nil,
     onPreparation: @escaping @Sendable () async throws -> Void = {}
   ) async throws -> PreparedInput {
     guard let source = sourceURL else { throw AudioInputPreparationError.cancelled }
@@ -139,10 +140,12 @@ actor AudioInputPreparer {
           extension: ext, contentType: pair.contentType,
           bytes: copied.bytes, durationSeconds: media.duration, sha256: copied.digest),
         sourceTitle: sourceTitle, sourceKind: sourceKind, clientStartedAt: clientStartedAt,
-        displayName: displayName,
+        displayName: displayName, sourceURL: canonicalSourceURL,
         policyVersion: 2, preparationProfileId: policy.profileID,
-        mediaSource: ["mp4", "mov", "m4v"].contains(source.pathExtension.lowercased())
-          ? "video_file" : "audio_file")
+        mediaSource: sourceKind == .url
+          ? "youtube"
+          : ["mp4", "mov", "m4v"].contains(source.pathExtension.lowercased())
+            ? "video_file" : "audio_file")
     } catch {
       // Remove only this new, unpublished attempt; retained inputs are never swept.
       try? FileManager.default.removeItem(at: directory)

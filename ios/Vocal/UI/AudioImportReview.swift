@@ -2,9 +2,8 @@ import SwiftUI
 
 struct AudioImportReview: View {
   let intent: AudioPipelineIntent
-  let confirm: (Bool) async throws -> Void
+  let confirm: () async throws -> Void
   let cancel: () async -> Void
-  @State private var trimEnabled = true
   @State private var rightsConfirmed = false
   @State private var submitting = false
   @State private var failed = false
@@ -13,7 +12,7 @@ struct AudioImportReview: View {
     Form {
       Section("import_review_title") {
         Text(intent.sourceTitle ?? intent.reviewInput?.fileURL.lastPathComponent ?? "")
-        Text("processing_import")
+        Text(intent.sourceKind == .url ? "youtube_secondary" : "processing_import")
         if let input = intent.reviewInput {
           Text(
             ByteCountFormatter.string(fromByteCount: input.declaration.bytes, countStyle: .file))
@@ -22,8 +21,6 @@ struct AudioImportReview: View {
               .time(pattern: .minuteSecond)))
         }
         Text("import_cloud_disclosure")
-        Toggle("trim_silence", isOn: $trimEnabled).disabled(submitting)
-          .accessibilityIdentifier("importTrimSilence")
         Toggle("import_rights_confirmation", isOn: $rightsConfirmed)
           .accessibilityIdentifier("importRightsConfirmation")
       }
@@ -32,7 +29,7 @@ struct AudioImportReview: View {
         guard rightsConfirmed, !submitting else { return }
         submitting = true
         Task {
-          do { try await confirm(trimEnabled) } catch {
+          do { try await confirm() } catch {
             failed = true
             submitting = false
           }
@@ -59,9 +56,8 @@ struct PendingAudioReviews: ViewModifier {
       if let intent = pipeline.pipelines.first(where: { $0.phase == .awaitingConfirmation }) {
         AudioImportReview(
           intent: intent,
-          confirm: { trimEnabled in
-            try await pipeline.confirmProcessing(
-              intent.operationId, rightsConfirmed: true, trimEnabled: trimEnabled)
+          confirm: {
+            try await pipeline.confirmProcessing(intent.operationId, rightsConfirmed: true)
           }, cancel: { await pipeline.cancel(intent.operationId) }
         )
         .id(intent.operationId)

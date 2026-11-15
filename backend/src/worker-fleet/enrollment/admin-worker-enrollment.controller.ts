@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Header,
-  HttpCode,
-  Param,
-  Post,
-  Req,
-} from '@nestjs/common';
+import { Body, Controller, Param, Post, Req } from '@nestjs/common';
 import type { AuthRequest } from '../../auth/auth-request.js';
 import {
   LimitAdmin,
@@ -16,7 +8,6 @@ import {
 import {
   CreateWorkerInvitationDto,
   WorkerLifecycleDto,
-  WorkerMachineDeletionDto,
 } from './worker-enrollment.dto.js';
 import { WorkerEnrollmentService } from './worker-enrollment.service.js';
 
@@ -35,7 +26,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.createInvitation(request.adminActor!, dto);
   }
 
-  @Post('invitations/:id/revocations')
+  @Post('invitations/:id/revoke')
   @RequireAdminPermission('workers.enroll')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -47,7 +38,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.revokeInvitation(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/pauses')
+  @Post('machines/:id/pause')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -59,7 +50,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.pause(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/drains')
+  @Post('machines/:id/drain')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -71,7 +62,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.drain(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/resumptions')
+  @Post('machines/:id/resume')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -83,7 +74,7 @@ export class AdminWorkerEnrollmentController {
     return this.enrollment.resume(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/revocations')
+  @Post('machines/:id/revoke')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -93,23 +84,5 @@ export class AdminWorkerEnrollmentController {
     @Body() dto: WorkerLifecycleDto,
   ) {
     return this.enrollment.revoke(request.adminActor!, id, dto);
-  }
-
-  @Post('machines/:id/deletions')
-  @HttpCode(200)
-  @Header('Cache-Control', 'no-store')
-  @RequireAdminPermission(
-    'workers.manage',
-    'users.read',
-    'users.worker-registration.manage',
-  )
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  deleteMachine(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() dto: WorkerMachineDeletionDto,
-  ) {
-    return this.enrollment.deleteMachine(request.adminActor!, id, dto);
   }
 }

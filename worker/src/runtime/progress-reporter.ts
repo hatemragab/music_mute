@@ -1,10 +1,8 @@
-import type { ExecutionStageTiming } from "./stage-clock.js";
 import type { WorkerProgressPhase } from "../../protocol/v1/protocol.js";
 import type { ChildProgress } from "../agent/ipc/child-progress.js";
 import type { AttemptStage } from "./worker-runtime.js";
 
 export interface AttemptProgressUpdate {
-  executionTimings?: ExecutionStageTiming[];
   sequence: number;
   phase: WorkerProgressPhase;
   phasePercent: number | null;
@@ -112,8 +110,6 @@ function sameProgress(
   return (
     right !== null &&
     left.phase === right.phase &&
-    left.phasePercent === right.phasePercent &&
-    JSON.stringify(left.executionTimings) ===
-      JSON.stringify(right.executionTimings)
+    left.phasePercent === right.phasePercent
   );
 }

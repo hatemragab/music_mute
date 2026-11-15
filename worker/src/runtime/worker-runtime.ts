@@ -1,12 +1,11 @@
-import { localDiagnostics } from "../observability/local-debug.js";
-import { StageClock } from "./stage-clock.js";
-import { DiagnosticForwarder } from "./diagnostic-forwarder.js";
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { ChildCommandError } from "../agent/ipc/child-command-error.js";
-import { sanitizeDiagnostic } from "../agent/diagnostic-redaction.js";
+import {
+  ChildCommandError,
+  sanitizeDiagnostic,
+} from "../agent/child-process.js";
 import type { ChildResponse } from "../agent/ipc/child-protocol.js";
 import {
   ControlPlaneError,
@@ -28,7 +27,6 @@ import { LeaseAuthority, OwnershipLostError } from "./lease-authority.js";
 import {
   loadLocalLifecycle,
   localLifecycleAllowsClaims,
-  type LocalLifecycleState,
 } from "./local-lifecycle.js";
 import { writeLocalRuntimeStatus } from "./local-runtime-status.js";
 import type { RuntimeJobSummary } from "./local-runtime-status.js";
@@ -41,22 +39,13 @@ import {
   RuntimeResourceGate,
   RuntimeResourceLimitError,
 } from "./resource-limits.js";
-import {
-  TransferError,
-  TransferOwnershipError,
-  type WorkerTransferClient,
-} from "./transfers.js";
-import {
-  WorkspaceManager,
-  type AttemptWorkspace,
-  type RuntimeWorkspace,
-} from "./workspace.js";
+import { TransferError, type WorkerTransferClient } from "./transfers.js";
+import { WorkspaceManager, type AttemptWorkspace } from "./workspace.js";
 import {
   AttemptProgressReporter,
   publicAttemptProgress,
 } from "./progress-reporter.js";
 import type { RuntimeCommandExecutor } from "./remote-command-executor.js";
-import type { PersonalAdmission } from "./personal-admission.js";
 
 export interface RuntimeSlotDefinition {
   workerId: string;
@@ -84,14 +73,7 @@ export interface WorkerRuntimeOptions {
   validatedMaxWorkersPerGpu?: 1 | 2;
   diagnostics?: RuntimeDiagnostics;
   resources?: Pick<RuntimeResourceGate, "assertAvailable">;
-  /** Internal native workspace lifecycle for Store-owned attempts. */
-  workspace?: RuntimeWorkspace;
   commandExecutor?: RuntimeCommandExecutor;
-  maintenancePending?: () => Promise<boolean>;
-  deferPreloadForMaintenance?: boolean;
-  personalAdmission?: PersonalAdmission;
-  /** Consumer-only positive owned-role proof before failed/cancelled inference scratch cleanup. */
-  terminatedInferenceIdle?: () => Promise<boolean>;
   onEvent?: (event: RuntimeEvent) => void;
   hintClientFactory?: (onHint: () => void) => RuntimeHintClient;
 }
@@ -116,13 +98,6 @@ export type AttemptStage =
 
 type RuntimeEventInput =
   | { kind: "started" }
-  | { kind: "diagnostic-delivery-deferred" }
-  | { kind: "reconciliation-failed"; code: string; detail: string }
-  | ({
-      kind: "failure-report-deferred" | "workspace-cleanup-failed";
-      code: string;
-    } & AttemptEventIdentity)
-  | { kind: "resource-recovered"; workerId: string }
   | {
       kind: "model-ready";
       workerId: string;
@@ -221,8 +196,6 @@ interface RuntimeControlPlane {
   progress?: WorkerControlPlaneClient["progress"];
   complete: WorkerControlPlaneClient["complete"];
   fail: WorkerControlPlaneClient["fail"];
-  appendDiagnosticLogs?: WorkerControlPlaneClient["appendDiagnosticLogs"];
-  diagnosticLogCursor?: WorkerControlPlaneClient["diagnosticLogCursor"];
   completeCommand: WorkerControlPlaneClient["completeCommand"];
 }
 
@@ -253,7 +226,6 @@ interface ProcessingChild {
   ): Promise<ChildResponse>;
   terminateActive(): void;
   isProcessing(): boolean;
-  isAlive?(): boolean;
   diagnosticTail?(): string;
 }
 
@@ -264,17 +236,14 @@ function eventSeverity(
     kind === "attempt-failed" ||
     kind === "child-failed" ||
     kind === "transfer-failed" ||
-    kind === "child-unavailable" ||
-    kind === "workspace-cleanup-failed"
+    kind === "child-unavailable"
   )
     return "error";
   if (
     kind === "resource-blocked" ||
     kind === "attempt-stopped" ||
     kind === "progress-sync-failed" ||
-    kind === "command-report-deferred" ||
-    kind === "reconciliation-failed" ||
-    kind === "failure-report-deferred"
+    kind === "command-report-deferred"
   )
     return "warning";
   return "info";
@@ -287,17 +256,10 @@ class PublicationUncertainError extends Error {
   }
 }
 
-class AttemptDeferredError extends Error {
-  constructor(readonly code: string) {
-    super(`Attempt deferred (${code})`);
-    this.name = "AttemptDeferredError";
-  }
-}
-
 export class WorkerRuntime {
   readonly sessionId = randomUUID();
   readonly incarnation = randomUUID();
-  private readonly workspace: RuntimeWorkspace;
+  private readonly workspace: WorkspaceManager;
   private readonly diagnostics: RuntimeDiagnostics;
   private readonly resources: Pick<RuntimeResourceGate, "assertAvailable">;
   private readonly busy = new Map<string, Promise<void>>();
@@ -319,16 +281,7 @@ export class WorkerRuntime {
   private readonly lastProgressSnapshotAt = new Map<string, number>();
   private readonly pendingClaims = new Map<string, string>();
   private readonly unavailable = new Set<string>();
-  private readonly cleanupBlocked = new Set<string>();
-  private readonly resourceRecovery = new Map<
-    string,
-    { inputBytes: number; retryAt: number }
-  >();
-  private diagnosticForwarder: DiagnosticForwarder | undefined;
-  private readonly idleChildExits = new Map<string, number>();
   private readonly childRecoveryAfter = new Map<string, number>();
-  private readonly childRecoveryFailures = new Map<string, number>();
-  private readonly childRecoveryExhausted = new Set<string>();
   private readonly pendingCommandResults = new Map<
     string,
     { requestId: string; result: WorkerCommandResult }
@@ -338,7 +291,6 @@ export class WorkerRuntime {
   private machineId = "";
   private childState:
     "loading" | "warming" | "ready" | "unavailable" | "stopped" = "loading";
-  private observedLifecycle?: LocalLifecycleState;
   private cachedPolicy?: {
     machineStatus: ConfigResponse["machineStatus"];
     claimAllowed: boolean;
@@ -349,13 +301,9 @@ export class WorkerRuntime {
   private lastSuccessfulJob?: RuntimeJobSummary;
   private lastFailedJob?: RuntimeJobSummary & { code: string };
   private started = false;
-  private childrenSuspended = false;
-  private stopPromise: Promise<void> | undefined;
   private wakeResolver: (() => void) | null = null;
   private wakeGeneration = 0;
   private eventSequence = 0;
-  private reconcileNotBefore = 0;
-  private diagnosticRecordingFailed = false;
 
   constructor(
     private readonly options: WorkerRuntimeOptions,
@@ -364,30 +312,10 @@ export class WorkerRuntime {
     private readonly supervisor: RuntimeSupervisor,
   ) {
     validateOptions(options);
-    this.workspace =
-      options.workspace === undefined
-        ? new WorkspaceManager(options.workRoot)
-        : options.workspace;
+    this.workspace = new WorkspaceManager(options.workRoot);
     this.diagnostics =
       options.diagnostics ??
       new DiagnosticSpool(join(dirname(options.workRoot), "logs"));
-    if (
-      this.diagnostics instanceof DiagnosticSpool &&
-      control.appendDiagnosticLogs
-    ) {
-      this.diagnosticForwarder = new DiagnosticForwarder(
-        join(dirname(options.workRoot), "logs", "delivery.json"),
-        this.diagnostics,
-        {
-          appendDiagnosticLogs: control.appendDiagnosticLogs.bind(control),
-          ...(control.diagnosticLogCursor
-            ? { diagnosticLogCursor: control.diagnosticLogCursor.bind(control) }
-            : {}),
-        },
-        { sessionId: this.sessionId, incarnation: this.incarnation },
-        () => this.emit({ kind: "diagnostic-delivery-deferred" }),
-      );
-    }
     this.resources =
       options.resources ?? new RuntimeResourceGate(options.workRoot);
     this.hintClient = options.hintClientFactory?.(() =>
@@ -399,59 +327,44 @@ export class WorkerRuntime {
     if (this.started) throw new Error("Worker runtime has already started");
     await this.diagnostics.initialize();
     await this.workspace.initialize();
-    await this.options.personalAdmission?.start(() => this.wake());
     this.childState = "loading";
     await this.publishLocalStatus();
     try {
-      if (
-        this.options.personalAdmission?.pending() ||
-        (this.options.deferPreloadForMaintenance === true &&
-          (await this.options.maintenancePending?.()))
-      ) {
-        this.childrenSuspended = true;
-        this.childState = "stopped";
-      } else {
-        await this.supervisor.start((_workerId, stage) => {
-          this.childState = stage;
-          void this.publishLocalStatus().catch(() => undefined);
-        });
-        this.childState = "ready";
-        for (const slot of this.options.slots)
-          this.emitModelReady(slot, "initial-start");
-      }
+      await this.supervisor.start((_workerId, stage) => {
+        this.childState = stage;
+        void this.publishLocalStatus().catch(() => undefined);
+      });
+      this.childState = "ready";
+      for (const slot of this.options.slots)
+        this.emitModelReady(slot, "initial-start");
     } catch (error) {
       this.childState = "unavailable";
       await this.publishLocalStatus();
       throw error;
     }
     try {
-      const session = await this.retryStartupControlRequest(() =>
-        this.control.openSession(
-          this.sessionId,
-          this.incarnation,
-          this.stopping.signal,
-        ),
+      const session = await this.control.openSession(
+        this.sessionId,
+        this.incarnation,
+        this.stopping.signal,
       );
       if (session.machineId !== this.options.machineId)
         throw new Error("Machine credential resolved to an unexpected machine");
       this.machineId = session.machineId;
-      await this.retryStartupControlRequest(() => this.synchronizeConfig());
+      await this.synchronizeConfig();
       for (const slot of this.options.slots) {
-        await this.retryStartupControlRequest(() =>
-          this.control.registerSlot(
-            this.identity(slot),
-            slot.gpuId,
-            slot.slotIndex,
-            slot.recipeIds,
-            this.stopping.signal,
-          ),
+        await this.control.registerSlot(
+          this.identity(slot),
+          slot.gpuId,
+          slot.slotIndex,
+          slot.recipeIds,
+          this.stopping.signal,
         );
       }
       this.started = true;
       this.hintClient?.start(this.stopping.signal);
       await this.publishLocalStatus();
       this.emit({ kind: "started" });
-      this.diagnosticForwarder?.start();
     } catch (error) {
       await this.hintClient?.stop();
       await this.supervisor.stop();
@@ -460,10 +373,7 @@ export class WorkerRuntime {
   }
 
   async run(signal?: AbortSignal): Promise<void> {
-    if (signal?.aborted) return;
-    const onAbort = () => {
-      void this.stop().catch(() => undefined);
-    };
+    const onAbort = () => void this.stop();
     signal?.addEventListener("abort", onAbort, { once: true });
     let lifecycleWatcher: FSWatcher | undefined;
     try {
@@ -476,12 +386,7 @@ export class WorkerRuntime {
             (_event, filename) => {
               if (
                 filename === null ||
-                [
-                  basename(lifecyclePath),
-                  "app-maintenance.json",
-                  "app-preparation.json",
-                  "update.json",
-                ].includes(String(filename))
+                String(filename) === basename(lifecyclePath)
               )
                 this.wake();
             },
@@ -491,56 +396,15 @@ export class WorkerRuntime {
           // The bounded idle poll remains the fallback when watching is unavailable.
         }
       }
-      let consecutiveFailures = 0;
       while (!this.stopping.signal.aborted) {
         const wakeGeneration = this.wakeGeneration;
-        try {
-          await this.reconcileOnce();
-          consecutiveFailures = 0;
-        } catch (error) {
-          if (this.stopping.signal.aborted) break;
-          // Preserve pending claim IDs across transport recovery. Auth,
-          // ownership and protocol failures must still fail closed.
-          if (!(error instanceof ControlPlaneError) || !error.retryable)
-            throw error;
-          this.emit({
-            kind: "reconciliation-failed",
-            code: error.code,
-            detail:
-              "Control-plane unavailable; claims suspended during recovery",
-          });
-          // An outage must not consume the service restart budget or unload a
-          // healthy model. Keep claims fenced until configuration is refreshed.
-          if (this.cachedPolicy) this.cachedPolicy.claimAllowed = false;
-          await this.publishLocalStatus();
-          const delayMs = Math.min(
-            30_000,
-            Math.max(
-              200,
-              error.retryAfterMs ??
-                1_000 * 2 ** Math.min(consecutiveFailures, 5),
-            ),
-          );
-          consecutiveFailures = Math.min(consecutiveFailures + 1, 6);
-          await abortableDelay(delayMs, this.stopping.signal).catch(
-            () => undefined,
-          );
-          continue;
-        }
+        await this.reconcileOnce();
         if (this.stopping.signal.aborted) break;
-        const deferredMs = this.reconcileNotBefore - Date.now();
-        if (deferredMs > 0)
-          await this.waitForWake(
-            deferredMs,
-            wakeGeneration,
-            this.stopping.signal,
-          );
-        else
-          await this.waitForWake(
-            randomPollDelay(this.options),
-            wakeGeneration,
-            this.stopping.signal,
-          );
+        await this.waitForWake(
+          randomPollDelay(this.options),
+          wakeGeneration,
+          this.stopping.signal,
+        );
       }
     } finally {
       lifecycleWatcher?.close();
@@ -552,90 +416,36 @@ export class WorkerRuntime {
   async reconcileOnce(): Promise<number> {
     this.assertStarted();
     if (this.stopping.signal.aborted) return 0;
-    // Only the serialized claim loop acknowledges intent. A progress/status
-    // callback must never acknowledge drain while a claim is still in flight.
-    await this.observeLocalLifecycle();
-    // Physical ownership does not depend on a healthy control plane. Uncertain
-    // claim IDs remain an absolute fence until replay resolves their ownership.
-    const yielded = await this.yieldPersonalIfIdle();
-    if (
-      (await this.options.maintenancePending?.()) &&
-      this.pendingClaims.size === 0
-    ) {
-      await this.publishLocalStatus();
-      return 0;
-    }
-    if (Date.now() < this.reconcileNotBefore) return 0;
-    let config: ConfigResponse;
-    try {
-      config = await this.synchronizeConfig();
-    } catch (error) {
-      if (yielded && error instanceof ControlPlaneError && error.retryable)
-        return 0;
-      if (this.deferReconciliation(error)) return 0;
-      throw error;
-    }
+    const config = await this.synchronizeConfig();
     await this.publishLocalStatus();
-    const personal = this.options.personalAdmission;
-    await this.processRemoteCommands(config, !personal?.pending());
-    if (yielded || (await this.yieldPersonalIfIdle())) return 0;
-    if (this.childrenSuspended) {
-      if (personal?.pending()) return 0;
-      await this.supervisor.start((_workerId, stage) => {
-        this.childState = stage;
-        void this.publishLocalStatus().catch(() => undefined);
-      });
-      this.childrenSuspended = false;
-      this.childState = "ready";
-      for (const slot of this.options.slots)
-        this.emitModelReady(slot, "slot-recovery");
-      await this.publishLocalStatus();
-    }
-    if (!personal?.pending()) {
-      this.detectIdleChildExit();
-      await this.recoverChildren();
-      await this.recoverResources();
-    }
+    await this.processRemoteCommands(config);
+    await this.recoverChildren();
     await this.publishLocalStatus();
-    const canAdmit =
-      !this.diagnosticRecordingFailed &&
-      (await this.diagnostics.canAdmitJobs());
-    if (!canAdmit && this.pendingClaims.size === 0) return 0;
+    if (!(await this.diagnostics.canAdmitJobs())) return 0;
     const idle = this.options.slots.filter(
       (slot) =>
-        !this.busy.has(slot.workerId) &&
-        (this.pendingClaims.has(slot.workerId) ||
-          !this.unavailable.has(slot.workerId)),
+        !this.busy.has(slot.workerId) && !this.unavailable.has(slot.workerId),
     );
     if (idle.length === 0) return 0;
-    if (!config.claimAllowed && this.pendingClaims.size === 0) return 0;
+    if (!config.claimAllowed) return 0;
+    if (this.options.localLifecyclePath !== undefined) {
+      const lifecycle = await loadLocalLifecycle(
+        this.options.localLifecyclePath,
+      );
+      if (!localLifecycleAllowsClaims(lifecycle)) return 0;
+    }
     let claimed = 0;
     for (const slot of idle) {
-      const uncertain = this.pendingClaims.has(slot.workerId);
-      if (!canAdmit && !uncertain) continue;
-      if (!(await this.observeLocalLifecycle()) && !uncertain) continue;
-      if ((await this.options.maintenancePending?.()) && !uncertain) continue;
-      if (!config.claimAllowed && !uncertain) continue;
-      // Resolve uncertain claims with the same request ID before yielding;
-      // only fresh claims are blocked by a personal reservation.
-      if (personal?.pending() && !this.pendingClaims.has(slot.workerId))
-        continue;
       const requestId = this.pendingClaims.get(slot.workerId) ?? randomUUID();
       this.pendingClaims.set(slot.workerId, requestId);
-      let response: Awaited<ReturnType<RuntimeControlPlane["claim"]>>;
-      try {
-        response = await this.control.claim(
-          this.identity(slot),
-          slot.gpuId,
-          slot.slotIndex,
-          config.appliedRevision,
-          requestId,
-          this.stopping.signal,
-        );
-      } catch (error) {
-        if (this.deferReconciliation(error)) return claimed;
-        throw error;
-      }
+      const response = await this.control.claim(
+        this.identity(slot),
+        slot.gpuId,
+        slot.slotIndex,
+        config.appliedRevision,
+        requestId,
+        this.stopping.signal,
+      );
       this.pendingClaims.delete(slot.workerId);
       if (!response.claim) continue;
       claimed += 1;
@@ -662,74 +472,13 @@ export class WorkerRuntime {
           this.activeAttemptIds.delete(slot.workerId);
           this.activeJobs.delete(slot.workerId);
           this.lastProgressSnapshotAt.delete(slot.workerId);
-          try {
-            await this.publishLocalStatus();
-          } finally {
-            this.wake();
-          }
-        })
-        .catch(() => undefined);
+          await this.publishLocalStatus();
+          this.wake();
+        });
       this.busy.set(slot.workerId, attempt);
       await this.publishLocalStatus();
     }
-    await this.observeLocalLifecycle();
     return claimed;
-  }
-
-  private deferReconciliation(error: unknown): boolean {
-    // A rate limit supplies a safe retry window; other transient failures must
-    // reach the run loop's bounded recovery and diagnostic path.
-    if (!(error instanceof ControlPlaneError) || error.status !== 429)
-      return false;
-    const delayMs = Math.min(
-      60_000,
-      Math.max(200, error.retryAfterMs ?? 1_000),
-    );
-    this.reconcileNotBefore = Date.now() + delayMs;
-    return true;
-  }
-
-  private async retryStartupControlRequest<T>(
-    request: () => Promise<T>,
-  ): Promise<T> {
-    for (let attempt = 0; !this.stopping.signal.aborted; attempt += 1) {
-      await this.yieldPersonalIfIdle();
-      try {
-        return await request();
-      } catch (error) {
-        if (!(error instanceof ControlPlaneError) || !error.retryable)
-          throw error;
-        const delayMs = Math.min(
-          60_000,
-          Math.max(200, error.retryAfterMs ?? 500 * 2 ** Math.min(attempt, 6)),
-        );
-        await this.waitForWake(
-          delayMs,
-          this.wakeGeneration,
-          this.stopping.signal,
-        );
-      }
-    }
-    throw this.stopping.signal.reason;
-  }
-
-  private async yieldPersonalIfIdle(): Promise<boolean> {
-    const personal = this.options.personalAdmission;
-    if (
-      !personal?.pending() ||
-      this.busy.size !== 0 ||
-      this.pendingClaims.size !== 0 ||
-      (await this.options.maintenancePending?.())
-    )
-      return false;
-    if (!this.childrenSuspended) {
-      await this.supervisor.stop();
-      this.childrenSuspended = true;
-      this.childState = "stopped";
-    }
-    await this.publishLocalStatus();
-    await personal.grant();
-    return true;
   }
 
   hintAvailableWork(): void {
@@ -740,50 +489,21 @@ export class WorkerRuntime {
     await Promise.allSettled(this.busy.values());
   }
 
-  stop(): Promise<void> {
-    this.stopPromise ??= this.stopOnce();
-    return this.stopPromise;
-  }
-
-  private async stopOnce(): Promise<void> {
-    this.diagnosticForwarder?.stop();
+  async stop(): Promise<void> {
     if (!this.stopping.signal.aborted)
       this.stopping.abort(new OwnershipLostError("runtime-stopping"));
     this.wake();
-    // Active attempts observe the abort and terminate their processing child.
-    // Await recovery/cleanup before stopping all remaining children once.
-    await this.waitForIdle();
-    try {
-      const [hints, children] = await Promise.allSettled([
-        this.hintClient?.stop(),
-        this.supervisor.stop(),
-      ]);
-      this.childState =
-        children.status === "fulfilled" ? "stopped" : "unavailable";
-      this.started = false;
-      await this.publishLocalStatus();
-      if (children.status === "rejected") throw children.reason;
-      if (hints.status === "rejected") throw hints.reason;
-    } finally {
-      try {
-        await this.diagnostics.flush();
-      } finally {
-        // A failed child-exit check must not leave the admission socket/timer
-        // keeping a dead supervisor alive and preventing service recovery.
-        await this.options.personalAdmission?.stop();
-      }
+    for (const slot of this.options.slots) {
+      if (this.busy.has(slot.workerId))
+        this.supervisor.child(slot.workerId).terminateActive();
     }
-  }
-
-  private async observeLocalLifecycle(): Promise<boolean> {
-    if (this.options.localLifecyclePath === undefined) return true;
-    const requested = await loadLocalLifecycle(this.options.localLifecyclePath);
-    // A drain ACK plus an empty active-attempt list is a physical-stop promise.
-    // Do not acknowledge it while a lost claim response might own a real job.
-    if (this.pendingClaims.size === 0 || requested.intent === "active")
-      this.observedLifecycle = requested;
+    await this.waitForIdle();
+    await this.hintClient?.stop();
+    await this.supervisor.stop();
+    this.childState = "stopped";
     await this.publishLocalStatus();
-    return localLifecycleAllowsClaims(requested);
+    await this.diagnostics.flush();
+    this.started = false;
   }
 
   private async publishLocalStatus(): Promise<void> {
@@ -792,20 +512,11 @@ export class WorkerRuntime {
     const attemptIds = [...this.activeAttemptIds.values()];
     const coverage = this.diagnostics.coverage?.();
     const details = {
-      ...(this.observedLifecycle === undefined
-        ? {}
-        : {
-            observedLifecycle: {
-              revision: this.observedLifecycle.revision,
-              intent: this.observedLifecycle.intent,
-            },
-          }),
       currentAttempts: [...this.activeJobs].map(([workerId, attempt]) => ({
         workerId,
         ...attempt,
       })),
-      childState:
-        this.unavailable.size > 0 ? ("unavailable" as const) : this.childState,
+      childState: this.childState,
       sessionId: this.sessionId,
       incarnation: this.incarnation,
       processId: process.pid,
@@ -821,9 +532,7 @@ export class WorkerRuntime {
         ? {}
         : {
             diagnostics: {
-              blockedReason: this.diagnosticRecordingFailed
-                ? "write-failed"
-                : coverage.blockedReason,
+              blockedReason: coverage.blockedReason,
               earliestAvailableAt: coverage.earliestAvailableAt,
               incompleteHistory: coverage.incompleteHistory,
               retainedBytes: coverage.retainedBytes,
@@ -903,7 +612,6 @@ export class WorkerRuntime {
     let workspace: AttemptWorkspace | null = null;
     let terminal = false;
     let childTerminated = false;
-    let consumerInferenceUnconfirmed = false;
     const lose = (reason: string) => {
       if (terminal || controller.signal.aborted) return;
       authority.lose(reason);
@@ -941,13 +649,10 @@ export class WorkerRuntime {
       modelLoadState: "preloaded",
       childIncarnation: child.incarnation,
     });
-    let inputGrantMs: number | null = null;
-    const publicationTiming = { outputGrantMs: 0, outputPutMs: 0 };
     let downloadMs: number | null = null;
     let uploadMs: number | null = null;
     let completionMs: number | null = null;
     let currentStage: AttemptStage = "resource-check";
-    const stageClock = new StageClock();
     const progressReporter = new AttemptProgressReporter(
       async (update) => {
         if (this.control.progress)
@@ -977,7 +682,6 @@ export class WorkerRuntime {
       if (controller.signal.aborted || terminal) return;
       const previousStage = currentStage;
       currentStage = stage;
-      stageClock.enter(stage);
       const active = this.activeJobs.get(slot.workerId);
       if (active) {
         const now = new Date().toISOString();
@@ -1007,21 +711,8 @@ export class WorkerRuntime {
         stage,
         ...(work === undefined ? {} : { work }),
       });
-      progressReporter.update({
-        ...publicAttemptProgress(stage, work),
-        executionTimings: stageClock.snapshot(),
-      });
+      progressReporter.update(publicAttemptProgress(stage, work));
     };
-    const timingHeartbeat = setInterval(() => {
-      if (!terminal && !controller.signal.aborted)
-        progressReporter.update({
-          ...publicAttemptProgress(
-            currentStage,
-            this.activeJobs.get(slot.workerId)?.work,
-          ),
-          executionTimings: stageClock.snapshot(),
-        });
-    }, 5_000);
     try {
       enterStage("resource-check");
       await this.resources.assertAvailable(claim.input.bytes);
@@ -1029,14 +720,11 @@ export class WorkerRuntime {
         claim.attemptId,
         claim.input.contentType,
       );
-      const inputGrantStarted = performance.now();
-      const input = await this.retryAttemptControlRequest(
-        () =>
-          this.control.inputGrant(claim.attemptId, identity, controller.signal),
-        authority,
+      const input = await this.control.inputGrant(
+        claim.attemptId,
+        identity,
         controller.signal,
       );
-      inputGrantMs = Math.max(0, performance.now() - inputGrantStarted);
       if (!sameObject(input.object, claim.input))
         throw new TransferError("DOWNLOAD_FAILED", false);
       enterStage("input-download");
@@ -1050,7 +738,6 @@ export class WorkerRuntime {
       downloadMs = Math.max(0, performance.now() - downloadStarted);
       authority.assertCurrent();
 
-      enterStage("input-validation");
       let childResponse: ChildResponse;
       try {
         childResponse = await child.request(
@@ -1078,10 +765,6 @@ export class WorkerRuntime {
         );
       } catch (error) {
         if (error instanceof ChildCommandError) {
-          if (error.code === "GPU_OOM") {
-            childTerminated = true;
-            child.terminateActive();
-          }
           this.emit({
             kind: "child-failed",
             workerId: slot.workerId,
@@ -1116,13 +799,12 @@ export class WorkerRuntime {
 
       enterStage("output-upload");
       const uploadStarted = performance.now();
-      const etag = await this.publishOutput(
+      const versionId = await this.publishOutput(
         identity,
         claim,
         result,
         authority,
         controller.signal,
-        publicationTiming,
       );
       uploadMs = Math.max(0, performance.now() - uploadStarted);
       authority.assertCurrent();
@@ -1133,18 +815,16 @@ export class WorkerRuntime {
           claim.attemptId,
           identity,
           {
-            etag,
+            versionId,
             recipeId: result.recipeId,
             recipeRevision: result.recipeRevision,
             recipeDigest: result.recipeDigest,
             modelDigest: result.modelDigest,
             trimEnabled: result.trimEnabled,
-            comparisonRanges: result.comparisonRanges,
             denoiseEnabled: result.denoiseEnabled,
             outputFormat: result.outputFormat,
             outputBitrateKbps: result.outputBitrateKbps,
             stageTimings: result.stageTimings,
-            executionTimings: stageClock.snapshot(),
           },
           controller.signal,
         );
@@ -1154,7 +834,6 @@ export class WorkerRuntime {
         throw new PublicationUncertainError();
       }
       terminal = true;
-      this.idleChildExits.delete(slot.workerId);
       this.lastSuccessfulJob = {
         jobId: claim.jobId,
         attemptId: claim.attemptId,
@@ -1168,11 +847,6 @@ export class WorkerRuntime {
         stageTimings: [
           ...result.stageTimings,
           ...(result.separationTimings ?? []),
-          ...(inputGrantMs === null
-            ? []
-            : [{ stage: "inputGrant", durationMs: inputGrantMs }]),
-          { stage: "outputGrant", durationMs: publicationTiming.outputGrantMs },
-          { stage: "outputPut", durationMs: publicationTiming.outputPutMs },
           ...(downloadMs === null
             ? []
             : [{ stage: "download", durationMs: downloadMs }]),
@@ -1188,23 +862,8 @@ export class WorkerRuntime {
         outputBitrateKbps: result.outputBitrateKbps,
       });
     } catch (error) {
-      if (error instanceof TransferOwnershipError) {
-        this.unavailable.add(slot.workerId);
-        this.cleanupBlocked.add(slot.workerId);
-        this.emit({
-          kind: "workspace-cleanup-failed",
-          workerId: slot.workerId,
-          jobId: claim.jobId,
-          attemptId: claim.attemptId,
-          code: "writer-not-closed",
-        });
-      }
       if (error instanceof RuntimeResourceLimitError) {
         this.unavailable.add(slot.workerId);
-        this.resourceRecovery.set(slot.workerId, {
-          inputBytes: claim.input.bytes,
-          retryAt: Date.now() + 30_000,
-        });
         this.emit({
           kind: "resource-blocked",
           workerId: slot.workerId,
@@ -1216,7 +875,6 @@ export class WorkerRuntime {
       if (
         error instanceof OwnershipLostError ||
         error instanceof PublicationUncertainError ||
-        error instanceof AttemptDeferredError ||
         isOwnershipRejection(error) ||
         controller.signal.aborted ||
         this.stopping.signal.aborted
@@ -1227,14 +885,11 @@ export class WorkerRuntime {
           jobId: claim.jobId,
           attemptId: claim.attemptId,
           code:
-            error instanceof AttemptDeferredError
-              ? error.code
-              : error instanceof PublicationUncertainError
-                ? "completion-uncertain"
-                : error instanceof ControlPlaneError &&
-                    isOwnershipRejection(error)
-                  ? "ownership-rejected"
-                  : ownershipCode(error, controller.signal.reason),
+            error instanceof PublicationUncertainError
+              ? "completion-uncertain"
+              : isOwnershipRejection(error)
+                ? "ownership-rejected"
+                : ownershipCode(error, controller.signal.reason),
           stage: currentStage,
         });
       } else {
@@ -1261,22 +916,12 @@ export class WorkerRuntime {
           await this.control.fail(
             claim.attemptId,
             identity,
-            { ...failure, executionTimings: stageClock.snapshot() },
+            failure,
             controller.signal,
           );
           terminal = true;
         } catch (failureError) {
-          this.emit({
-            kind: "failure-report-deferred",
-            workerId: slot.workerId,
-            jobId: claim.jobId,
-            attemptId: claim.attemptId,
-            code: isOwnershipRejection(failureError)
-              ? "ownership-rejected"
-              : "failure-ack-uncertain",
-          });
-          // Stop renewing below; the backend remains the recovery authority.
-          // Reporting failure must not suppress the original attempt diagnostic.
+          if (!isOwnershipRejection(failureError)) throw failureError;
         }
         this.emit({
           kind: "attempt-failed",
@@ -1290,57 +935,12 @@ export class WorkerRuntime {
       }
     } finally {
       terminal = true;
-      clearInterval(timingHeartbeat);
       progressReporter.close();
       controller.abort(new OwnershipLostError("attempt-finished"));
       this.stopping.signal.removeEventListener("abort", stopListener);
       await Promise.allSettled([watchdog, renewal]);
-      if (
-        workspace &&
-        childTerminated &&
-        this.options.terminatedInferenceIdle
-      ) {
-        let idle = false;
-        try {
-          idle = await this.options.terminatedInferenceIdle();
-        } catch {
-          /* Keep exact workspace on native query uncertainty. */
-        }
-        if (!idle) {
-          consumerInferenceUnconfirmed = true;
-          this.unavailable.add(slot.workerId);
-          this.cleanupBlocked.add(slot.workerId);
-          this.emit({
-            kind: "workspace-cleanup-failed",
-            workerId: slot.workerId,
-            jobId: claim.jobId,
-            attemptId: claim.attemptId,
-            code: "inference-stop-unconfirmed",
-          });
-        }
-      }
-      if (workspace && !this.cleanupBlocked.has(slot.workerId)) {
-        try {
-          await this.workspace.cleanup(workspace);
-        } catch {
-          // Preserve the unsafe/undeletable workspace for operator recovery;
-          // do not admit more work, but still recover a terminated child.
-          this.unavailable.add(slot.workerId);
-          this.cleanupBlocked.add(slot.workerId);
-          this.emit({
-            kind: "workspace-cleanup-failed",
-            workerId: slot.workerId,
-            jobId: claim.jobId,
-            attemptId: claim.attemptId,
-            code: "cleanup-required",
-          });
-        }
-      }
-      if (
-        childTerminated &&
-        !consumerInferenceUnconfirmed &&
-        !this.stopping.signal.aborted
-      ) {
+      if (workspace) await this.workspace.cleanup(workspace);
+      if (childTerminated && !this.stopping.signal.aborted) {
         try {
           await this.supervisor.restart(slot.workerId, (_workerId, stage) => {
             this.childState = stage;
@@ -1372,74 +972,34 @@ export class WorkerRuntime {
     }
   }
 
-  private async retryAttemptControlRequest<T>(
-    request: () => Promise<T>,
-    authority: LeaseAuthority,
-    signal: AbortSignal,
-  ): Promise<T> {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      authority.assertCurrent();
-      try {
-        const result = await request();
-        authority.assertCurrent();
-        return result;
-      } catch (error) {
-        if (!(error instanceof ControlPlaneError) || !error.retryable)
-          throw error;
-        const code =
-          error.status === 429
-            ? "control-plane-rate-limited"
-            : "control-plane-unavailable";
-        if (attempt === 2) throw new AttemptDeferredError(code);
-        const delayMs =
-          error.status === 429 && error.retryAfterMs !== undefined
-            ? error.retryAfterMs
-            : Math.min(2_000, 500 * 2 ** attempt);
-        if (delayMs >= Math.min(60_000, authority.deadlineRemainingMs()))
-          throw new AttemptDeferredError(code);
-        await abortableDelay(delayMs, signal);
-      }
-    }
-    throw new AttemptDeferredError("control-plane-unavailable");
-  }
-
   private async publishOutput(
     identity: WorkerIdentity,
     claim: Claim,
     output: ReturnType<typeof parseChildProcessResult>,
     authority: LeaseAuthority,
     signal: AbortSignal,
-    timing: { outputGrantMs: number; outputPutMs: number },
   ): Promise<string> {
     const maximum = this.options.uploadAttempts ?? 3;
     let lastError: unknown;
     for (let attempt = 0; attempt < maximum; attempt += 1) {
       authority.assertCurrent();
-      const grantStarted = performance.now();
-      const response = await this.retryAttemptControlRequest(
-        () =>
-          this.control.outputGrant(
-            claim.attemptId,
-            identity,
-            {
-              bytes: output.bytes,
-              sha256: output.sha256,
-              contentType: output.contentType,
-              measuredDurationSeconds: output.measuredOutputDurationSeconds,
-            },
-            signal,
-          ),
-        authority,
+      const response = await this.control.outputGrant(
+        claim.attemptId,
+        identity,
+        {
+          bytes: output.bytes,
+          sha256: output.sha256,
+          contentType: output.contentType,
+          measuredDurationSeconds: output.measuredOutputDurationSeconds,
+        },
         signal,
       );
-      timing.outputGrantMs += Math.max(0, performance.now() - grantStarted);
       assertReservation(response, output);
       if (response.object) {
         if (!sameOutput(response.object, response.reservation))
           throw new TransferError("OUTPUT_UPLOAD_FAILED", false);
-        return response.object.etag;
+        return response.object.versionId;
       }
-      const putStarted = performance.now();
       try {
         return await this.transfers.upload(
           response.grant!,
@@ -1450,18 +1010,12 @@ export class WorkerRuntime {
       } catch (error) {
         lastError = error;
         if (!(error instanceof TransferError) || !error.retryable) throw error;
-      } finally {
-        // Includes failed PUTs before recovery, without counting grant/backoff time.
-        timing.outputPutMs += Math.max(0, performance.now() - putStarted);
       }
     }
     throw lastError ?? new TransferError("OUTPUT_UPLOAD_FAILED", true);
   }
 
-  private async processRemoteCommands(
-    config: ConfigResponse,
-    allowExecution = true,
-  ): Promise<void> {
+  private async processRemoteCommands(config: ConfigResponse): Promise<void> {
     const executor = this.options.commandExecutor;
     if (!executor) return;
     const serverTime = Date.parse(config.serverTime);
@@ -1470,8 +1024,6 @@ export class WorkerRuntime {
       if (command.kind === "benchmark" && this.busy.size > 0) continue;
       let pending = this.pendingCommandResults.get(command.commandId);
       if (!pending) {
-        if (!allowExecution || this.options.personalAdmission?.pending())
-          continue;
         this.emit({
           kind: "command-started",
           code: command.kind,
@@ -1551,58 +1103,6 @@ export class WorkerRuntime {
     return result;
   }
 
-  private async recoverResources(): Promise<void> {
-    for (const [workerId, blocked] of this.resourceRecovery) {
-      if (blocked.retryAt > Date.now() || this.busy.has(workerId)) continue;
-      try {
-        await this.resources.assertAvailable(blocked.inputBytes);
-        this.resourceRecovery.delete(workerId);
-        if (
-          !this.childRecoveryAfter.has(workerId) &&
-          !this.childRecoveryExhausted.has(workerId) &&
-          !this.cleanupBlocked.has(workerId)
-        )
-          this.unavailable.delete(workerId);
-        this.emit({ kind: "resource-recovered", workerId });
-      } catch {
-        blocked.retryAt = Date.now() + 30_000;
-      }
-    }
-  }
-
-  private detectIdleChildExit(): void {
-    for (const { workerId } of this.options.slots) {
-      if (
-        this.busy.has(workerId) ||
-        this.childRecoveryAfter.has(workerId) ||
-        this.childRecoveryExhausted.has(workerId)
-      )
-        continue;
-      let alive: boolean | undefined;
-      try {
-        alive = this.supervisor.child(workerId).isAlive?.();
-      } catch {
-        alive = false;
-      }
-      if (alive !== false) continue;
-      this.unavailable.add(workerId);
-      this.childState = "unavailable";
-      const exits = (this.idleChildExits.get(workerId) ?? 0) + 1;
-      this.idleChildExits.set(workerId, exits);
-      if (exits >= 3) this.childRecoveryExhausted.add(workerId);
-      else this.childRecoveryAfter.set(workerId, Date.now());
-      this.emit({
-        kind: "child-unavailable",
-        workerId,
-        code: exits >= 3 ? "child-recovery-exhausted" : "child-exited-idle",
-        detail:
-          exits >= 3
-            ? "Repeated idle child exits require intervention"
-            : "Idle child exited; restarting before admission",
-      });
-    }
-  }
-
   private async recoverChildren(): Promise<void> {
     const now = Date.now();
     for (const [workerId, retryAt] of this.childRecoveryAfter) {
@@ -1612,34 +1112,20 @@ export class WorkerRuntime {
           this.childState = stage;
           void this.publishLocalStatus().catch(() => undefined);
         });
-        if (
-          !this.cleanupBlocked.has(workerId) &&
-          !this.resourceRecovery.has(workerId)
-        )
-          this.unavailable.delete(workerId);
+        this.unavailable.delete(workerId);
         this.childState = "ready";
         this.childRecoveryAfter.delete(workerId);
-        this.childRecoveryFailures.delete(workerId);
         const slot = this.options.slots.find(
           (candidate) => candidate.workerId === workerId,
         );
         if (slot) this.emitModelReady(slot, "slot-recovery");
         this.emit({ kind: "child-recovered", workerId });
       } catch (error) {
-        const failures = (this.childRecoveryFailures.get(workerId) ?? 0) + 1;
-        this.childRecoveryFailures.set(workerId, failures);
-        if (failures >= 3) {
-          this.childRecoveryAfter.delete(workerId);
-          this.childRecoveryExhausted.add(workerId);
-        } else
-          this.childRecoveryAfter.set(workerId, Date.now() + 30_000 * failures);
+        this.childRecoveryAfter.set(workerId, now + 30_000);
         this.emit({
           kind: "child-unavailable",
           workerId,
-          code:
-            failures >= 3
-              ? "child-recovery-exhausted"
-              : "child-recovery-failed",
+          code: "child-recovery-failed",
           detail: sanitizeDiagnostic(
             error instanceof Error ? error.message : "Child recovery failed",
           ).slice(-2_000),
@@ -1765,31 +1251,8 @@ export class WorkerRuntime {
       severity: eventSeverity(event.kind),
       ...event,
     };
-    localDiagnostics.emit(
-      `worker.${record.kind}`,
-      record,
-      record.severity === "warning" ? "warn" : record.severity,
-      {
-        operation: record.kind,
-        sourceTimestamp: record.recordedAt,
-        sessionId: record.sessionId,
-        ...("jobId" in record ? { jobId: record.jobId } : {}),
-        ...("attemptId" in record ? { attemptId: record.attemptId } : {}),
-        ...("workerId" in record ? { workerId: record.workerId } : {}),
-        result: /failed|unavailable/.test(record.kind) ? "failure" : "observed",
-      },
-    );
-    try {
-      this.options.onEvent?.(record);
-    } catch {
-      // An optional observer cannot interrupt ownership or child recovery.
-    }
-    try {
-      this.diagnostics.record(record);
-    } catch {
-      // Preserve active-attempt cleanup while failing closed for future claims.
-      this.diagnosticRecordingFailed = true;
-    }
+    this.options.onEvent?.(record);
+    this.diagnostics.record(record);
   }
 
   private wake(): void {
@@ -1820,16 +1283,6 @@ export class WorkerRuntime {
 }
 
 function validateOptions(options: WorkerRuntimeOptions): void {
-  if (
-    options.workspace !== undefined &&
-    (!options.workspace ||
-      ["initialize", "create", "cleanup"].some(
-        (name) =>
-          typeof options.workspace![name as keyof RuntimeWorkspace] !==
-          "function",
-      ))
-  )
-    throw new TypeError("Worker workspace lifecycle is invalid");
   if (options.slots.length === 0 || options.slots.length > 16)
     throw new TypeError("Worker runtime requires 1 to 16 slots");
   if (
@@ -1898,7 +1351,7 @@ function randomPollDelay(options: WorkerRuntimeOptions): number {
 function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
   return (
     left.key === right.key &&
-    left.etag === right.etag &&
+    left.versionId === right.versionId &&
     left.bytes === right.bytes &&
     left.sha256 === right.sha256 &&
     left.contentType === right.contentType

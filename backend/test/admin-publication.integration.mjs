@@ -69,7 +69,7 @@ test(
       const config = new ConfigService({
         APP_UPDATES_ENABLED: true,
         APK_EXPECTED_PACKAGE_ID: 'com.example.fixture',
-        IOS_APP_STORE_ID: '123456',
+        RELEASE_LANDING_BASE_URL: 'https://example.invalid/api/v1',
       });
       const operations = new AdminOperationsService(
         connection,
@@ -212,7 +212,7 @@ test(
         createdBy: actors[0].uid,
         artifact: {
           key: 'fixture/private.apk',
-          etag: '"fixture-version"',
+          versionId: 'fixture-version',
           bytes: 1,
           sha256Hex: 'a'.repeat(64),
           signerSha256Hex: 'b'.repeat(64),
@@ -220,7 +220,7 @@ test(
           minimumSdk: 26,
         },
       });
-      const invalidDirect = {
+      const strandedPlay = {
         android: {
           minimumBuild: 10,
           directReleaseId: direct._id.toString(),
@@ -229,34 +229,38 @@ test(
         },
         ios: { minimumBuild: null, storeReleaseId: null },
       };
+      assert.equal((await publication.preview(strandedPlay)).valid, false);
       await assert.rejects(
-        publication.preview(invalidDirect),
-        (error) => error.response?.code === 'INVALID_REQUEST',
+        publication.mutate(actors[winner], direct._id.toString(), 'publish', {
+          policy: strandedPlay,
+          expectedRevision: 1,
+          expectedReleaseRevision: 0,
+          operationId: randomUUID(),
+          reason: 'Cannot strand Play',
+          storeAvailabilityConfirmed: false,
+        }),
       );
-      for (const operation of ['publish', 'withdraw']) {
-        await assert.rejects(
-          publication.mutate(actors[winner], direct._id.toString(), operation, {
-            [operation === 'publish' ? 'policy' : 'replacementPolicy']:
-              selections[winner],
+      await assert.rejects(
+        publication.mutate(
+          actors[winner],
+          drafts[winner]._id.toString(),
+          'withdraw',
+          {
+            replacementPolicy: strandedPlay,
             expectedRevision: 1,
-            expectedReleaseRevision: 0,
+            expectedReleaseRevision: 1,
             operationId: randomUUID(),
-            reason: 'Retired direct rows are read-only',
-            ...(operation === 'publish'
-              ? { storeAvailabilityConfirmed: true }
-              : {}),
-          }),
-          (error) => error.response?.code === 'INVALID_REQUEST',
-        );
-      }
-      assert.equal((await releases.findById(direct._id)).revision, 0);
+            reason: 'Cannot strand Play',
+          },
+        ),
+      );
       assert.equal((await policies.findById('global')).revision, 1);
       const empty = {
         android: {
           minimumBuild: null,
           directReleaseId: null,
           storeReleaseId: null,
-          source: 'google_play',
+          source: 'direct_apk',
         },
         ios: { minimumBuild: null, storeReleaseId: null },
       };
@@ -278,167 +282,11 @@ test(
       );
       assert.equal(await releases.countDocuments(), 3);
       assert.equal((await policies.findById('global')).revision, 2);
-      assert.equal((await snapshots.snapshot('android', 'play')).target, null);
+      assert.equal(
+        (await snapshots.snapshot('android', 'direct')).target,
+        null,
+      );
       assert.equal(await events.countDocuments(), 2);
-      // Read mappings and iOS actions must not rewrite a stranded historical Android policy.
-      const historicalAndroid = {
-        minimumBuild: 10,
-        releaseSelection: {
-          source: 'direct_apk',
-          directReleaseId: direct._id.toString(),
-          storeReleaseId: null,
-        },
-      };
-      await policies.updateOne(
-        { _id: 'global' },
-        {
-          $set: {
-            'platforms.android': historicalAndroid,
-            'platforms.macos': { minimumBuild: 5 },
-          },
-        },
-      );
-      const current = await publication.current();
-      assert.deepEqual(current.android, {
-        minimumBuild: 10,
-        source: 'google_play',
-        directReleaseId: null,
-        storeReleaseId: null,
-      });
-      assert.deepEqual(
-        (await policies.findById('global').lean()).platforms.android,
-        historicalAndroid,
-      );
-      await assert.rejects(
-        snapshots.snapshot('android', 'play'),
-        (error) => error.response?.code === 'DEPENDENCY_UNAVAILABLE',
-      );
-      const ios = await releases.create({
-        platform: 'ios',
-        source: 'app_store',
-        versionName: '1.0',
-        buildNumber: 12,
-        changelogEn: 'iOS release',
-        storeUrl: 'https://apps.apple.com/app/id123456',
-        createdBy: actors[0].uid,
-      });
-      const iosSelection = {
-        android: current.android,
-        ios: { minimumBuild: 10, storeReleaseId: ios._id.toString() },
-      };
-      const iosPreview = await publication.preview(iosSelection);
-      assert.equal(iosPreview.valid, true);
-      assert.ok(
-        iosPreview.examples.every((example) => example.platform === 'ios'),
-      );
-      const androidChanged = {
-        ...iosSelection,
-        android: { ...iosSelection.android, minimumBuild: 11 },
-      };
-      assert.equal((await publication.preview(androidChanged)).valid, false);
-      const iosRequest = {
-        policy: iosSelection,
-        expectedRevision: 2,
-        expectedReleaseRevision: 0,
-        operationId: randomUUID(),
-        reason: 'Publish iOS while Android awaits Play',
-        storeAvailabilityConfirmed: true,
-      };
-      await assert.rejects(
-        publication.mutate(actors[0], ios._id.toString(), 'publish', {
-          ...iosRequest,
-          operationId: randomUUID(),
-          policy: androidChanged,
-        }),
-        (error) => error.response?.code === 'INVALID_UPDATE_POLICY',
-      );
-      const iosPublished = await publication.mutate(
-        actors[0],
-        ios._id.toString(),
-        'publish',
-        iosRequest,
-      );
-      assert.equal(iosPublished.release.state, 'published');
-      assert.deepEqual(
-        (await policies.findById('global').lean()).platforms.android,
-        historicalAndroid,
-      );
-      assert.deepEqual(
-        (await policies.findById('global').lean()).platforms.macos,
-        { minimumBuild: 5 },
-      );
-      assert.equal(
-        (await snapshots.snapshot('ios', 'app_store')).target.buildNumber,
-        12,
-      );
-      await assert.rejects(
-        snapshots.snapshot('android', 'play'),
-        (error) => error.response?.code === 'DEPENDENCY_UNAVAILABLE',
-      );
-      const iosReplacement = {
-        android: current.android,
-        ios: { minimumBuild: null, storeReleaseId: null },
-      };
-      assert.equal((await publication.preview(iosReplacement)).valid, true);
-      await publication.mutate(actors[0], ios._id.toString(), 'withdraw', {
-        replacementPolicy: iosReplacement,
-        expectedRevision: 3,
-        expectedReleaseRevision: 1,
-        operationId: randomUUID(),
-        reason: 'Withdraw iOS only',
-      });
-      assert.deepEqual(
-        (await policies.findById('global').lean()).platforms.android,
-        historicalAndroid,
-      );
-      assert.deepEqual(
-        (await policies.findById('global').lean()).platforms.macos,
-        { minimumBuild: 5 },
-      );
-      const playRequest = {
-        policy: iosReplacement,
-        expectedRevision: 4,
-        expectedReleaseRevision: 0,
-        operationId: randomUUID(),
-        reason: 'Android needs a real Play target',
-        storeAvailabilityConfirmed: true,
-      };
-      await assert.rejects(
-        publication.mutate(
-          actors[0],
-          drafts[loser]._id.toString(),
-          'publish',
-          playRequest,
-        ),
-        (error) => error.response?.code === 'INVALID_UPDATE_POLICY',
-      );
-      const playSelection = {
-        ...iosReplacement,
-        android: {
-          ...current.android,
-          storeReleaseId: drafts[loser]._id.toString(),
-        },
-      };
-      assert.equal((await publication.preview(playSelection)).valid, true);
-      assert.ok(
-        (await publication.preview(playSelection)).examples.every(
-          (example) => example.distribution !== 'direct',
-        ),
-      );
-      await publication.mutate(
-        actors[0],
-        drafts[loser]._id.toString(),
-        'publish',
-        { ...playRequest, operationId: randomUUID(), policy: playSelection },
-      );
-      assert.equal(
-        (await snapshots.snapshot('android', 'play')).minimumBuild,
-        10,
-      );
-      assert.deepEqual(
-        (await policies.findById('global').lean()).platforms.macos,
-        { minimumBuild: 5 },
-      );
     } finally {
       await connection?.close();
       await fixture.stop();

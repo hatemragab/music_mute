@@ -9,84 +9,6 @@ const incarnation = 'e221c880-7196-4fa5-b1b8-ee504e87c04c';
 const attemptId = '99f8016b-67f3-4f4b-beb4-205a7b87147e';
 
 describe('job deletion worker fencing', () => {
-  it.each(['shared', 'foreignUser', 'malformedShared'] as const)(
-    'protects %s media during job reference deletion',
-    async (storageMode) => {
-      const now = new Date('2026-10-01T00:00:00.000Z');
-      const userId = new Types.ObjectId();
-      const jobId = new Types.ObjectId();
-      const sharedPrefix = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9`;
-      const job = {
-        _id: jobId,
-        userId,
-        deletedAt: now,
-        cleanupCompletedAt: null,
-        cleanupFirstDeletedAt: null,
-        cleanupNextAt: now,
-        cleanupToken: null as string | null,
-        cleanupAttempts: 0,
-        inputReservation: { key: `${sharedPrefix}/input/source.mp3` },
-        inputObject: { key: `${sharedPrefix}/input/source.mp3` },
-        outputObject: { key: `${sharedPrefix}/output/vocals.mp3` },
-        retainedOutputAccountedAt: now,
-        retainedOutputReleasedAt: null,
-      };
-      if (storageMode === 'foreignUser')
-        job.inputReservation.key = `users/${new Types.ObjectId()}/jobs/${jobId}/input/source.mp3`;
-      if (storageMode === 'malformedShared')
-        job.inputReservation.key = 'shared/url/invalid-source/input/source.mp3';
-      const jobs = {
-        findOneAndUpdate: vi.fn((_filter: unknown, update: any) => {
-          job.cleanupToken = update.$set.cleanupToken;
-          return { lean: async () => ({ ...job }) };
-        }),
-        findOne: vi.fn(() => ({
-          session: () => ({ lean: async () => ({ ...job }) }),
-        })),
-        updateOne: vi.fn(async (_filter, update) => {
-          Object.assign(job, update.$set ?? {});
-          return { matchedCount: 1, modifiedCount: 1 };
-        }),
-        exists: vi.fn(),
-      };
-      const storage = { deleteObject: vi.fn() };
-      const usage = { releaseRetainedOutput: vi.fn(async () => undefined) };
-      const service = new JobDeletionService(
-        jobs as never,
-        {} as never,
-        {
-          run: (operation: (session: unknown) => Promise<unknown>) =>
-            operation({}),
-        } as never,
-        storage as never,
-        usage as never,
-        {} as never,
-      );
-
-      await expect(service.cleanupDue(now)).resolves.toBe(true);
-
-      expect(storage.deleteObject).not.toHaveBeenCalled();
-      expect(jobs.exists).not.toHaveBeenCalled();
-      if (storageMode !== 'shared') {
-        expect(usage.releaseRetainedOutput).not.toHaveBeenCalled();
-        expect(job).toMatchObject({
-          cleanupCompletedAt: null,
-          cleanupAttempts: 1,
-          retainedOutputReleasedAt: null,
-        });
-        return;
-      }
-      expect(usage.releaseRetainedOutput).toHaveBeenCalledOnce();
-      expect(job).toMatchObject({
-        cleanupCompletedAt: now,
-        cleanupFirstDeletedAt: null,
-        cleanupNextAt: null,
-        cleanupToken: null,
-        retainedOutputReleasedAt: now,
-      });
-    },
-  );
-
   it('cancels stale terminal-job ownership before scheduling cleanup', async () => {
     const userId = new Types.ObjectId();
     const jobId = new Types.ObjectId();
@@ -105,10 +27,6 @@ describe('job deletion worker fencing', () => {
     const slotModel = {
       updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
     };
-    const deliveryModel = {
-      updateMany: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
-    };
-    const outboxId = new Types.ObjectId();
     const jobs = {
       findOne: vi.fn(() => ({
         session: vi.fn().mockResolvedValue({
@@ -128,21 +46,12 @@ describe('job deletion worker fencing', () => {
       updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
       db: {
         model: vi.fn((name: string) =>
-          name === 'WorkerAttempt'
-            ? attemptModel
-            : name === 'WorkerSlot'
-              ? slotModel
-              : deliveryModel,
+          name === 'WorkerAttempt' ? attemptModel : slotModel,
         ),
       },
     };
     const outbox = {
       updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
-      find: vi.fn(() => ({
-        session: vi.fn(() => ({
-          lean: vi.fn(async () => [{ _id: outboxId }]),
-        })),
-      })),
     };
     const transactions = {
       run: vi.fn(async (operation: (session: unknown) => Promise<void>) =>
@@ -159,17 +68,6 @@ describe('job deletion worker fencing', () => {
     );
 
     await service.delete(userId.toString(), jobId.toString());
-    expect(deliveryModel.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'pending' }),
-      {
-        $set: {
-          status: 'ineligible',
-          lastFailureKind: 'ineligible',
-          failedAt: expect.any(Date),
-        },
-      },
-      expect.objectContaining({ session: expect.anything() }),
-    );
 
     expect(jobs.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ _id: jobId, revision: 4 }),
@@ -205,13 +103,13 @@ describe('job deletion worker fencing', () => {
     );
   });
 
-  it('releases retained bytes only after both exact deletion passes', async () => {
+  it('releases retained bytes once only after exact cleanup is reconciled', async () => {
     const now = new Date('2026-09-20T00:00:00.000Z');
     const userId = new Types.ObjectId();
     const jobId = new Types.ObjectId();
     const outputObject = {
       key: `users/${userId}/jobs/${jobId}/attempts/a/vocals.mp3`,
-      etag: '"output-v1"',
+      versionId: 'output-v1',
       bytes: 2_048,
       sha256: 'B'.repeat(43) + '=',
       contentType: 'audio/mpeg',
@@ -221,7 +119,6 @@ describe('job deletion worker fencing', () => {
       userId,
       deletedAt: now,
       cleanupCompletedAt: null,
-      cleanupFirstDeletedAt: null as Date | null,
       cleanupNextAt: now,
       cleanupLeaseUntil: null,
       cleanupToken: null as string | null,
@@ -235,22 +132,21 @@ describe('job deletion worker fencing', () => {
       retainedOutputReleasedAt: null,
     };
     const jobs = {
-      findOneAndUpdate: vi.fn((_filter: unknown, update: any) => {
-        const observedNow = update.$set.cleanupLeaseUntil.getTime() - 60000;
-        if (job.cleanupCompletedAt || job.cleanupNextAt.getTime() > observedNow)
-          return { lean: async () => null };
-        job.cleanupToken = update.$set.cleanupToken;
-        return { lean: async () => ({ ...job }) };
-      }),
+      findOneAndUpdate: vi
+        .fn()
+        .mockImplementationOnce((_filter: unknown, update: any) => {
+          job.cleanupToken = update.$set.cleanupToken;
+          return { lean: vi.fn().mockResolvedValue({ ...job }) };
+        })
+        .mockReturnValue({ lean: vi.fn().mockResolvedValue(null) }),
       findOne: vi.fn(() => ({
         session: vi.fn().mockReturnValue({
           lean: vi.fn().mockResolvedValue({ ...job }),
         }),
       })),
-      updateOne: vi.fn(async (_filter, update) => {
-        Object.assign(job, update.$set ?? {});
-        return { matchedCount: 1, modifiedCount: 1 };
-      }),
+      updateOne: vi
+        .fn()
+        .mockResolvedValue({ matchedCount: 1, modifiedCount: 1 }),
       exists: vi.fn().mockResolvedValue(null),
     };
     const transactions = {
@@ -259,7 +155,7 @@ describe('job deletion worker fencing', () => {
       ),
     };
     const storage = {
-      deleteObject: vi.fn().mockResolvedValue(true),
+      deleteVersionsForKey: vi.fn().mockResolvedValue(true),
     };
     const usage = {
       releaseRetainedOutput: vi.fn().mockResolvedValue(undefined),
@@ -274,15 +170,9 @@ describe('job deletion worker fencing', () => {
     );
 
     await expect(service.cleanupDue(now)).resolves.toBe(true);
-    expect(usage.releaseRetainedOutput).not.toHaveBeenCalled();
-    expect(job.cleanupCompletedAt).toBeNull();
-    expect(job.cleanupFirstDeletedAt).toEqual(now);
     await expect(service.cleanupDue(now)).resolves.toBe(false);
-    const recheck = new Date(now.getTime() + 7_200_000);
-    await expect(service.cleanupDue(recheck)).resolves.toBe(true);
-    await expect(service.cleanupDue(recheck)).resolves.toBe(false);
 
-    expect(storage.deleteObject).toHaveBeenCalledWith(outputObject.key);
+    expect(storage.deleteVersionsForKey).toHaveBeenCalledWith(outputObject.key);
     expect(usage.releaseRetainedOutput).toHaveBeenCalledOnce();
     expect(usage.releaseRetainedOutput).toHaveBeenCalledWith(
       expect.objectContaining({ outputObject }),
@@ -292,8 +182,8 @@ describe('job deletion worker fencing', () => {
       expect.objectContaining({ _id: jobId, cleanupToken: expect.any(String) }),
       expect.objectContaining({
         $set: expect.objectContaining({
-          cleanupCompletedAt: recheck,
-          retainedOutputReleasedAt: recheck,
+          cleanupCompletedAt: now,
+          retainedOutputReleasedAt: now,
         }),
       }),
       expect.objectContaining({ runValidators: true }),

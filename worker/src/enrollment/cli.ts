@@ -19,29 +19,15 @@ import {
   type ExchangeResult,
   type WorkerInstallationReport,
 } from "./enrollment-client.js";
-import {
-  downloadInstallationArtifacts,
-  downloadVerifiedArtifact,
-} from "./artifact-download.js";
-import {
-  APP_MODEL_BYTES,
-  APP_MODEL_SHA256,
-  verifyManagedMacRelease,
-} from "../platform/macos/app-installation-binding.js";
+import { downloadInstallationArtifacts } from "./artifact-download.js";
 import { buildServiceRuntimeConfig } from "./runtime-config-builder.js";
 import {
   createEnrollmentReport,
   parseQualificationEvidence,
 } from "./report-builder.js";
 import { uploadQualificationResult } from "./qualification-upload.js";
-import { cleanupQualificationWorkspace } from "./qualification-cleanup.js";
 import { prepareInstallationRelease } from "./release-archive.js";
 import { verifyWindowsRelease } from "../platform/windows/release-manifest.js";
-import { verifyInstallationSignature } from "./installation-signature.js";
-import {
-  assertWindowsPrivateDataFile,
-  assertWindowsPrivateDirectory,
-} from "../platform/windows/private-data.js";
 
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 const UUID_V4 =
@@ -60,10 +46,7 @@ export const ENROLLMENT_USAGE = `Usage:
   mw enroll --backend-url <api-base-url> --enrollment-file <absolute-path> --release <absolute-path> [--diagnostics <absolute-path>] --qualification <absolute-path> --label <name> [--group-id <id>] [--service-root <absolute-path>] --output <existing-protected-directory> [--allow-insecure-loopback <true|false>]`;
 
 export interface InstallationPreparationReuse {
-  publicKeys?: Readonly<Record<string, string>>;
   reusableModelPath?: string;
-  /** Private app installer hook; absent from CLI flags and public wire payloads. */
-  appReleaseRoot?: string;
 }
 
 interface EnrollmentState {
@@ -85,9 +68,7 @@ interface EnrollmentState {
 export async function runInstallationPreparationCommand(
   arguments_: string[],
   reuse: InstallationPreparationReuse = {},
-  context: { stdout?: (value: string) => void } = {},
 ): Promise<void> {
-  const stdout = context.stdout ?? console.log;
   const flags = parseFlags(arguments_);
   exactFlags(
     flags,
@@ -130,43 +111,8 @@ export async function runInstallationPreparationCommand(
     exchange.credential,
     platform,
   );
-  verifyInstallationSignature(manifest.release, platform, reuse.publicKeys);
   const artifactRoot = join(outputRoot, ARTIFACTS_DIRECTORY);
   await ensureProtectedDirectory(artifactRoot);
-  if (reuse.appReleaseRoot !== undefined) {
-    if (platform !== "darwin-arm64")
-      throw new TypeError("App worker preparation requires macOS");
-    const binding = await verifyManagedMacRelease(reuse.appReleaseRoot);
-    if (
-      binding.schemaVersion !== 2 ||
-      manifest.model.sha256 !== APP_MODEL_SHA256 ||
-      manifest.model.bytes !== APP_MODEL_BYTES
-    )
-      throw new TypeError("App worker preparation requires the approved model");
-    const fixture = await downloadVerifiedArtifact({
-      url: manifest.fixture.url,
-      outputPath: join(artifactRoot, manifest.fixture.filename),
-      expectedBytes: manifest.fixture.bytes,
-      expectedSha256: manifest.fixture.sha256,
-      expectedContentType: manifest.fixture.contentType,
-      allowInsecureLoopback,
-    });
-    await writeStablePrivateFile(
-      join(outputRoot, ARTIFACTS_FILE),
-      `${JSON.stringify({ schemaVersion: 1, installationId: state.installationId, platform, releaseVersion: binding.releaseVersion, release: { releaseRoot: reuse.appReleaseRoot }, model: { path: join(binding.base.supportRoot, "models", APP_MODEL_SHA256, "Kim_Vocal_2.onnx"), bytes: APP_MODEL_BYTES, sha256: APP_MODEL_SHA256 }, fixture: localArtifact(fixture, manifest.fixture.contentType) }, null, 2)}\n`,
-    );
-    stdout(
-      JSON.stringify({
-        status: "ok",
-        action: "prepare-installation",
-        installationId: exchange.installationId,
-        platform,
-        releaseVersion: binding.releaseVersion,
-        reused: true,
-      }),
-    );
-    return;
-  }
   const downloads = await downloadInstallationArtifacts(manifest, {
     outputRoot: artifactRoot,
     allowInsecureLoopback,
@@ -199,7 +145,7 @@ export async function runInstallationPreparationCommand(
       2,
     )}\n`,
   );
-  stdout(
+  console.log(
     JSON.stringify({
       status: "ok",
       action: "prepare-installation",
@@ -217,9 +163,7 @@ export async function runInstallationPreparationCommand(
 
 export async function runEnrollmentCommand(
   arguments_: string[],
-  context: { stdout?: (value: string) => void } = {},
 ): Promise<void> {
-  const stdout = context.stdout ?? console.log;
   const flags = parseFlags(arguments_);
   exactFlags(
     flags,
@@ -283,7 +227,7 @@ export async function runEnrollmentCommand(
   const exchange = exchanged.exchange;
   state = exchanged.state;
 
-  if (state.reportRevision === undefined) {
+  if (exchange.phase !== "activated") {
     const report = flags.has("report")
       ? await reportFromFileMode(flags, backendBaseUrl, allowInsecureLoopback)
       : await reportAndUploadQualification(
@@ -349,7 +293,7 @@ export async function runEnrollmentCommand(
   );
   let runtimeConfigPath: string | undefined;
   if (!flags.has("report")) {
-    const runtimeConfig = await writeServiceRuntimeConfig(
+    runtimeConfigPath = await writeServiceRuntimeConfig(
       flags,
       outputRoot,
       backendBaseUrl,
@@ -357,23 +301,8 @@ export async function runEnrollmentCommand(
       activated.machineId,
       workerId,
     );
-    runtimeConfigPath = runtimeConfig.path;
-    const qualification = parseQualificationEvidence(
-      await readBoundedJson(
-        absoluteFlag(flags, "qualification"),
-        "Qualification report",
-      ),
-    );
-    await cleanupQualificationWorkspace({
-      workRoot: runtimeConfig.workRoot,
-      outputPath: qualification.uploadCandidate.path,
-    }).catch(() => {
-      // Enrollment is already committed remotely and in the private journal.
-      // A disk cleanup failure must not trigger a new activation or rollback.
-      console.warn("Worker qualification workspace cleanup deferred.");
-    });
   }
-  stdout(
+  console.log(
     JSON.stringify({
       status: "ok",
       action: "enroll",
@@ -420,28 +349,7 @@ async function exchangeInstallation(
   enrollmentCredential: string,
   state: EnrollmentState,
   statePath: string,
-): Promise<{
-  exchange: Pick<ExchangeResult, "installationId" | "credential" | "replayed">;
-  state: EnrollmentState;
-}> {
-  if (
-    state.installationId !== undefined &&
-    state.installationCredential !== undefined
-  ) {
-    return {
-      exchange: {
-        installationId: state.installationId,
-        credential: state.installationCredential,
-        replayed: true,
-      },
-      state,
-    };
-  }
-  if (
-    state.installationId !== undefined ||
-    state.installationCredential !== undefined
-  )
-    throw new TypeError("Enrollment state installation identity is incomplete");
+): Promise<{ exchange: ExchangeResult; state: EnrollmentState }> {
   const exchange = await client.exchange(
     enrollmentCredential,
     state.exchangeRequestId,
@@ -555,7 +463,7 @@ async function writeServiceRuntimeConfig(
   allowInsecureLoopback: boolean,
   machineId: string,
   workerId: string,
-): Promise<{ path: string; workRoot: string }> {
+): Promise<string> {
   const qualification = parseQualificationEvidence(
     await readBoundedJson(
       absoluteFlag(flags, "qualification"),
@@ -581,7 +489,7 @@ async function writeServiceRuntimeConfig(
   });
   const path = join(outputRoot, RUNTIME_CONFIG_FILE);
   await writeStablePrivateFile(path, `${JSON.stringify(document, null, 2)}\n`);
-  return { path, workRoot: document.workRoot };
+  return path;
 }
 
 export function enrollmentCommandErrorSummary(error: unknown): string {
@@ -629,7 +537,6 @@ async function readBoundedJson(path: string, label: string): Promise<unknown> {
 }
 
 async function readCredential(path: string, label: string): Promise<string> {
-  if (process.platform === "win32") await assertWindowsPrivateDataFile(path);
   const info = await lstat(path);
   if (
     !info.isFile() ||
@@ -646,7 +553,6 @@ async function readCredential(path: string, label: string): Promise<string> {
 }
 
 async function assertProtectedOutputDirectory(path: string): Promise<void> {
-  if (process.platform === "win32") await assertWindowsPrivateDirectory(path);
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink())
     throw new TypeError("Output directory is unsafe");

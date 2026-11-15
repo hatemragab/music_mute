@@ -8,12 +8,11 @@ import {
   WORKER_PROTOCOL_VERSION,
   WORKER_RECIPE_IDS,
 } from "../../protocol/v1/protocol.js";
+import { runtimePlatformAdapter } from "../platform/runtime-adapter.js";
 import {
-  runtimePlatformAdapter,
-  type RuntimeProfile,
-} from "../platform/runtime-adapter.js";
-import { MAC_RELEASE_MANIFEST } from "../platform/macos/release-manifest.js";
-import { verifyManagedMacRelease as verifyMacRelease } from "../platform/macos/app-installation-binding.js";
+  MAC_RELEASE_MANIFEST,
+  verifyMacRelease,
+} from "../platform/macos/release-manifest.js";
 import { DEFAULT_MAC_RECIPE_ID } from "../platform/macos/runtime-recipes.js";
 import {
   WINDOWS_RELEASE_MANIFEST,
@@ -41,10 +40,6 @@ interface ServiceDiagnostics {
 }
 
 export interface QualificationEvidence {
-  runtimeProfile: RuntimeProfile;
-  directmlDeviceId: number;
-  serviceIdentity: string;
-  gpuIdentity?: DirectmlGpuIdentity;
   platform: "darwin-arm64" | "windows-amd64";
   provider: "mps" | "directml";
   gpuId: string;
@@ -53,7 +48,6 @@ export interface QualificationEvidence {
   fixtureDigest: string;
   runtimeDiagnostics?: ServiceDiagnostics;
   recipeIds: (typeof WORKER_RECIPE_IDS)[number][];
-  recipeDigests: Record<string, string>;
   uploadCandidate: QualificationUploadCandidate;
 }
 
@@ -65,9 +59,6 @@ export interface QualificationUploadCandidate {
 }
 
 export interface EnrollmentReportBaseOptions {
-  runtimeProfile?: RuntimeProfile;
-  expectedUserSid?: string;
-  expectedFixtureDigest?: string;
   releaseRoot: string;
   label: string;
   groupId?: string;
@@ -85,94 +76,6 @@ export interface EnrollmentReportDiagnosticsOptions extends EnrollmentReportBase
   qualification: unknown;
 }
 
-export interface WindowsUserRuntimeReportObservations {
-  label: string;
-  host: HostInformation;
-  expectedUserSid: string;
-  expectedFixtureDigest: string;
-  workerVersion: string;
-  manifestDigest: string;
-  modelDigest: string;
-  diagnostics: unknown;
-  qualification: unknown;
-  currentGpus: readonly unknown[];
-  recipeDigests: Readonly<Record<(typeof WORKER_RECIPE_IDS)[number], string>>;
-}
-
-/** Validated report data only. The Store caller must independently retain its
- * genuine protected code owner and reobserve its actual native SID/GPU before
- * and after this function. These observations cannot grant code or enrollment. */
-export function createWindowsUserReportFromRuntimeObservations(
-  options: WindowsUserRuntimeReportObservations,
-): WorkerInstallationReport {
-  const adapter = runtimePlatformAdapter(options.host, "windows-user"),
-    diagnostics = parseDiagnostics(options.diagnostics),
-    qualification = parseQualificationEvidence(options.qualification, {
-      runtimeProfile: "windows-user",
-      expectedUserSid: options.expectedUserSid,
-      expectedFixtureDigest: options.expectedFixtureDigest,
-    });
-  assertDiagnosticsMatchHost(diagnostics, adapter.platform, adapter.provider);
-  if (!SHA256.test(options.manifestDigest) || !SHA256.test(options.modelDigest))
-    throw new TypeError("Windows user runtime digests are invalid");
-  assertQualificationMatchesHost(
-    qualification,
-    adapter.platform,
-    adapter.provider,
-    options.manifestDigest,
-    options.modelDigest,
-  );
-  if (
-    !qualification.runtimeDiagnostics ||
-    qualification.runtimeDiagnostics.onnxRuntime !== diagnostics.onnxRuntime ||
-    diagnostics.modelSha256 !== options.modelDigest
-  )
-    throw new TypeError("Qualification provider runtime version changed");
-  const recipes = strictRecord(
-    options.recipeDigests,
-    new Set(WORKER_RECIPE_IDS),
-    "Windows user recipe catalog",
-  );
-  if (
-    WORKER_RECIPE_IDS.some(
-      (recipe) => recipes[recipe] !== qualification.recipeDigests[recipe],
-    )
-  )
-    throw new TypeError(
-      "Qualification recipes do not match the verified runtime",
-    );
-  const selected = resolveQualifiedGpuIdentity(
-      qualification.gpuIdentity!,
-      options.currentGpus,
-    ),
-    hardware = qualifiedWindowsHardware(options.host, qualification, selected);
-  const report: WorkerInstallationReport = {
-    label: boundedText(options.label, "machine label", 120),
-    hardware,
-    runtime: {
-      installationProfile: "windows-user",
-      workerVersion: parsePackage({ version: options.workerVersion }).version,
-      protocolVersion: WORKER_PROTOCOL_VERSION,
-      manifestDigest: options.manifestDigest,
-      modelDigest: options.modelDigest,
-      providerRuntimeVersion: `onnxruntime ${diagnostics.onnxRuntime}`,
-    },
-    capabilities: [
-      {
-        platform: "windows-amd64",
-        provider: "directml",
-        gpuId: hardware.gpus[0]!.id,
-        recipeIds: qualification.recipeIds,
-        maxSlots: 1,
-      },
-    ],
-    summary:
-      "qualified Windows user DirectML runtime; current-user Kim dispatch passed",
-  };
-  assertInstallationReport(report);
-  return report;
-}
-
 export interface HostInformation {
   platform: NodeJS.Platform;
   arch: string;
@@ -186,36 +89,13 @@ export type CommandRunner = (
   arguments_: readonly string[],
 ) => Promise<string>;
 
-export interface DirectmlGpuIdentity {
-  source: "DXGI EnumAdapters1/GetDesc1";
-  deviceIndex: number;
-  name: string;
-  vendorId: number;
-  deviceId: number;
-  subsystemId: number;
-  revision: number;
-  driverVersion: string;
-  luid: string;
-  dedicatedVideoMemoryBytes: number;
-  sharedSystemMemoryLimitBytes: number;
-}
-
-export interface QualificationContext {
-  runtimeProfile?: RuntimeProfile;
-  expectedUserSid?: string;
-  expectedFixtureDigest?: string;
-}
-
 export async function createEnrollmentReport(
   options: EnrollmentReportOptions,
 ): Promise<WorkerInstallationReport> {
   const qualification = JSON.parse(
     (await readBoundedFile(options.qualificationPath)).toString("utf8"),
   ) as unknown;
-  const parsedQualification = parseQualificationEvidence(
-    qualification,
-    options,
-  );
+  const parsedQualification = parseQualificationEvidence(qualification);
   const diagnostics =
     options.diagnosticsPath === undefined
       ? parsedQualification.runtimeDiagnostics === undefined
@@ -237,28 +117,15 @@ export async function createEnrollmentReportFromDiagnostics(
   options: EnrollmentReportDiagnosticsOptions,
 ): Promise<WorkerInstallationReport> {
   const host = options.host ?? currentHost();
-  const adapter = runtimePlatformAdapter(host, options.runtimeProfile);
+  const adapter = runtimePlatformAdapter(host);
   const releaseManifest =
     adapter.platform === "darwin"
       ? await verifyMacRelease(options.releaseRoot)
-      : await verifyWindowsRelease(
-          options.releaseRoot,
-          options.runtimeProfile === "windows-user"
-            ? "windows-user"
-            : undefined,
-        );
+      : await verifyWindowsRelease(options.releaseRoot);
   const manifestName =
     adapter.platform === "darwin"
       ? MAC_RELEASE_MANIFEST
       : WINDOWS_RELEASE_MANIFEST;
-  if (
-    options.runtimeProfile === "windows-user" &&
-    (releaseManifest as { installationProfile?: unknown })
-      .installationProfile !== "windows-user"
-  )
-    throw new TypeError(
-      "Consumer qualification requires a Windows user release",
-    );
   const manifestDigest = createHash("sha256")
     .update(
       await readBoundedFile(
@@ -276,10 +143,7 @@ export async function createEnrollmentReportFromDiagnostics(
   );
   const diagnostics = parseDiagnostics(options.diagnostics);
   assertDiagnosticsMatchHost(diagnostics, adapter.platform, adapter.provider);
-  const qualification = parseQualificationEvidence(
-    options.qualification,
-    options,
-  );
+  const qualification = parseQualificationEvidence(options.qualification);
   assertQualificationMatchesHost(
     qualification,
     adapter.platform,
@@ -287,18 +151,7 @@ export async function createEnrollmentReportFromDiagnostics(
     manifestDigest,
     diagnostics.modelSha256,
   );
-  if (
-    qualification.runtimeProfile === "windows-user" &&
-    (qualification.runtimeDiagnostics === undefined ||
-      qualification.runtimeDiagnostics.onnxRuntime !== diagnostics.onnxRuntime)
-  )
-    throw new TypeError("Qualification provider runtime version changed");
-  const hardware = await collectHardware(
-    host,
-    options.command ?? runCommand,
-    qualification,
-    options,
-  );
+  const hardware = await collectHardware(host, options.command ?? runCommand);
   const report: WorkerInstallationReport = {
     label: boundedText(options.label, "machine label", 120),
     ...(options.groupId === undefined
@@ -306,9 +159,6 @@ export async function createEnrollmentReportFromDiagnostics(
       : { groupId: boundedText(options.groupId, "machine group ID", 100) }),
     hardware,
     runtime: {
-      ...(options.runtimeProfile === "windows-user"
-        ? { installationProfile: "windows-user" as const }
-        : {}),
       workerVersion: packageValue.version,
       protocolVersion: WORKER_PROTOCOL_VERSION,
       manifestDigest,
@@ -328,7 +178,7 @@ export async function createEnrollmentReportFromDiagnostics(
         maxSlots: 1,
       },
     ],
-    summary: `qualified ${adapter.id}; release ${releaseManifest.releaseVersion}; ${qualification.runtimeProfile === "windows-user" ? "current-user" : "service-context"} Kim dispatch passed`,
+    summary: `qualified ${adapter.id}; release ${releaseManifest.releaseVersion}; service-context Kim dispatch passed`,
   };
   assertInstallationReport(report);
   return report;
@@ -336,7 +186,6 @@ export async function createEnrollmentReportFromDiagnostics(
 
 export function parseQualificationEvidence(
   value: unknown,
-  context: QualificationContext = {},
 ): QualificationEvidence {
   const object = strictRecord(
     value,
@@ -357,10 +206,6 @@ export function parseQualificationEvidence(
       "uploadCandidate",
       "preloadSeconds",
       "totalSeconds",
-      "runtimeProfile",
-      "gpuIdentity",
-      "gpuOnlyPolicy",
-      "resourceObservations",
     ]),
     "Qualification evidence",
   );
@@ -377,31 +222,8 @@ export function parseQualificationEvidence(
     "qualification provider",
   );
   const gpuId = boundedText(object.gpuId, "qualification GPU ID", 128);
-  const runtimeProfile = context.runtimeProfile ?? "legacy-service";
-  if (runtimeProfile !== "legacy-service" && runtimeProfile !== "windows-user")
-    throw new TypeError("Qualification runtime profile is unsupported");
-  if (
-    runtimeProfile === "legacy-service" &&
-    object.runtimeProfile !== undefined
-  )
-    throw new TypeError(
-      "Consumer qualification requires an explicit user context",
-    );
-  if (
-    runtimeProfile === "windows-user" &&
-    (object.runtimeProfile !== runtimeProfile ||
-      platform !== "windows-amd64" ||
-      provider !== "directml")
-  )
-    throw new TypeError("Qualification user runtime profile is invalid");
-  if (runtimeProfile === "legacy-service" && object.directmlDeviceId !== 0)
+  if (object.directmlDeviceId !== 0)
     throw new TypeError("Qualification device ID is invalid");
-  const directmlDeviceId = boundedInteger(
-    object.directmlDeviceId,
-    0,
-    runtimeProfile === "windows-user" ? 15 : 0,
-    "qualification device ID",
-  );
   const serviceIdentity = boundedText(
     object.serviceIdentity,
     "qualification service identity",
@@ -411,57 +233,9 @@ export function parseQualificationEvidence(
     (platform === "darwin-arm64" &&
       (serviceIdentity === "root" ||
         !/^[A-Za-z_][A-Za-z0-9._-]{0,99}$/u.test(serviceIdentity))) ||
-    (platform === "windows-amd64" &&
-      runtimeProfile === "legacy-service" &&
-      serviceIdentity !== "S-1-5-19") ||
-    (runtimeProfile === "windows-user" &&
-      (serviceIdentity !== context.expectedUserSid ||
-        !/^S-1-(?:\d+-){1,14}\d+$/u.test(serviceIdentity) ||
-        ["S-1-5-18", "S-1-5-19", "S-1-5-20"].includes(serviceIdentity)))
+    (platform === "windows-amd64" && serviceIdentity !== "S-1-5-19")
   )
     throw new TypeError("Qualification service identity is invalid");
-  const gpuIdentity =
-    runtimeProfile === "windows-user"
-      ? parseDirectmlGpuIdentity(object.gpuIdentity)
-      : undefined;
-  if (gpuIdentity !== undefined) {
-    if (
-      gpuIdentity.deviceIndex !== directmlDeviceId ||
-      gpuId !== `dxgi-${gpuIdentity.luid}` ||
-      object.gpuOnlyPolicy !== "onnxruntime-disable-cpu-fallback-v1"
-    )
-      throw new TypeError("Qualification GPU identity is invalid");
-    const observations = strictRecord(
-      object.resourceObservations,
-      new Set([
-        "dedicatedVideoMemoryLimitBytes",
-        "sharedSystemMemoryLimitBytes",
-        "inferenceSlots",
-      ]),
-      "Qualification GPU observations",
-    );
-    if (
-      observations.inferenceSlots !== 1 ||
-      observations.dedicatedVideoMemoryLimitBytes !==
-        gpuIdentity.dedicatedVideoMemoryBytes ||
-      observations.sharedSystemMemoryLimitBytes !==
-        gpuIdentity.sharedSystemMemoryLimitBytes
-    )
-      throw new TypeError("Qualification GPU observations are invalid");
-  } else if (
-    object.gpuIdentity !== undefined ||
-    object.resourceObservations !== undefined
-  ) {
-    throw new TypeError(
-      "Consumer GPU evidence requires an explicit user context",
-    );
-  }
-  if (
-    object.gpuOnlyPolicy !== undefined &&
-    (provider !== "directml" ||
-      object.gpuOnlyPolicy !== "onnxruntime-disable-cpu-fallback-v1")
-  )
-    throw new TypeError("Qualification GPU-only policy is invalid");
   const modelDigest = sha256Text(
     object.modelDigest,
     "qualification model digest",
@@ -474,15 +248,6 @@ export function parseQualificationEvidence(
     object.fixtureDigest,
     "qualification fixture digest",
   );
-  if (
-    runtimeProfile === "windows-user" &&
-    (context.expectedFixtureDigest === undefined ||
-      fixtureDigest !==
-        sha256Text(context.expectedFixtureDigest, "expected fixture digest"))
-  )
-    throw new TypeError(
-      "Qualification fixture does not match the approved fixture",
-    );
   const expectedProvider = provider === "mps" ? "MPS" : "DmlExecutionProvider";
   const runtimeDiagnostics =
     object.runtimeDiagnostics === undefined
@@ -565,10 +330,7 @@ export function parseQualificationEvidence(
       WORKER_RECIPE_IDS,
       "qualification recipe ID",
     );
-    const recipeDigest = sha256Text(
-      recipe.recipeDigest,
-      "qualification recipe digest",
-    );
+    sha256Text(recipe.recipeDigest, "qualification recipe digest");
     const resultDigest = sha256Text(
       recipe.resultDigest,
       "qualification result digest",
@@ -615,7 +377,7 @@ export function parseQualificationEvidence(
       for (const [stage, seconds] of Object.entries(timings))
         positiveFinite(seconds, `qualification ${stage} duration`);
     }
-    return { recipeId, recipeDigest, resultDigest, resultBytes };
+    return { recipeId, resultDigest, resultBytes };
   });
   const recipeIds = recipeResults.map((result) => result.recipeId);
   if (
@@ -666,10 +428,6 @@ export function parseQualificationEvidence(
   )
     throw new TypeError("Qualification upload candidate is invalid");
   return {
-    runtimeProfile,
-    directmlDeviceId,
-    serviceIdentity,
-    ...(gpuIdentity === undefined ? {} : { gpuIdentity }),
     platform,
     provider,
     gpuId,
@@ -678,9 +436,6 @@ export function parseQualificationEvidence(
     fixtureDigest,
     ...(runtimeDiagnostics === undefined ? {} : { runtimeDiagnostics }),
     recipeIds,
-    recipeDigests: Object.fromEntries(
-      recipeResults.map((recipe) => [recipe.recipeId, recipe.recipeDigest]),
-    ),
     uploadCandidate,
   };
 }
@@ -697,8 +452,7 @@ function assertQualificationMatchesHost(
   if (
     qualification.platform !== expectedPlatform ||
     qualification.provider !== provider ||
-    (qualification.runtimeProfile === "legacy-service" &&
-      qualification.gpuId !== "gpu0") ||
+    qualification.gpuId !== "gpu0" ||
     qualification.releaseManifestDigest !== releaseManifestDigest ||
     qualification.modelDigest !== modelDigest
   )
@@ -719,150 +473,9 @@ export function currentHost(): HostInformation {
   };
 }
 
-export function parseDirectmlGpuIdentity(value: unknown): DirectmlGpuIdentity {
-  const gpu = strictRecord(
-    value,
-    new Set([
-      "source",
-      "deviceIndex",
-      "name",
-      "vendorId",
-      "deviceId",
-      "subsystemId",
-      "revision",
-      "driverVersion",
-      "luid",
-      "dedicatedVideoMemoryBytes",
-      "sharedSystemMemoryLimitBytes",
-    ]),
-    "DirectML GPU identity",
-  );
-  if (gpu.source !== "DXGI EnumAdapters1/GetDesc1")
-    throw new TypeError("DirectML GPU identity source is invalid");
-  const name = boundedText(gpu.name, "DirectML GPU name", 128);
-  const driverVersion = boundedText(
-    gpu.driverVersion,
-    "DirectML GPU driver",
-    100,
-  );
-  const luid = boundedText(gpu.luid, "DirectML GPU LUID", 16);
-  if (
-    /\p{Cc}/u.test(name) ||
-    !/^[a-f0-9]{16}$/u.test(luid) ||
-    !/^\d{1,5}(?:\.\d{1,5}){3}$/u.test(driverVersion)
-  )
-    throw new TypeError("DirectML GPU identity is invalid");
-  return {
-    source: "DXGI EnumAdapters1/GetDesc1",
-    deviceIndex: boundedInteger(gpu.deviceIndex, 0, 15, "DirectML GPU ordinal"),
-    name,
-    vendorId: boundedInteger(
-      gpu.vendorId,
-      1,
-      0xffffffff,
-      "DirectML GPU vendor",
-    ),
-    deviceId: boundedInteger(
-      gpu.deviceId,
-      0,
-      0xffffffff,
-      "DirectML GPU device",
-    ),
-    subsystemId: boundedInteger(
-      gpu.subsystemId,
-      0,
-      0xffffffff,
-      "DirectML GPU subsystem",
-    ),
-    revision: boundedInteger(
-      gpu.revision,
-      0,
-      0xffffffff,
-      "DirectML GPU revision",
-    ),
-    driverVersion,
-    luid,
-    dedicatedVideoMemoryBytes: boundedInteger(
-      gpu.dedicatedVideoMemoryBytes,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      "DirectML dedicated GPU memory",
-    ),
-    sharedSystemMemoryLimitBytes: boundedInteger(
-      gpu.sharedSystemMemoryLimitBytes,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      "DirectML shared GPU memory",
-    ),
-  };
-}
-
-export function resolveQualifiedGpuIdentity(
-  qualified: DirectmlGpuIdentity,
-  current: readonly unknown[],
-): DirectmlGpuIdentity {
-  const expected = parseDirectmlGpuIdentity(qualified);
-  const adapters = current.map(parseDirectmlGpuIdentity);
-  if (
-    adapters.length > 16 ||
-    new Set(adapters.map((gpu) => gpu.luid)).size !== adapters.length ||
-    new Set(adapters.map((gpu) => gpu.deviceIndex)).size !== adapters.length
-  )
-    throw new TypeError("DirectML GPU enumeration is invalid");
-  const binding = ({
-    deviceIndex: _ordinal,
-    ...identity
-  }: DirectmlGpuIdentity) => JSON.stringify(identity);
-  const matches = adapters.filter((gpu) => binding(gpu) === binding(expected));
-  if (matches.length !== 1)
-    throw new TypeError(
-      "Qualified GPU or driver changed; qualification is required",
-    );
-  return matches[0]!;
-}
-
-function qualifiedWindowsHardware(
-  host: HostInformation,
-  qualification: QualificationEvidence,
-  selected: DirectmlGpuIdentity,
-): WorkerHardwareReport {
-  const build = /^(?:10\.0\.)?(\d{5})(?:\.\d+)?$/.exec(host.release);
-  if (
-    host.platform !== "win32" ||
-    host.arch !== "x64" ||
-    !build ||
-    Number(build[1]) < 19045
-  )
-    throw new TypeError("Windows user host is unsupported");
-  return {
-    os: "Windows",
-    osBuild: boundedText(host.release, "host OS build", 100),
-    architecture: "x86_64",
-    cpu: boundedText(host.cpu, "host CPU", 200),
-    memoryBytes: boundedInteger(
-      host.memoryBytes,
-      1,
-      Number.MAX_SAFE_INTEGER,
-      "host memory",
-    ),
-    gpus: [
-      {
-        id: qualification.gpuId,
-        name: selected.name,
-        driverVersion: selected.driverVersion,
-        ...(selected.dedicatedVideoMemoryBytes > 0
-          ? { memoryBytes: selected.dedicatedVideoMemoryBytes }
-          : {}),
-      },
-    ],
-  };
-}
-
 async function collectHardware(
   host: HostInformation,
   command: CommandRunner,
-  qualification: QualificationEvidence,
-  options: EnrollmentReportBaseOptions,
 ): Promise<WorkerHardwareReport> {
   const base = {
     os: host.platform === "darwin" ? "Darwin" : "Windows",
@@ -910,48 +523,6 @@ async function collectHardware(
         },
       ],
     };
-  }
-  if (qualification.runtimeProfile === "windows-user") {
-    const native = strictRecord(
-      JSON.parse(
-        await command(
-          join(options.releaseRoot, "runtime", "python", "python.exe"),
-          [
-            "-I",
-            "-B",
-            "-c",
-            "import json,sys;sys.path.insert(0,sys.argv[1]);from musicmute_engine.windows_gpu import enumerate_adapters;from musicmute_engine.qualification import service_identity;from musicmute_engine.recipes import RECIPE_DEFINITIONS,recipe_snapshot;print(json.dumps({'sid':service_identity(),'gpus':enumerate_adapters(),'recipes':{key:recipe_snapshot(key)['recipeDigest'] for key in RECIPE_DEFINITIONS}}))",
-            join(options.releaseRoot, "app", "engine"),
-          ],
-        ),
-      ) as unknown,
-      new Set(["sid", "gpus", "recipes"]),
-      "Windows user GPU discovery",
-    );
-    if (
-      native.sid !== options.expectedUserSid ||
-      native.sid !== qualification.serviceIdentity ||
-      !Array.isArray(native.gpus)
-    )
-      throw new TypeError("Windows user GPU discovery context changed");
-    const recipes = strictRecord(
-      native.recipes,
-      new Set(WORKER_RECIPE_IDS),
-      "Windows user recipe catalog",
-    );
-    if (
-      WORKER_RECIPE_IDS.some(
-        (recipe) => recipes[recipe] !== qualification.recipeDigests[recipe],
-      )
-    )
-      throw new TypeError(
-        "Qualification recipes do not match the verified runtime",
-      );
-    const selected = resolveQualifiedGpuIdentity(
-      qualification.gpuIdentity!,
-      native.gpus,
-    );
-    return qualifiedWindowsHardware(host, qualification, selected);
   }
   const powershell = join(
     process.env.SystemRoot ?? "C:\\Windows",

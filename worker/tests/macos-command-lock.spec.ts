@@ -12,8 +12,7 @@ afterEach(async () => {
   );
 });
 
-// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
-describe.skipIf(process.platform !== "darwin")("macOS CLI command lock", () => {
+describe("macOS CLI command lock", () => {
   it("rejects concurrent mutation and releases after completion", async () => {
     const path = await fixture();
     let release!: () => void;

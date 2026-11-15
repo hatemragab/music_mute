@@ -40,27 +40,6 @@ describe('processing access policy', () => {
     ).toEqual({ allowed: true });
   });
 
-  it('admits an owned web device without a native build channel while retaining verification', async () => {
-    const policy = defaultPolicy();
-    policy.platforms.android.minimumBuild = 10;
-    policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(24);
-    policy.requireVerifiedEmail = true;
-    const web = { platform: 'web' as const, buildNumber: 1 };
-    expect(evaluateProcessingAccess(policy, false, web)).toEqual({
-      allowed: false,
-      reason: 'EMAIL_VERIFICATION_REQUIRED',
-    });
-    expect(evaluateProcessingAccess(policy, true, web)).toEqual({
-      allowed: true,
-    });
-    const releases = { findById: vi.fn() };
-    const service = new AppPolicyService({} as never, releases as never);
-    await expect(
-      service.assertProcessingTargetAvailable(policy, 'web'),
-    ).resolves.toBeUndefined();
-    expect(releases.findById).not.toHaveBeenCalled();
-  });
-
   it.each([
     {
       minimumBuild: 2,
@@ -96,80 +75,6 @@ describe('processing access policy', () => {
     const policy = defaultPolicy();
     expect(() => validatePolicy(policy)).not.toThrow();
     expect(() => validatePolicy({ ...policy, bypass: true })).toThrow();
-  });
-
-  it.each(['macos', 'windows'] as const)(
-    'keeps native %s eligibility independent from mobile release channels',
-    async (platform) => {
-      const policy = defaultPolicy();
-      const mac = { platform, buildNumber: 2 };
-      policy.platforms.android.minimumBuild = 10;
-      policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(
-        24,
-      );
-      expect(evaluateProcessingAccess(policy, true, mac)).toEqual({
-        allowed: true,
-      });
-      policy.platforms[platform] = { minimumBuild: 3 };
-      expect(() => validatePolicy(policy)).not.toThrow();
-      expect(evaluateProcessingAccess(policy, true, mac)).toEqual({
-        allowed: false,
-        reason: 'APP_UPDATE_REQUIRED',
-      });
-      expect(
-        evaluateProcessingAccess(policy, true, { ...mac, buildNumber: 3 }),
-      ).toEqual({ allowed: true });
-      policy.requireVerifiedEmail = true;
-      expect(evaluateProcessingAccess(policy, false, mac)).toEqual({
-        allowed: false,
-        reason: 'EMAIL_VERIFICATION_REQUIRED',
-      });
-      expect(evaluateProcessingAccess(policy, true, null)).toEqual({
-        allowed: false,
-        reason: 'DEVICE_SYNC_REQUIRED',
-      });
-      const releases = { findById: vi.fn() };
-      const service = new AppPolicyService({} as never, releases as never);
-      await service.assertProcessingTargetAvailable(policy, platform);
-      expect(releases.findById).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([0, 1.5, 2147483648, '3', undefined])(
-    'rejects an invalid native Mac gate %j',
-    (minimumBuild) => {
-      const policy = defaultPolicy();
-      policy.platforms.macos = { minimumBuild } as never;
-      expect(() => validatePolicy(policy)).toThrow();
-      policy.platforms.macos = { minimumBuild: null };
-      policy.platforms.windows = { minimumBuild } as never;
-      expect(() => validatePolicy(policy)).toThrow();
-    },
-  );
-
-  it('supports both desktop policies and rejects unknown platform selections', () => {
-    const policy = defaultPolicy();
-    policy.platforms.macos = { minimumBuild: 2 };
-    policy.platforms.windows = { minimumBuild: 3 };
-    expect(() => validatePolicy(policy)).not.toThrow();
-    expect(() =>
-      validatePolicy({
-        ...policy,
-        platforms: { ...policy.platforms, linux: { minimumBuild: null } },
-      }),
-    ).toThrow();
-    expect(() =>
-      validatePolicy({
-        ...policy,
-        platforms: {
-          ...policy.platforms,
-          windows: {
-            minimumBuild: 3,
-            releaseSelection: policy.platforms.ios.releaseSelection,
-          },
-        },
-      }),
-    ).toThrow();
   });
 
   it('rejects an unavailable selected release', async () => {

@@ -21,6 +21,12 @@ export class AccountUsagePeriod {
   })
   periodKey!: string;
 
+  @Prop({ type: Date, required: true, immutable: true })
+  periodStart!: Date;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  periodEnd!: Date;
+
   @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
   processingUsedSeconds!: number;
 
@@ -65,17 +71,6 @@ AccountUsagePeriodSchema.index(
   { purgeAt: 1 },
   { expireAfterSeconds: 0, name: 'account_usage_closed_period_ttl' },
 );
-AccountUsagePeriodSchema.index(
-  { _id: 1, periodKey: 1 },
-  {
-    name: 'account_usage_retention_repair',
-    partialFilterExpression: {
-      purgeAt: null,
-      processingReservationCount: 0,
-      processingReservedSeconds: 0,
-    },
-  },
-);
 
 @Schema({
   collection: 'account_daily_usage_periods',
@@ -96,6 +91,12 @@ export class AccountDailyUsagePeriod {
     match: /^\d{4}-\d{2}-\d{2}$/,
   })
   dayKey!: string;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  dayStart!: Date;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  dayEnd!: Date;
 
   @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
   uploadGrants!: number;
@@ -170,8 +171,8 @@ export class UploadGrantReceipt {
 export const UploadGrantReceiptSchema =
   SchemaFactory.createForClass(UploadGrantReceipt);
 UploadGrantReceiptSchema.index(
-  { accountId: 1 },
-  { name: 'upload_grants_account' },
+  { accountId: 1, jobId: 1, createdAt: 1 },
+  { name: 'upload_grants_account_job_created' },
 );
 UploadGrantReceiptSchema.index(
   { logicalAudioId: 1, attemptNumber: 1 },
@@ -219,7 +220,7 @@ export class DownloadGrantReceipt {
   requestId!: string;
 
   @Prop({ required: true, immutable: true, maxlength: 1024 })
-  objectEtag!: string;
+  objectVersionId!: string;
 
   @Prop({
     required: true,
@@ -245,8 +246,8 @@ export class DownloadGrantReceipt {
 export const DownloadGrantReceiptSchema =
   SchemaFactory.createForClass(DownloadGrantReceipt);
 DownloadGrantReceiptSchema.index(
-  { accountId: 1 },
-  { name: 'download_grants_account' },
+  { accountId: 1, periodKey: 1, scope: 1 },
+  { name: 'download_grants_account_period_scope' },
 );
 DownloadGrantReceiptSchema.index(
   { purgeAt: 1 },
@@ -264,6 +265,12 @@ export class ServiceUsagePeriod {
 
   @Prop({ required: true, immutable: true, match: /^\d{4}-\d{2}$/ })
   periodKey!: string;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  periodStart!: Date;
+
+  @Prop({ type: Date, required: true, immutable: true })
+  periodEnd!: Date;
 
   @Prop({ required: true, default: 0, min: 0, validate: Number.isSafeInteger })
   estimatedOutboundBytes!: number;
@@ -340,8 +347,8 @@ export const ProcessingReservationSchema = SchemaFactory.createForClass(
   ProcessingReservation,
 );
 ProcessingReservationSchema.index(
-  { accountId: 1 },
-  { name: 'processing_reservations_account' },
+  { accountId: 1, state: 1, periodKey: 1 },
+  { name: 'processing_reservations_account_state_period' },
 );
 ProcessingReservationSchema.index(
   { purgeAt: 1 },

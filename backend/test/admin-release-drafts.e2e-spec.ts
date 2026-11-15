@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createAdminHarness,
   type AdminHarness,
-  wireJson,
 } from './helpers/admin-harness.js';
 import { AdminReleasesController } from '../src/releases/admin-releases.controller.js';
 import { ReleaseDraftsService } from '../src/releases/release-drafts.service.js';
@@ -16,7 +15,7 @@ describe('release administration HTTP admission', () => {
       list: vi.fn(async () => ({ items: [], nextCursor: null })),
       proposal: vi.fn(async () => ({
         platform: 'android',
-        source: 'google_play',
+        source: 'direct_apk',
         current: { versionName: '0.1.0', buildNumber: 1 },
         suggested: { versionName: '0.1.1', buildNumber: 2 },
       })),
@@ -33,12 +32,11 @@ describe('release administration HTTP admission', () => {
   }
   const body = {
     platform: 'android',
-    source: 'google_play',
+    source: 'direct_apk',
     versionName: '1',
     buildNumber: 1,
     changelogEn: 'Initial',
-    storeUrl:
-      'https://play.google.com/store/apps/details?id=com.example.fixture',
+    storeUrl: null,
     operationId: '97cb8747-2823-43e0-b333-66ab50ff751b',
     reason: 'Initial release',
   };
@@ -54,34 +52,19 @@ describe('release administration HTTP admission', () => {
     const drafts = await setup(),
       token = harness.signInAs('release_manager');
     await harness
-      .request(
-        'post',
-        '/admin/releases',
-        wireJson({ ...body, buildNumber: 0 }),
-        token,
-      )
+      .request('post', '/admin/releases', { ...body, buildNumber: 0 }, token)
       .expect(400);
     await harness
       .request(
         'post',
         '/admin/releases',
-        wireJson({ ...body, state: 'published' }),
+        { ...body, state: 'published' },
         token,
       )
       .expect(400);
-    expect(drafts.create).not.toHaveBeenCalled();
-    const retired = await harness
-      .request(
-        'post',
-        '/admin/releases',
-        wireJson({ ...body, source: 'direct_apk', storeUrl: null }),
-        token,
-      )
-      .expect(400);
-    expect(retired.body.code).toBe('INVALID_REQUEST');
     expect(drafts.create).not.toHaveBeenCalled();
     const response = await harness
-      .request('post', '/admin/releases', wireJson(body), token)
+      .request('post', '/admin/releases', body, token)
       .expect(201);
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.body.state).toBe('draft');
@@ -91,20 +74,20 @@ describe('release administration HTTP admission', () => {
     const response = await harness
       .request(
         'get',
-        '/admin/releases/proposal?platform=android&source=google_play',
+        '/admin/releases/proposal?platform=android&source=direct_apk',
         undefined,
         harness.signInAs('release_manager'),
       )
       .expect(200);
     expect(response.body).toEqual({
       platform: 'android',
-      source: 'google_play',
-      current: { version_name: '0.1.0', build_number: 1 },
-      suggested: { version_name: '0.1.1', build_number: 2 },
+      source: 'direct_apk',
+      current: { versionName: '0.1.0', buildNumber: 1 },
+      suggested: { versionName: '0.1.1', buildNumber: 2 },
     });
     expect(drafts.proposal).toHaveBeenCalledWith({
       platform: 'android',
-      source: 'google_play',
+      source: 'direct_apk',
     });
   });
 });

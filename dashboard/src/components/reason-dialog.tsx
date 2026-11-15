@@ -23,7 +23,6 @@ interface ReasonDialogProps {
   confirmLabel: string;
   destructive?: boolean;
   freshAuth?: boolean;
-  confirmDisabled?: boolean;
   summary?: React.ReactNode;
   onReauthenticate?(): Promise<void>;
   onConfirm(reason: string): Promise<void>;
@@ -41,7 +40,6 @@ function OpenReasonDialog({
   confirmLabel,
   destructive = false,
   freshAuth = false,
-  confirmDisabled = false,
   summary,
   onReauthenticate,
   onConfirm,
@@ -129,9 +127,7 @@ function OpenReasonDialog({
           </DialogClose>
           {!reauthenticated ? (
             <Button
-              variant="outline"
-              className="transition-none"
-              disabled={busy || !reason.trim() || confirmDisabled}
+              disabled={busy || !reason.trim()}
               onClick={() => void reauthenticate()}
             >
               {busy ? (
@@ -143,12 +139,7 @@ function OpenReasonDialog({
           ) : (
             <Button
               variant={destructive ? "destructive" : "default"}
-              className={
-                destructive
-                  ? "transition-none bg-red-700 text-white hover:bg-red-800"
-                  : "transition-none"
-              }
-              disabled={busy || !reason.trim() || confirmDisabled}
+              disabled={busy || !reason.trim()}
               onClick={() => void submit()}
             >
               {busy ? <InlineBusy label="Submitting" /> : confirmLabel}

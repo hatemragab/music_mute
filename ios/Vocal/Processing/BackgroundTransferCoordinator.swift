@@ -24,8 +24,7 @@ struct TransferCompletion: Sendable {
 @MainActor protocol BackgroundTransferring: AnyObject {
   var onCompletion: ((TransferCompletion) async -> Void)? { get set }
   var onProgress: ((TransferContext, TransferProgressSnapshot) -> Void)? { get set }
-  func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
-    async throws
+  func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext) async throws
     -> Int
   func activeTransfers() async -> [TransferContext]
   func cancel(ownerUid: String, operationId: UUID?) async
@@ -74,8 +73,7 @@ struct TransferCompletion: Sendable {
     return true
   }
 
-  func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
-    async throws
+  func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext) async throws
     -> Int
   {
     try Task.checkCancellation()
@@ -85,23 +83,14 @@ struct TransferCompletion: Sendable {
     let task = session.uploadTask(with: request, fromFile: file.fileURL)
     task.taskDescription = String(data: try JSONEncoder().encode(context), encoding: .utf8)
     task.resume()
-    LocalDiagnostics.emit(
-      "transfer.upload_scheduled", category: "transfer",
-      data: [
-        "operationId": context.operationId.uuidString.lowercased(),
-        "transferId": context.transferId.uuidString.lowercased(), "taskId": task.taskIdentifier,
-        "bytes": file.bytes, "contentType": file.contentType, "body": ["omitted": "binary_stream"],
-      ], userID: context.ownerUid)
     return task.taskIdentifier
   }
 
-  static func uploadRequest(grant: UploadGrant, multipart: ObjectStorageUploadFile) throws
-    -> URLRequest
-  {
+  static func uploadRequest(grant: UploadGrant, multipart: S3MultipartFile) throws -> URLRequest {
     guard grant.url.scheme == "https", grant.url.host != nil,
       grant.url.user == nil, grant.url.password == nil, grant.url.fragment == nil,
       grant.method == .put,
-      grant.headers.count == 4,
+      grant.headers.count == 3,
       grant.headers.keys.allSatisfy({
         !$0.contains(where: {
           guard let ascii = $0.asciiValue else { return false }
@@ -121,10 +110,9 @@ struct TransferCompletion: Sendable {
         throw ProcessingTransferFailure.invalidGrant
       }
     }
-    guard headers.count == 4,
+    guard headers.count == 3,
       headers["content-type"] == multipart.contentType,
       headers["x-amz-checksum-sha256"] == multipart.checksumSha256,
-      headers["x-amz-meta-sha256"] == multipart.checksumSha256,
       headers["if-none-match"] == "*"
     else { throw ProcessingTransferFailure.invalidGrant }
     var request = URLRequest(
@@ -228,18 +216,6 @@ extension BackgroundTransferCoordinator: URLSessionTaskDelegate, URLSessionDeleg
     let completion = TransferCompletion(
       context: context, statusCode: status,
       succeeded: error == nil && status.map { (200...299).contains($0) } == true)
-    var details: [String: Any] = [
-      "operationId": context.operationId.uuidString.lowercased(),
-      "transferId": context.transferId.uuidString.lowercased(), "taskId": task.taskIdentifier,
-      "bytesSent": task.countOfBytesSent,
-      "result": completion.succeeded ? "provider_accepted" : "failed",
-      "body": ["omitted": "binary_stream"],
-    ]
-    if let status { details["status"] = status }
-    if let error { details["error"] = LocalDiagnostics.error(error) }
-    LocalDiagnostics.emit(
-      "transfer.upload_completed", category: "transfer",
-      level: completion.succeeded ? "info" : "warn", data: details, userID: context.ownerUid)
     MainActor.assumeIsolated { self.receiveCompletion(completion) }
   }
 

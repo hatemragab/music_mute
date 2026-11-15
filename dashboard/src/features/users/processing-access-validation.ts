@@ -2,6 +2,7 @@ import type { AccountPolicyOverride } from "@/api/contracts";
 
 export function validateAccountPolicyOverride(
   values: AccountPolicyOverride["values"],
+  effective: AccountPolicyOverride["values"],
   expiresAt: string,
   now = new Date(),
 ) {
@@ -14,12 +15,11 @@ export function validateAccountPolicyOverride(
   }
   if ((values.signedUrlTtlSeconds ?? 1) > 600)
     errors.push("Signed URL validity cannot exceed 600 seconds.");
-  // Effective account quotas can be reduced for unverified email. The backend
-  // resolves omitted fields from the raw global policy before validating them.
+  const merged = { ...effective, ...values };
   if (
-    values.dailyUploadGrants !== undefined &&
-    values.monthlyUploadGrants !== undefined &&
-    values.monthlyUploadGrants < values.dailyUploadGrants
+    merged.dailyUploadGrants !== undefined &&
+    merged.monthlyUploadGrants !== undefined &&
+    merged.monthlyUploadGrants < merged.dailyUploadGrants
   )
     errors.push("Monthly upload grants cannot be lower than daily grants.");
   if (expiresAt) {

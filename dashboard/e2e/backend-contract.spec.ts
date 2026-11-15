@@ -13,23 +13,6 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
   ).toBeVisible();
 
   const result = await page.evaluate(async (api) => {
-    const wireCase = <T>(value: T, fromWire = false): T => {
-      if (Array.isArray(value))
-        return value.map((item) => wireCase(item, fromWire)) as T;
-      if (value === null || typeof value !== "object") return value;
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-          fromWire
-            ? key.replace(
-                /_([a-z0-9])/g,
-                (match, letter: string, offset: number) =>
-                  offset === 0 ? match : letter.toUpperCase(),
-              )
-            : key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-          wireCase(item, fromWire),
-        ]),
-      ) as T;
-    };
     const request = async (
       method: string,
       path: string,
@@ -42,13 +25,13 @@ test("browser enforces session, permission, receipt, concurrency, and revision c
           authorization: `Bearer ${token}`,
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
-        body: body === undefined ? undefined : JSON.stringify(wireCase(body)),
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
       const text = await response.text();
       return {
         status: response.status,
         cacheControl: response.headers.get("cache-control"),
-        value: text ? wireCase(JSON.parse(text), true) : null,
+        value: text ? JSON.parse(text) : null,
       };
     };
 
@@ -160,23 +143,6 @@ test("dashboard media and release payloads pass compiled backend validation", as
   await page.goto("/overview");
 
   const result = await page.evaluate(async (api) => {
-    const wireCase = <T>(value: T, fromWire = false): T => {
-      if (Array.isArray(value))
-        return value.map((item) => wireCase(item, fromWire)) as T;
-      if (value === null || typeof value !== "object") return value;
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-          fromWire
-            ? key.replace(
-                /_([a-z0-9])/g,
-                (match, letter: string, offset: number) =>
-                  offset === 0 ? match : letter.toUpperCase(),
-              )
-            : key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-          wireCase(item, fromWire),
-        ]),
-      ) as T;
-    };
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${api}${path}`, {
         method,
@@ -185,11 +151,11 @@ test("dashboard media and release payloads pass compiled backend validation", as
           authorization: "Bearer owner-fixture",
           ...(body ? { "content-type": "application/json" } : {}),
         },
-        body: body ? JSON.stringify(wireCase(body)) : undefined,
+        body: body ? JSON.stringify(body) : undefined,
       });
       return {
         status: response.status,
-        value: wireCase(await response.json().catch(() => null), true),
+        value: await response.json().catch(() => null),
       };
     };
     const missingId = "000000000000000000000099";
@@ -219,12 +185,12 @@ test("dashboard media and release payloads pass compiled backend validation", as
     };
     const preview = await request(
       "POST",
-      "/admin/update-policy/previews",
+      "/admin/update-policy/preview",
       selection,
     );
     const publish = await request(
       "POST",
-      `/admin/releases/${missingId}/publications`,
+      `/admin/releases/${missingId}/publish`,
       {
         expectedRevision: current.value.revision,
         expectedReleaseRevision: 1,
@@ -236,7 +202,7 @@ test("dashboard media and release payloads pass compiled backend validation", as
     );
     const withdraw = await request(
       "POST",
-      `/admin/releases/${missingId}/withdrawals`,
+      `/admin/releases/${missingId}/withdraw`,
       {
         expectedRevision: current.value.revision,
         expectedReleaseRevision: 1,
@@ -267,23 +233,6 @@ test("every dashboard mutation payload passes compiled backend strict validation
   await page.goto("/overview");
 
   const responses = await page.evaluate(async (api) => {
-    const wireCase = <T>(value: T, fromWire = false): T => {
-      if (Array.isArray(value))
-        return value.map((item) => wireCase(item, fromWire)) as T;
-      if (value === null || typeof value !== "object") return value;
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-          fromWire
-            ? key.replace(
-                /_([a-z0-9])/g,
-                (match, letter: string, offset: number) =>
-                  offset === 0 ? match : letter.toUpperCase(),
-              )
-            : key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-          wireCase(item, fromWire),
-        ]),
-      ) as T;
-    };
     const missingId = "000000000000000000000098";
     const request = async (method: string, path: string, body?: unknown) => {
       const response = await fetch(`${api}${path}`, {
@@ -293,12 +242,11 @@ test("every dashboard mutation payload passes compiled backend strict validation
           authorization: "Bearer owner-fixture",
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
-        body: body === undefined ? undefined : JSON.stringify(wireCase(body)),
+        body: body === undefined ? undefined : JSON.stringify(body),
       });
       return {
         status: response.status,
-        code:
-          wireCase(await response.json().catch(() => null), true)?.code ?? null,
+        code: (await response.json().catch(() => null))?.code ?? null,
       };
     };
     const revision = () => ({
@@ -307,17 +255,6 @@ test("every dashboard mutation payload passes compiled backend strict validation
       reason: "Validate the dashboard request contract",
     });
     const results: Record<string, { status: number; code: string | null }> = {};
-
-    results.workerRegistration = await request(
-      "PUT",
-      `/admin/users/${missingId}/worker-registration`,
-      { ...revision(), workerRegistrationAllowed: true },
-    );
-    results.workerDeletion = await request(
-      "POST",
-      "/admin/workers/machines/5acc2df8-bf20-40ec-ab6f-b64a68cd4aec/deletions",
-      { ...revision(), registrationUserId: missingId, expectedUserRevision: 0 },
-    );
 
     results.accountRestrictionPut = await request(
       "PUT",
@@ -340,12 +277,12 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
     results.jobCancel = await request(
       "POST",
-      `/admin/jobs/${missingId}/cancellations`,
+      `/admin/jobs/${missingId}/cancel`,
       revision(),
     );
     results.alertAcknowledge = await request(
       "POST",
-      `/admin/alerts/${missingId}/acknowledgements`,
+      `/admin/alerts/${missingId}/acknowledge`,
       revision(),
     );
 
@@ -359,7 +296,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
         },
       },
     );
-    const currentSettings = wireCase(await settingsResponse.json(), true);
+    const currentSettings = await settingsResponse.json();
     results.settingsRead = settings;
     results.settingsUpdate = await request(
       "PUT",
@@ -376,7 +313,7 @@ test("every dashboard mutation payload passes compiled backend strict validation
     );
 
     const releaseProposalResponse = await fetch(
-      `${api}/admin/releases/proposal?platform=android&source=google_play`,
+      `${api}/admin/releases/proposal?platform=android&source=direct_apk`,
       {
         headers: {
           accept: "application/json",
@@ -384,21 +321,32 @@ test("every dashboard mutation payload passes compiled backend strict validation
         },
       },
     );
-    const releaseProposal = wireCase(
-      await releaseProposalResponse.json(),
-      true,
-    );
+    const releaseProposal = await releaseProposalResponse.json();
     results.releaseCreate = await request("POST", "/admin/releases", {
       platform: "android",
-      source: "google_play",
+      source: "direct_apk",
       versionName: releaseProposal.suggested.versionName,
       buildNumber: releaseProposal.suggested.buildNumber,
       changelogEn: "Validate release creation contract",
-      storeUrl:
-        "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
+      storeUrl: null,
       operationId: crypto.randomUUID(),
       reason: "Validate release creation contract",
     });
+    results.releaseUploadReserve = await request(
+      "POST",
+      `/admin/releases/${missingId}/uploads`,
+      {
+        bytes: 1024,
+        sha256Hex: "a".repeat(64),
+        expectedRevision: 0,
+        operationId: crypto.randomUUID(),
+      },
+    );
+    results.releaseUploadComplete = await request(
+      "POST",
+      `/admin/releases/${missingId}/uploads/${missingId}/complete`,
+      { operationId: crypto.randomUUID() },
+    );
 
     return results;
   }, E2E_API_ORIGIN);

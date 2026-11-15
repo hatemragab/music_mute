@@ -3,7 +3,6 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Connection, Model } from 'mongoose';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
-import type { WorkerConfigQueryDto } from '../control/worker-control.dto.js';
 import { WorkerInstallationSession } from '../enrollment/worker-enrollment.schema.js';
 import { WorkerMachine } from '../machines/worker-machine.schema.js';
 import { workerError } from '../worker-errors.js';
@@ -14,7 +13,7 @@ import type {
 import { WorkerDiagnostic } from './worker-diagnostic.schema.js';
 import { sanitizeWorkerDiagnosticLine } from './worker-diagnostic-sanitizer.js';
 
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class WorkerDiagnosticsService {
@@ -109,33 +108,6 @@ export class WorkerDiagnosticsService {
     } finally {
       await session.endSession();
     }
-  }
-
-  async runtimeLogCursor(
-    principal: WorkerPrincipal,
-    dto: WorkerConfigQueryDto,
-  ) {
-    if (principal.kind !== 'machine')
-      throw workerError('WORKER_UNAUTHENTICATED');
-    const machine = await this.machines
-      .findById(principal.subjectId)
-      .maxTimeMS(2000)
-      .lean();
-    if (
-      !machine ||
-      machine.status === 'revoked' ||
-      machine.currentSession?.sessionId !== dto.sessionId ||
-      machine.currentSession.incarnation !== dto.incarnation
-    )
-      throw workerError('WORKER_UNAUTHENTICATED');
-    const acknowledgedSequence = machine.acknowledgedDiagnosticSequence ?? 0;
-    if (
-      !Number.isSafeInteger(acknowledgedSequence) ||
-      acknowledgedSequence < 0 ||
-      acknowledgedSequence >= Number.MAX_SAFE_INTEGER
-    )
-      throw workerError('WORKER_CONFLICT');
-    return { acknowledgedSequence };
   }
 
   async appendRuntimeLogs(

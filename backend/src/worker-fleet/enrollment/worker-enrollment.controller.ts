@@ -1,6 +1,5 @@
-import { Body, Controller, Header, Param, Post, Req } from '@nestjs/common';
-import { EmptyBodyPipe } from '../../auth/dto/empty-body.pipe.js';
-import { LimitWorker, WorkerRoute } from '../auth/worker-auth.decorators.js';
+import { Body, Controller, Param, Post, Req } from '@nestjs/common';
+import { WorkerRoute } from '../auth/worker-auth.decorators.js';
 import type { WorkerRequest } from '../auth/worker-auth.types.js';
 import {
   ActivateWorkerInstallationDto,
@@ -16,7 +15,7 @@ import { WorkerInstallationQualificationService } from './worker-installation-qu
 import { AppendInstallationLogsDto } from '../telemetry/worker-diagnostic.dto.js';
 import { WorkerDiagnosticsService } from '../telemetry/worker-diagnostics.service.js';
 
-@Controller('worker/installations')
+@Controller('worker/v1/installations')
 export class WorkerEnrollmentController {
   constructor(
     private readonly enrollment: WorkerEnrollmentService,
@@ -34,9 +33,8 @@ export class WorkerEnrollmentController {
     return this.enrollment.exchange(request.workerPrincipal!, dto);
   }
 
-  @Post(':id/qualification-output-grants')
+  @Post(':id/qualification-output/grant')
   @WorkerRoute('installation')
-  @LimitWorker('transfer')
   qualificationOutputGrant(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -49,7 +47,7 @@ export class WorkerEnrollmentController {
     );
   }
 
-  @Post(':id/qualification-output-confirmations')
+  @Post(':id/qualification-output/confirm')
   @WorkerRoute('installation')
   confirmQualificationOutput(
     @Req() request: WorkerRequest,
@@ -61,7 +59,6 @@ export class WorkerEnrollmentController {
 
   @Post(':id/artifacts')
   @WorkerRoute('installation')
-  @LimitWorker('transfer')
   installationArtifacts(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -71,11 +68,10 @@ export class WorkerEnrollmentController {
       request.workerPrincipal!,
       id,
       dto.platform,
-      dto.installationProfile,
     );
   }
 
-  @Post(':id/reports')
+  @Post(':id/report')
   @WorkerRoute('installation')
   report(
     @Req() request: WorkerRequest,
@@ -85,24 +81,8 @@ export class WorkerEnrollmentController {
     return this.enrollment.report(request.workerPrincipal!, id, dto);
   }
 
-  @Post(':id/store-qualification-artifacts')
-  @Header('Cache-Control', 'no-store')
-  @WorkerRoute('installation')
-  @LimitWorker('transfer')
-  storeQualificationArtifacts(
-    @Req() request: WorkerRequest,
-    @Param('id') id: string,
-    @Body(EmptyBodyPipe) _body: void,
-  ) {
-    return this.artifacts.createStoreQualificationDataGrants(
-      request.workerPrincipal!,
-      id,
-    );
-  }
-
   @Post(':id/logs')
   @WorkerRoute('installation')
-  @LimitWorker('telemetry')
   logs(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -115,7 +95,7 @@ export class WorkerEnrollmentController {
     );
   }
 
-  @Post(':id/activations')
+  @Post(':id/activate')
   @WorkerRoute('installation')
   activate(
     @Req() request: WorkerRequest,

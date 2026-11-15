@@ -31,6 +31,16 @@ data class UpdatePolicySnapshot(
     val checkedAt: String,
 )
 
+@Serializable
+data class ReleaseDownloadGrant(
+    val releaseId: String,
+    val url: String,
+    val expiresAt: String,
+    val bytes: Long,
+    val sha256Hex: String,
+    val signerSha256Hex: String,
+)
+
 enum class UpdateDecision {
     NONE,
     OPTIONAL,
@@ -53,6 +63,16 @@ enum class UpdateProblem {
     RATE_LIMITED,
     INVALID_POLICY,
     RELEASE_UNAVAILABLE,
+    DOWNLOAD_FAILED,
+    INSUFFICIENT_STORAGE,
+    APK_CHECKSUM_MISMATCH,
+    APK_SIZE_MISMATCH,
+    APK_PACKAGE_MISMATCH,
+    APK_BUILD_MISMATCH,
+    APK_SIGNER_MISMATCH,
+    APK_INVALID,
+    INSTALL_PERMISSION_REQUIRED,
+    INSTALLER_UNAVAILABLE,
     INSTALL_CANCELLED,
     PLAY_UPDATE_UNAVAILABLE,
 }
@@ -71,14 +91,11 @@ data class UpdateUiState(
 )
 
 sealed interface UpdateInstallState {
-    val restartAvailable: Boolean
-        get() = this == Downloaded || (this is Failed && downloaded)
     data object Idle : UpdateInstallState
     data class Downloading(val percent: Int) : UpdateInstallState
-    data object CheckingPlay : UpdateInstallState
-    data object PlayFlow : UpdateInstallState
-    data object Downloaded : UpdateInstallState
-    data object Installing : UpdateInstallState
+    data object Verifying : UpdateInstallState
+    data object PermissionNeeded : UpdateInstallState
+    data object AwaitingInstaller : UpdateInstallState
     data object StoreOpened : UpdateInstallState
-    data class Failed(val problem: UpdateProblem, val downloaded: Boolean = false) : UpdateInstallState
+    data class Failed(val problem: UpdateProblem) : UpdateInstallState
 }

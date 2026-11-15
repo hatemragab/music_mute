@@ -4,21 +4,9 @@ export interface ProcessingChangeMetadata {
   after: string | number | boolean | null;
 }
 const processingAuditFields = new Set([
-  'processingUsedSeconds',
-  'processingReleasedSeconds',
-  'uploadGrants',
-  'confirmedUploadBytes',
-  'downloadGrants',
-  'estimatedDownloadBytes',
-  'dailyUsedUploadGrants',
-  'usagePeriodKey',
-  'usageDayKey',
   'monthlyProcessingSeconds',
   'overrideExpiresAt',
   'acceptNewJobs',
-  'linkImportEnabled',
-  'linkImportDisabledCountries',
-  'linkImportDisabledUserIds',
   'maxDurationSeconds',
   'maxPreparedAudioBytes',
   'dailyUploadGrants',
@@ -299,12 +287,7 @@ export function validateAuditEvent(
             typeof item === 'boolean' ||
             (typeof item === 'number' && Number.isFinite(item)) ||
             (typeof item === 'string' &&
-              item.length <=
-                (change.field === 'linkImportDisabledUserIds'
-                  ? 24_999
-                  : change.field === 'linkImportDisabledCountries'
-                    ? 750
-                    : 200) &&
+              item.length <= 200 &&
               !/[\r\n]/.test(item) &&
               !item.includes(String.fromCharCode(0)))
           )

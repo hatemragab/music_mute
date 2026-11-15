@@ -2,21 +2,12 @@ package com.hatem.musicmute.updates
 
 import android.content.Context
 import android.os.Build
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.IntentSenderRequest
 import kotlinx.coroutines.flow.StateFlow
 
 interface UpdateInstaller {
     val state: StateFlow<UpdateInstallState>
-    fun bindLauncher(owner: Any, launcher: ActivityResultLauncher<IntentSenderRequest>)
-    fun unbindLauncher(owner: Any)
-    fun onActivityResult(owner: Any, resultCode: Int)
-    fun onBackground(owner: Any)
-    fun synchronizePolicy(target: ReleaseTarget?, decision: UpdateDecision, minimumBuild: Int?)
-    suspend fun start(target: ReleaseTarget, decision: UpdateDecision, minimumBuild: Int?)
-    suspend fun onForeground(target: ReleaseTarget?, decision: UpdateDecision, minimumBuild: Int?)
-    suspend fun completeUpdate()
-    fun openStore(target: ReleaseTarget)
+    suspend fun start(target: ReleaseTarget)
+    suspend fun onForeground()
     fun cancel()
 }
 

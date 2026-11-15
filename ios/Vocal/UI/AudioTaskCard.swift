@@ -18,11 +18,8 @@ struct AudioTaskCard: View {
           VStack(alignment: .leading, spacing: 5) {
             Text(task.title).font(.system(.headline, design: .rounded, weight: .bold))
               .foregroundStyle(.primary).lineLimit(2)
-            Text(task.createdAt, format: .dateTime.year().month(.abbreviated).day().hour().minute())
-              .font(.caption).foregroundStyle(.secondary)
             Text(LocalizedStringKey(task.statusKey)).font(.subheadline.weight(.semibold))
               .foregroundStyle(task.isReady ? VocalStyle.teal : .secondary)
-              .fixedSize(horizontal: false, vertical: true)
               .contentTransition(.opacity)
               .animation(.easeInOut(duration: reduceMotion ? 0 : 0.2), value: task.statusKey)
             HStack(spacing: 5) {
@@ -61,7 +58,7 @@ struct AudioTaskCard: View {
       }
     }
     .buttonStyle(.plain)
-    .accessibilityIdentifier("audioTask-\(task.jobID.map { "job:\($0)" } ?? task.id)")
+    .accessibilityIdentifier("audioTask-\(task.id)")
     .task(id: task.isActive && !reduceMotion) {
       guard task.isActive, !reduceMotion else {
         pulsing = false
@@ -98,17 +95,36 @@ struct AudioTaskCard: View {
   }
 }
 
-/// Server snapshots never advance on the phone, including while offline.
+/// Only this leaf refreshes each second. Worker processing time remains the
+/// server-measured sample; an offline client must not invent worker activity.
 struct AudioTaskElapsedTime: View {
   let task: AudioTaskPresentation
+  @State private var sampledAt = Date()
 
   var body: some View {
-    Text(task.totalSeconds.map { (task.totalApproximate ? "≥ " : "") + audioTime($0) } ?? "—")
+    Group {
+      if task.isActive {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+          elapsedText(audioTaskTotalSeconds(task, at: context.date, sampledAt: sampledAt))
+        }
+      } else {
+        elapsedText(task.totalSeconds)
+      }
+    }
+    .onChange(of: task.totalSeconds) { _, _ in sampledAt = Date() }
+    .onChange(of: task.isActive) { _, _ in sampledAt = Date() }
+  }
+
+  private func elapsedText(_ seconds: Double?) -> Text {
+    Text(
+      seconds.map { (task.totalApproximate || task.isActive ? "≈ " : "") + audioTime($0) } ?? "—")
   }
 }
 
 func audioTaskTotalSeconds(
   _ task: AudioTaskPresentation, at date: Date, sampledAt: Date
 ) -> Double? {
-  task.totalSeconds
+  guard task.isActive else { return task.totalSeconds }
+  if task.operationID != nil { return max(0, date.timeIntervalSince(task.createdAt)) }
+  return task.totalSeconds.map { max(0, $0 + max(0, date.timeIntervalSince(sampledAt))) }
 }

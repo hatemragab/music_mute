@@ -4,7 +4,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -35,7 +34,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.rememberUpdatedState
@@ -55,9 +53,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
@@ -100,53 +95,20 @@ fun CreativeCard(
     modifier: Modifier = Modifier,
     contentPadding: Dp = CreativeTokens.CardPadding,
     contentGap: Dp = CreativeTokens.ContentGap,
-    shape: Shape = RoundedCornerShape(16.dp),
-    onClick: (() -> Unit)? = null,
+    shape: Shape = MaterialTheme.shapes.large,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-    val body: @Composable ColumnScope.() -> Unit = {
+    Card(
+        modifier.fillMaxWidth(),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+    ) {
         Column(
             Modifier.fillMaxWidth().padding(contentPadding),
             verticalArrangement = Arrangement.spacedBy(contentGap),
             content = content,
         )
-    }
-    if (onClick != null) {
-        Card(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = shape, colors = colors, border = border, content = body)
-    } else {
-        Card(modifier.fillMaxWidth(), shape = shape, colors = colors, border = border, content = body)
-    }
-}
-
-@Composable
-fun CreativeStatusPill(
-    label: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
-) {
-    Surface(
-        modifier = modifier.heightIn(min = 36.dp),
-        shape = RoundedCornerShape(50),
-        color = containerColor,
-        contentColor = contentColor,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, null, Modifier.size(16.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 

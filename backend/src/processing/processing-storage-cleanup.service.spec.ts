@@ -40,70 +40,6 @@ function fixture() {
 describe('ProcessingStorageCleanupService', () => {
   const now = new Date('2026-09-12T00:30:00.000Z');
   const owner = new Types.ObjectId('507f1f77bcf86cd799439011');
-  const sharedKey = `shared/url/${'a'.repeat(64)}/2f237a2e-031e-4b58-b9a7-9f9e7c0e31a9/input/source.mp3`;
-
-  it.each(['shared', 'private'] as const)(
-    'releases a failed shared-input reference while cleaning only %s scratch reservations',
-    async (reservationStorage) => {
-      const { service, jobs, cleanup } = fixture();
-      const reservationKey =
-        reservationStorage === 'shared'
-          ? sharedKey
-          : `users/${owner}/jobs/failed/input/source.mp3`;
-      const job = {
-        _id: new Types.ObjectId(),
-        userId: owner,
-        revision: 5,
-        status: 'failed',
-        reservationCleanupScheduledAt: null,
-        inputReservation: { key: reservationKey },
-        inputObject: { key: sharedKey },
-        admissionSnapshot: null,
-      };
-      jobs.findOne.mockReturnValue(query(job));
-
-      await expect(service.scheduleDue(now)).resolves.toBe(true);
-
-      expect(cleanup.schedule).toHaveBeenCalledTimes(
-        reservationStorage === 'private' ? 1 : 0,
-      );
-      if (reservationStorage === 'private')
-        expect(cleanup.schedule).toHaveBeenCalledWith(
-          expect.objectContaining({ key: reservationKey }),
-          expect.anything(),
-        );
-      expect(jobs.updateOne).toHaveBeenCalledWith(
-        expect.objectContaining({ _id: job._id, revision: job.revision }),
-        { $set: { reservationCleanupScheduledAt: now } },
-        expect.anything(),
-      );
-    },
-  );
-
-  it('settles an expired shared reservation without scheduling R2 deletion', async () => {
-    const { service, jobs, cleanup, usage } = fixture();
-    const job = {
-      _id: new Types.ObjectId(),
-      userId: owner,
-      revision: 3,
-      status: 'awaiting_upload',
-      inputReservation: { key: sharedKey },
-      admissionSnapshot: {
-        reservationExpiresAt: new Date('2026-09-12T00:15:00.000Z'),
-      },
-    };
-    jobs.findOne
-      .mockReturnValueOnce(query(null))
-      .mockReturnValueOnce(query(job));
-
-    await expect(service.scheduleDue(now)).resolves.toBe(true);
-
-    expect(cleanup.schedule).not.toHaveBeenCalled();
-    expect(usage.settleJob).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: job._id, status: 'failed' }),
-      expect.anything(),
-    );
-  });
 
   it('schedules a cancelled unconfirmed upload after its last grant can settle', async () => {
     const { service, jobs, cleanup, session } = fixture();
@@ -129,6 +65,7 @@ describe('ProcessingStorageCleanupService', () => {
     expect(cleanup.schedule).toHaveBeenCalledWith(
       {
         key: job.inputReservation.key,
+        versionId: null,
         ownerUserId: owner,
         reason: 'AUDIO_INPUT_TERMINAL',
         nextAt: new Date('2026-09-12T00:40:00.000Z'),
@@ -147,13 +84,13 @@ describe('ProcessingStorageCleanupService', () => {
     );
   });
 
-  it('schedules a cancelled terminal input by its unique key after transfer settlement', async () => {
+  it('schedules a successful terminal input by its exact immutable version', async () => {
     const { service, jobs, cleanup, session } = fixture();
     const job = {
       _id: new Types.ObjectId('507f1f77bcf86cd799439014'),
       userId: owner,
       revision: 5,
-      status: 'cancelled',
+      status: 'ready',
       finishedAt: now,
       reservationCleanupScheduledAt: null,
       inputReservation: {
@@ -161,7 +98,7 @@ describe('ProcessingStorageCleanupService', () => {
       },
       inputObject: {
         key: `users/${owner.toHexString()}/jobs/cancelled/input/file.mp3`,
-        etag: '"immutable-input-version"',
+        versionId: 'immutable-input-version',
       },
       admissionSnapshot: null,
     };
@@ -172,10 +109,11 @@ describe('ProcessingStorageCleanupService', () => {
     expect(cleanup.schedule).toHaveBeenCalledWith(
       {
         key: job.inputObject.key,
+        versionId: job.inputObject.versionId,
         ownerUserId: owner,
         reason: 'AUDIO_INPUT_TERMINAL',
-        nextAt: new Date('2026-09-12T00:35:00.000Z'),
-        settleUntil: new Date('2026-09-12T01:35:00.000Z'),
+        nextAt: now,
+        settleUntil: now,
       },
       session,
     );
@@ -220,20 +158,6 @@ describe('ProcessingStorageCleanupService', () => {
       }),
       expect.objectContaining({ session }),
     );
-  });
-
-  it('excludes successful jobs from terminal input cleanup', async () => {
-    const { service, jobs, cleanup } = fixture();
-    jobs.findOne.mockReturnValue(query(null));
-    await service.scheduleDue(now);
-    expect(jobs.findOne.mock.calls[0][0].$or).toEqual([
-      { status: 'cancelled' },
-      {
-        status: 'failed',
-        'retryEligibility.eligible': expect.objectContaining({ $ne: true }),
-      },
-    ]);
-    expect(cleanup.schedule).not.toHaveBeenCalled();
   });
 
   it('returns false when no input reservation has expired', async () => {

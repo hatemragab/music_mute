@@ -7,7 +7,6 @@ import type {
   AlertRecord,
   AuditEvent,
   JobDetail,
-  OperationReceipt,
   Permission,
   AccountPolicy,
   AccountPolicyOverride,
@@ -15,16 +14,15 @@ import type {
   RevisionCommand,
   ReleaseDetail,
   UpdatePolicy,
-  DesktopUpdatePolicy,
   UserDetail,
 } from "../api/contracts";
 import { ROLE_DETAILS } from "../features/administrators/role-permissions";
 import type {
   WorkerDiagnosticPage,
   WorkerFleetPolicy,
+  WorkerInvitation,
   WorkerMachine,
   WorkerMachineDetail,
-  DeleteWorkerMachineCommand,
 } from "../features/workers/worker-types";
 
 const NOW = "2026-09-11T00:00:00.000Z";
@@ -37,6 +35,7 @@ export const FIXTURE_IDS = {
   alert: "000000000000000000000040",
   recovery: "000000000000000000000050",
   workerMachine: "5acc2df8-bf20-40ec-ab6f-b64a68cd4aec",
+  workerInvitation: "7a155328-7d4f-4102-a99f-63ea3025935f",
   workerInstallation: "d32f392a-88de-4ce3-b1a3-e79890be1547",
   workerAttempt: "10e021b3-799d-48cc-b763-524db4953c3c",
   workerSlot: "4e8a5582-5e24-4fa5-8258-704f7cb2b6d5",
@@ -64,15 +63,7 @@ const error = (
   message: string,
 ): FixtureResponse => ({
   status,
-  body: {
-    type: "about:blank",
-    title: status === 429 ? "Too Many Requests" : "Request failed",
-    status,
-    detail: message,
-    code,
-    request_id: "fixture-request",
-  },
-  headers: { "content-type": "application/problem+json" },
+  body: { code, message, requestId: "fixture-request" },
 });
 
 const hasExactKeys = (value: unknown, keys: string[]): boolean =>
@@ -105,10 +96,7 @@ const validPolicySelection = (value: unknown): boolean => {
       "directReleaseId",
       "storeReleaseId",
       "source",
-    ]) &&
-    (selection.android as Record<string, unknown>).source === "google_play" &&
-    (selection.android as Record<string, unknown>).directReleaseId === null &&
-    hasExactKeys(selection.ios, ["minimumBuild", "storeReleaseId"])
+    ]) && hasExactKeys(selection.ios, ["minimumBuild", "storeReleaseId"])
   );
 };
 
@@ -123,11 +111,7 @@ const permissionFor = (method: string, path: string): Permission | null => {
     return method === "GET" ? "health.read" : "alerts.manage";
   if (path.startsWith("/admin/settings"))
     return method === "GET" ? "settings.read" : "settings.manage";
-  if (
-    path.startsWith("/admin/releases") ||
-    path === "/admin/update-policy" ||
-    path === "/admin/update-policy/desktop"
-  )
+  if (path.startsWith("/admin/releases") || path === "/admin/update-policy")
     return method === "GET" ? "releases.read" : "releases.manage";
   if (path.startsWith("/admin/jobs")) {
     if (method === "GET") return "jobs.read";
@@ -139,16 +123,16 @@ const permissionFor = (method: string, path: string): Permission | null => {
   if (path.startsWith("/admin/abuse-events")) return "abuse.read";
   if (path.endsWith("/restriction"))
     return method === "GET" ? "abuse.read" : "users.restrictions.manage";
-  if (path.endsWith("/worker-registration"))
-    return "users.worker-registration.manage";
   if (path.startsWith("/admin/users"))
     return method === "GET" ? "users.read" : "users.processing.manage";
   if (path.startsWith("/admin/worker-fleet/machines")) {
     if (path.endsWith("/diagnostics")) return "workers.logs.read";
     return method === "GET" ? "workers.read" : "workers.manage";
   }
+  if (path === "/admin/worker-fleet/invitations") return "workers.enroll";
   if (path === "/admin/worker-fleet/policy")
     return method === "GET" ? "workers.read" : "workers.manage";
+  if (path.startsWith("/admin/workers/invitations")) return "workers.enroll";
   if (path.startsWith("/admin/workers/machines")) return "workers.manage";
   return null;
 };
@@ -164,25 +148,7 @@ export const sessionForRole = (role: AdminRole): AdminSession => ({
 });
 
 export class DashboardFixture {
-  workerDeleted = false;
-  userMissing = false;
-  workerDeletionOperations = new Map<
-    string,
-    { receipt: OperationReceipt; body: string; actor: string }
-  >();
   readonly requests: FixtureRequest[] = [];
-  readonly workerRegistrationOperations = new Map<
-    string,
-    { receipt: OperationReceipt; body: string; actor: string }
-  >();
-  readonly desktopPolicyOperations = new Map<
-    string,
-    { receipt: OperationReceipt; body: string; actor: string }
-  >();
-  desktopGates: Omit<DesktopUpdatePolicy, "revision"> = {
-    macos: { minimumBuild: null },
-    windows: { minimumBuild: null },
-  };
   accountUsage: AccountUsage = {
     schemaVersion: 2,
     plan: "standard",
@@ -246,10 +212,6 @@ export class DashboardFixture {
     policyOverride: null,
   };
   settings: AccountPolicy = {
-    linkImportEnabled: false,
-    linkImportDisabledCountries: [],
-    linkImportDisabledUserIds: [],
-    linkImportForcedOff: false,
     plan: "standard",
     revision: 1,
     acceptNewJobs: true,
@@ -288,9 +250,9 @@ export class DashboardFixture {
     revision: 1,
     android: {
       minimumBuild: 10,
-      source: "google_play",
-      directReleaseId: null,
-      storeReleaseId: FIXTURE_IDS.publishedRelease,
+      source: "direct_apk",
+      directReleaseId: FIXTURE_IDS.publishedRelease,
+      storeReleaseId: null,
     },
     ios: { minimumBuild: 10, storeReleaseId: null },
   };
@@ -330,8 +292,6 @@ export class DashboardFixture {
     createdAt: NOW,
     updatedAt: NOW,
     revision: 1,
-    workerRegistrationAllowed: false,
-    providers: ["google.com"],
     processingCounts: { processing: 1, completed: 2 },
     recentJobIds: [FIXTURE_IDS.job],
     deletion: null,
@@ -362,40 +322,38 @@ export class DashboardFixture {
     {
       id: FIXTURE_IDS.release,
       platform: "android",
-      source: "google_play",
+      source: "direct_apk",
       versionName: "2.0.0",
       buildNumber: 20,
       changelogEn: "Fixture release",
-      storeUrl:
-        "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
+      storeUrl: null,
       state: "draft",
-      artifactState: null,
+      artifactState: "verified",
       revision: 1,
       createdAt: NOW,
       publishedAt: null,
-      bytes: null,
-      sha256Hex: null,
-      signerSha256Hex: null,
+      bytes: 1_024,
+      sha256Hex: "a".repeat(64),
+      signerSha256Hex: "b".repeat(64),
       rejectionCode: null,
       publishedBy: null,
     },
     {
       id: FIXTURE_IDS.publishedRelease,
       platform: "android",
-      source: "google_play",
+      source: "direct_apk",
       versionName: "1.0.0",
       buildNumber: 10,
       changelogEn: "Current release",
-      storeUrl:
-        "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
+      storeUrl: null,
       state: "published",
-      artifactState: null,
+      artifactState: "verified",
       revision: 1,
       createdAt: NOW,
       publishedAt: NOW,
-      bytes: null,
-      sha256Hex: null,
-      signerSha256Hex: null,
+      bytes: 1_024,
+      sha256Hex: "c".repeat(64),
+      signerSha256Hex: "b".repeat(64),
       rejectionCode: null,
       publishedBy: "owner-fixture",
     },
@@ -416,7 +374,6 @@ export class DashboardFixture {
   };
   workerMachine: WorkerMachine = {
     machineId: FIXTURE_IDS.workerMachine,
-    registeredByUserId: null,
     status: "active",
     label: "Windows Z440",
     groupId: "mvp",
@@ -476,7 +433,6 @@ export class DashboardFixture {
     recentError: null,
   };
   workerDetail: WorkerMachineDetail = {
-    asOf: NOW,
     machine: this.workerMachine,
     slots: [
       {
@@ -526,7 +482,6 @@ export class DashboardFixture {
     commands: [],
   };
   workerDiagnostics: WorkerDiagnosticPage = {
-    nextCursor: null,
     items: [
       {
         id: FIXTURE_IDS.workerDiagnostic,
@@ -542,6 +497,28 @@ export class DashboardFixture {
       },
     ],
   };
+  workerInvitations: WorkerInvitation[] = [
+    {
+      invitationId: FIXTURE_IDS.workerInvitation,
+      state: "consumed",
+      createdByUid: "owner-fixture",
+      initialPolicyId: null,
+      expiresAt: "2026-09-11T00:15:00.000Z",
+      consumedAt: NOW,
+      revokedAt: null,
+      installationSessionId: FIXTURE_IDS.workerInstallation,
+      installation: {
+        phase: "activated",
+        outcomeCode: null,
+        reportSummary: "DirectML qualification passed",
+        lastSeenAt: NOW,
+        machineId: FIXTURE_IDS.workerMachine,
+        activatedAt: NOW,
+        updatedAt: NOW,
+      },
+      revision: 1,
+    },
+  ];
   workerPolicy: WorkerFleetPolicy = {
     revision: 3,
     acceptClaims: true,
@@ -561,7 +538,7 @@ export class DashboardFixture {
   async handle(input: FixtureRequest): Promise<FixtureResponse> {
     const method = input.method.toUpperCase();
     const url = new URL(input.url, "http://127.0.0.1");
-    const path = url.pathname;
+    const path = url.pathname.replace(/^\/api\/v1/, "");
     const request = { ...input, method, url: url.toString() };
     this.requests.push(request);
 
@@ -574,16 +551,6 @@ export class DashboardFixture {
 
     if (method === "GET" && path === "/admin/session")
       return { status: 200, body: sessionForRole(role) };
-    const operationRead = path.match(/^\/admin\/operations\/([^/]+)$/);
-    if (operationRead && method === "GET") {
-      const operation =
-        this.workerRegistrationOperations.get(operationRead[1]!) ??
-        this.workerDeletionOperations.get(operationRead[1]!) ??
-        this.desktopPolicyOperations.get(operationRead[1]!);
-      return operation?.actor === role
-        ? { status: 200, body: operation.receipt }
-        : error(404, "RESOURCE_NOT_FOUND", "Operation not found.");
-    }
     if (
       path === `/admin/users/${FIXTURE_IDS.user}/account-usage` &&
       method === "GET"
@@ -766,10 +733,7 @@ export class DashboardFixture {
       return { status: 200, body: page([this.job]) };
     if (path === `/admin/jobs/${this.job.id}` && method === "GET")
       return { status: 200, body: this.job };
-    if (
-      path === `/admin/jobs/${this.job.id}/cancellations` &&
-      method === "POST"
-    ) {
+    if (path === `/admin/jobs/${this.job.id}/cancel` && method === "POST") {
       this.job = {
         ...this.job,
         status: "cancelled",
@@ -836,107 +800,31 @@ export class DashboardFixture {
     )
       return { status: 200, body: this.recovery };
     if (
-      (path ===
-        `/admin/account-recovery-requests/${this.recovery.id}/approvals` ||
-        path ===
-          `/admin/account-recovery-requests/${this.recovery.id}/rejections`) &&
+      path.startsWith(
+        `/admin/account-recovery-requests/${this.recovery.id}/`,
+      ) &&
       method === "POST"
     ) {
       const action = path.split("/").at(-1);
       const body = input.body as { reason: string };
       this.recovery = {
         ...this.recovery,
-        status: action === "approvals" ? "approved" : "rejected",
+        status: action === "approve" ? "approved" : "rejected",
         reviewedAt: NOW,
         reviewReason: body.reason,
         revision: this.recovery.revision + 1,
         user: {
           ...this.recovery.user,
-          status: action === "approvals" ? "active" : "deleting",
+          status: action === "approve" ? "active" : "deleting",
         },
       };
       return { status: 201, body: this.recovery };
     }
 
     if (path === "/admin/users" && method === "GET")
-      return {
-        status: 200,
-        body: page(
-          this.userMissing ||
-            (url.searchParams.get("query") &&
-              !`${this.user.email} ${this.user.displayName} ${this.user.id}`
-                .toLowerCase()
-                .includes(url.searchParams.get("query")!.toLowerCase()))
-            ? []
-            : [this.user],
-        ),
-      };
+      return { status: 200, body: page([this.user]) };
     if (path === `/admin/users/${this.user.id}` && method === "GET")
-      return this.userMissing
-        ? error(404, "RESOURCE_NOT_FOUND", "User not found.")
-        : { status: 200, body: this.user };
-    if (path === `/admin/users/${this.user.id}/devices` && method === "GET")
-      return this.userMissing
-        ? error(404, "RESOURCE_NOT_FOUND", "User not found.")
-        : { status: 200, body: { items: [], nextCursor: null, asOf: NOW } };
-    if (
-      path === `/admin/users/${this.user.id}/worker-registration` &&
-      method === "PUT"
-    ) {
-      if (
-        !hasExactKeys(input.body, [
-          "workerRegistrationAllowed",
-          "expectedRevision",
-          "operationId",
-          "reason",
-        ])
-      )
-        return error(400, "INVALID_REQUEST", "Invalid registration request.");
-      const body = input.body as RevisionCommand & {
-        workerRegistrationAllowed: boolean;
-      };
-      if (
-        typeof body.workerRegistrationAllowed !== "boolean" ||
-        !Number.isSafeInteger(body.expectedRevision) ||
-        body.expectedRevision < 0 ||
-        typeof body.reason !== "string" ||
-        !body.reason.trim() ||
-        body.reason.length > 500 ||
-        typeof body.operationId !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          body.operationId,
-        )
-      )
-        return error(400, "INVALID_REQUEST", "Invalid registration request.");
-      const encodedBody = JSON.stringify(body);
-      const previous = this.workerRegistrationOperations.get(body.operationId);
-      if (previous)
-        return previous.actor === role && previous.body === encodedBody
-          ? { status: 200, body: previous.receipt }
-          : error(409, "OPERATION_CONFLICT", "Operation ID was already used.");
-      if (this.user.status !== "active")
-        return error(409, "ACCOUNT_NOT_ACTIVE", "The account is not active.");
-      if (body.expectedRevision !== this.user.revision)
-        return error(409, "REVISION_CONFLICT", "Account revision changed.");
-      this.user = {
-        ...this.user,
-        workerRegistrationAllowed: body.workerRegistrationAllowed,
-        revision: this.user.revision + 1,
-        updatedAt: NOW,
-      };
-      const receipt: OperationReceipt = {
-        operationId: body.operationId,
-        status: "succeeded",
-        resourceId: this.user.id,
-        revision: this.user.revision,
-      };
-      this.workerRegistrationOperations.set(body.operationId, {
-        receipt,
-        body: encodedBody,
-        actor: role,
-      });
-      return { status: 200, body: receipt };
-    }
+      return { status: 200, body: this.user };
     if (path === `/admin/users/${this.user.id}/restriction` && method === "GET")
       return { status: 200, body: this.restriction };
     if (
@@ -978,103 +866,12 @@ export class DashboardFixture {
     if (path === "/admin/abuse-events" && method === "GET")
       return { status: 200, body: page(this.abuseEvents) };
 
-    if (
-      path ===
-        `/admin/workers/machines/${FIXTURE_IDS.workerMachine}/deletions` &&
-      method === "POST"
-    ) {
-      if (
-        !ROLE_DETAILS[role].permissions.includes("users.read") ||
-        !ROLE_DETAILS[role].permissions.includes(
-          "users.worker-registration.manage",
-        )
-      )
-        return error(
-          403,
-          "FORBIDDEN",
-          "Deletion requires account registration management.",
-        );
-      if (
-        !hasOnlyKeys(
-          input.body,
-          ["operationId", "expectedRevision", "reason"],
-          ["registrationUserId", "expectedUserRevision"],
-        )
-      )
-        return error(400, "INVALID_REQUEST", "Invalid deletion request.");
-      const body = input.body as DeleteWorkerMachineCommand;
-      if (
-        typeof body.operationId !== "string" ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          body.operationId,
-        ) ||
-        !Number.isSafeInteger(body.expectedRevision) ||
-        body.expectedRevision < 0 ||
-        typeof body.reason !== "string" ||
-        !body.reason.trim() ||
-        body.reason.length > 500
-      )
-        return error(400, "INVALID_REQUEST", "Invalid deletion request.");
-      const encodedBody = JSON.stringify(body);
-      const previous = this.workerDeletionOperations.get(body.operationId);
-      if (previous)
-        return previous.actor === role && previous.body === encodedBody
-          ? { status: 200, body: previous.receipt }
-          : error(409, "OPERATION_CONFLICT", "Operation ID was already used.");
-      if (this.workerDeleted)
-        return error(404, "RESOURCE_NOT_FOUND", "Machine not found.");
-      const creator = this.workerMachine.registeredByUserId;
-      const selected = body.registrationUserId ?? creator;
-      if (!selected || (creator && selected !== creator))
-        return error(
-          400,
-          "INVALID_REQUEST",
-          "Choose the registration account.",
-        );
-      if (selected !== this.user.id || (this.userMissing && !creator))
-        return error(404, "RESOURCE_NOT_FOUND", "User not found.");
-      if (
-        body.expectedRevision !== this.workerMachine.revision ||
-        (!this.userMissing && body.expectedUserRevision !== this.user.revision)
-      )
-        return error(
-          409,
-          "REVISION_CONFLICT",
-          "Machine or account revision changed.",
-        );
-      if (!this.userMissing)
-        this.user = {
-          ...this.user,
-          workerRegistrationAllowed: false,
-          revision: this.user.revision + 1,
-        };
-      this.workerMachine = {
-        ...this.workerMachine,
-        status: "revoked",
-        revision: this.workerMachine.revision + 1,
-      };
-      this.workerDetail.machine = this.workerMachine;
-      this.workerDeleted = true;
-      const receipt: OperationReceipt = {
-        operationId: body.operationId,
-        status: "succeeded",
-        resourceId: this.workerMachine.machineId,
-        revision: this.workerMachine.revision,
-      };
-      this.workerDeletionOperations.set(body.operationId, {
-        receipt,
-        body: encodedBody,
-        actor: role,
-      });
-      return { status: 200, body: receipt };
-    }
     if (path === "/admin/worker-fleet/machines" && method === "GET") {
       const status = url.searchParams.get("status");
       const platform = url.searchParams.get("platform");
       const groupId = url.searchParams.get("groupId");
       const releaseVersion = url.searchParams.get("releaseVersion");
       const matches =
-        !this.workerDeleted &&
         (!status || this.workerMachine.status === status) &&
         (!platform ||
           this.workerMachine.capabilities.some(
@@ -1098,13 +895,11 @@ export class DashboardFixture {
       path === `/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}` &&
       method === "GET"
     )
-      return this.workerDeleted
-        ? error(404, "RESOURCE_NOT_FOUND", "Machine not found.")
-        : { status: 200, body: this.workerDetail };
+      return { status: 200, body: this.workerDetail };
     if (
       path.match(
         new RegExp(
-          `^/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/(diagnostic-runs|benchmark-runs)$`,
+          `^/admin/worker-fleet/machines/${FIXTURE_IDS.workerMachine}/(doctor|benchmark)$`,
         ),
       ) &&
       method === "POST"
@@ -1117,9 +912,76 @@ export class DashboardFixture {
           replayed: false,
         },
       };
+    if (path === "/admin/worker-fleet/invitations" && method === "GET")
+      return {
+        status: 200,
+        body: { items: this.workerInvitations, asOf: NOW },
+      };
+    if (path === "/admin/workers/invitations" && method === "POST") {
+      const body = input.body as {
+        expiresInSeconds?: number;
+        operationId?: string;
+        reason?: string;
+      };
+      if (
+        !body.reason ||
+        !body.operationId ||
+        !body.expiresInSeconds ||
+        body.expiresInSeconds < 300 ||
+        body.expiresInSeconds > 86400
+      )
+        return error(400, "INVALID_REQUEST", "Invalid worker invitation.");
+      const invitationId = "0a67996c-84d7-412e-9c0e-e8684519a793";
+      const expiresAt = new Date(
+        Date.parse(NOW) + body.expiresInSeconds * 1000,
+      ).toISOString();
+      this.workerInvitations.unshift({
+        invitationId,
+        state: "active",
+        createdByUid: `${role}-fixture`,
+        initialPolicyId: null,
+        expiresAt,
+        consumedAt: null,
+        revokedAt: null,
+        installationSessionId: null,
+        installation: null,
+        revision: 0,
+      });
+      return {
+        status: 201,
+        body: {
+          invitationId,
+          revision: 0,
+          credential: "fixture-one-use-enrollment-secret",
+          expiresAt,
+          replayed: false,
+        },
+      };
+    }
+    const invitationRevoke = path.match(
+      /^\/admin\/workers\/invitations\/([^/]+)\/revoke$/,
+    );
+    if (invitationRevoke && method === "POST") {
+      const invitation = this.workerInvitations.find(
+        (item) => item.invitationId === invitationRevoke[1],
+      );
+      if (!invitation)
+        return error(404, "RESOURCE_NOT_FOUND", "Invitation not found.");
+      invitation.state = "revoked";
+      invitation.revokedAt = NOW;
+      invitation.revision += 1;
+      return {
+        status: 201,
+        body: {
+          invitationId: invitation.invitationId,
+          revision: invitation.revision,
+          replayed: false,
+        },
+      };
+    }
     const machineAction = path.match(
       new RegExp(
-        `^/admin/workers/machines/${FIXTURE_IDS.workerMachine}/(pauses|drains|resumptions|revocations)$`,
+        `^/admin/workers/machines/${FIXTURE_IDS.workerMachine}/(pause|drain|resume|revoke)$`,
       ),
     );
     if (machineAction && method === "POST") {
@@ -1128,11 +990,11 @@ export class DashboardFixture {
         return error(409, "REVISION_CONFLICT", "Worker revision changed.");
       const action = machineAction[1];
       const status =
-        action === "pauses"
+        action === "pause"
           ? "paused"
-          : action === "drains"
+          : action === "drain"
             ? "draining"
-            : action === "resumptions"
+            : action === "resume"
               ? "active"
               : "revoked";
       this.workerMachine = {
@@ -1179,7 +1041,8 @@ export class DashboardFixture {
       const platform = url.searchParams.get("platform");
       const source = url.searchParams.get("source");
       if (!(
-        (platform === "android" && source === "google_play") ||
+        (platform === "android" &&
+          (source === "direct_apk" || source === "google_play")) ||
         (platform === "ios" && source === "app_store")
       ))
         return error(400, "INVALID_REQUEST", "Invalid release channel.");
@@ -1214,14 +1077,6 @@ export class DashboardFixture {
       return { status: 200, body: page(this.releases) };
     if (path === "/admin/releases" && method === "POST") {
       const body = input.body as Omit<ReleaseDetail, "id">;
-      if (
-        (body.platform === "android" &&
-          (body.source !== "google_play" ||
-            body.storeUrl !==
-              "https://play.google.com/store/apps/details?id=com.hatem.musicmute")) ||
-        (body.platform === "ios" && body.source !== "app_store")
-      )
-        return error(400, "INVALID_REQUEST", "Invalid release channel.");
       const created = {
         ...this.releases[0],
         ...body,
@@ -1237,12 +1092,6 @@ export class DashboardFixture {
       if (!release) return error(404, "NOT_FOUND", "Release was not found.");
       if (method === "GET") return { status: 200, body: release };
       if (method === "PATCH") {
-        if (release.source === "direct_apk")
-          return error(
-            400,
-            "INVALID_REQUEST",
-            "Retired direct APK releases are read-only.",
-          );
         if (
           !hasOnlyKeys(
             input.body,
@@ -1255,117 +1104,41 @@ export class DashboardFixture {
         return { status: 200, body: release };
       }
     }
-    if (/^\/admin\/releases\/[^/]+\/uploads(?:\/|$)/.test(path))
-      return error(
-        400,
-        "INVALID_REQUEST",
-        "Android updates are delivered by Google Play.",
-      );
-    if (path === "/admin/update-policy/desktop") {
-      const current = () => ({
-        revision: this.policy.revision,
-        ...structuredClone(this.desktopGates),
-      });
-      if (method === "GET") return { status: 200, body: current() };
-      if (method === "PATCH") {
-        if (
-          !hasExactKeys(input.body, [
-            "expectedRevision",
-            "operationId",
-            "reason",
-            "platforms",
-          ])
-        )
-          return error(
-            400,
-            "INVALID_REQUEST",
-            "Invalid desktop policy request.",
-          );
-        const body = input.body as {
-          expectedRevision: number;
-          operationId: string;
-          reason: string;
-          platforms: Partial<DesktopUpdatePolicy>;
-        };
-        if (
-          !Number.isSafeInteger(body.expectedRevision) ||
-          body.expectedRevision < 0 ||
-          body.expectedRevision >= Number.MAX_SAFE_INTEGER ||
-          typeof body.operationId !== "string" ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-            body.operationId,
-          ) ||
-          typeof body.reason !== "string" ||
-          !body.reason.trim() ||
-          body.reason.trim().length > 500 ||
-          /[\p{Cc}]/u.test(body.reason) ||
-          !body.platforms ||
-          typeof body.platforms !== "object" ||
-          Array.isArray(body.platforms) ||
-          !Object.keys(body.platforms).length ||
-          Object.keys(body.platforms).some(
-            (key) => !["macos", "windows"].includes(key),
-          ) ||
-          Object.values(body.platforms).some((gate: unknown) => {
-            if (!hasExactKeys(gate, ["minimumBuild"])) return true;
-            const minimum = (gate as { minimumBuild: unknown }).minimumBuild;
-            return (
-              minimum !== null &&
-              (!Number.isInteger(minimum) ||
-                Number(minimum) < 1 ||
-                Number(minimum) > 2147483647)
-            );
-          })
-        )
-          return error(
-            400,
-            "INVALID_REQUEST",
-            "Invalid desktop policy request.",
-          );
-        const encodedBody = JSON.stringify(body),
-          previous = this.desktopPolicyOperations.get(body.operationId);
-        if (
-          previous &&
-          (previous.actor !== role || previous.body !== encodedBody)
-        )
-          return error(
-            409,
-            "OPERATION_CONFLICT",
-            "Operation ID was already used.",
-          );
-        if (!previous) {
-          if (body.expectedRevision !== this.policy.revision)
-            return error(409, "REVISION_CONFLICT", "Policy revision changed.");
-          for (const key of ["macos", "windows"] as const)
-            if (body.platforms[key])
-              this.desktopGates[key] = structuredClone(body.platforms[key]);
-          this.policy = { ...this.policy, revision: this.policy.revision + 1 };
-          this.desktopPolicyOperations.set(body.operationId, {
-            receipt: {
-              operationId: body.operationId,
-              status: "succeeded",
-              resourceId: "global",
-              revision: this.policy.revision,
+    if (
+      path === `/admin/releases/${FIXTURE_IDS.release}/uploads` &&
+      method === "POST"
+    ) {
+      this.releases[0].artifactState = "awaiting_upload";
+      return {
+        status: 201,
+        body: {
+          uploadId: FIXTURE_IDS.upload,
+          grant: {
+            method: "PUT",
+            url: "https://upload.fixture.invalid",
+            headers: {
+              "Content-Type": "application/vnd.android.package-archive",
+              "x-amz-checksum-sha256":
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+              "If-None-Match": "*",
             },
-            body: encodedBody,
-            actor: role,
-          });
-        }
-        return {
-          status: 200,
-          body: {
-            policy: current(),
-            appliedRevision: this.desktopPolicyOperations.get(body.operationId)!
-              .receipt.revision,
-            operationId: body.operationId,
-            replayed: Boolean(previous),
+            expiresAt: "2026-09-11T00:05:00.000Z",
           },
-        };
-      }
+          expectedBytes: 1024,
+          expectedSha256: "a".repeat(64),
+        },
+      };
+    }
+    if (path.includes(`/uploads/${FIXTURE_IDS.upload}`)) {
+      this.releases[0].artifactState = "verified";
+      return {
+        status: method === "GET" ? 200 : 201,
+        body: { artifactState: "verified", checkedAt: NOW },
+      };
     }
     if (path === "/admin/update-policy" && method === "GET")
       return { status: 200, body: this.policy };
-    if (path === "/admin/update-policy/previews" && method === "POST") {
+    if (path === "/admin/update-policy/preview" && method === "POST") {
       if (!validPolicySelection(input.body))
         return error(400, "INVALID_REQUEST", "Invalid policy selection.");
       return {
@@ -1377,7 +1150,7 @@ export class DashboardFixture {
           examples: [
             {
               platform: "android",
-              distribution: "play",
+              distribution: "direct_apk",
               installedBuild: 9,
               decision: "required",
               targetBuild: 20,
@@ -1387,43 +1160,28 @@ export class DashboardFixture {
       };
     }
     const publication = path.match(
-      /^\/admin\/releases\/([^/]+)\/(publications|withdrawals)$/,
+      /^\/admin\/releases\/([^/]+)\/(publish|withdraw)$/,
     );
     if (publication && method === "POST") {
       const release = this.releases.find(({ id }) => id === publication[1]);
       if (!release) return error(404, "NOT_FOUND", "Release was not found.");
-      if (release.source === "direct_apk")
-        return error(
-          400,
-          "INVALID_REQUEST",
-          "Retired direct APK releases are read-only.",
-        );
-      const operation = publication[2] as "publications" | "withdrawals";
+      const operation = publication[2] as "publish" | "withdraw";
       const policyField =
-        operation === "publications" ? "policy" : "replacementPolicy";
+        operation === "publish" ? "policy" : "replacementPolicy";
       const keys = [
         "expectedRevision",
         "expectedReleaseRevision",
         policyField,
         "operationId",
         "reason",
-        ...(operation === "publications" ? ["storeAvailabilityConfirmed"] : []),
+        ...(operation === "publish" ? ["storeAvailabilityConfirmed"] : []),
       ];
       if (!hasExactKeys(input.body, keys))
         return error(400, "INVALID_REQUEST", "Invalid publication request.");
       const body = input.body as Record<string, unknown>;
       if (!validPolicySelection(body[policyField]))
         return error(400, "INVALID_REQUEST", "Invalid policy selection.");
-      if (
-        operation === "publications" &&
-        body.storeAvailabilityConfirmed !== true
-      )
-        return error(
-          400,
-          "INVALID_REQUEST",
-          "Store availability must be confirmed.",
-        );
-      release.state = operation === "publications" ? "published" : "withdrawn";
+      release.state = operation === "publish" ? "published" : "withdrawn";
       release.revision += 1;
       this.policy = {
         ...(body[policyField] as Omit<UpdatePolicy, "revision">),
@@ -1452,15 +1210,6 @@ export class DashboardFixture {
       this.settings = {
         ...this.settings,
         acceptNewJobs: Boolean(body.acceptNewJobs),
-        linkImportEnabled: body.linkImportEnabled === true,
-        linkImportDisabledCountries: Array.isArray(
-          body.linkImportDisabledCountries,
-        )
-          ? (body.linkImportDisabledCountries as string[])
-          : [],
-        linkImportDisabledUserIds: Array.isArray(body.linkImportDisabledUserIds)
-          ? (body.linkImportDisabledUserIds as string[])
-          : [],
         maintenanceMessageEn: String(body.maintenanceMessageEn ?? ""),
         maintenanceMessageAr:
           typeof body.maintenanceMessageAr === "string"
@@ -1493,7 +1242,7 @@ export class DashboardFixture {
     if (path === "/admin/alerts" && method === "GET")
       return { status: 200, body: page([this.alert]) };
     if (
-      path === `/admin/alerts/${this.alert.id}/acknowledgements` &&
+      path === `/admin/alerts/${this.alert.id}/acknowledge` &&
       method === "POST"
     ) {
       this.alert = {

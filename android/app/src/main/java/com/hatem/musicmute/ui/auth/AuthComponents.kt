@@ -10,11 +10,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -74,14 +72,12 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
         Card(
             colors =
                 CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth().testTag("auth-error").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     stringResource(failure.problem.messageResource()),
                     color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodyMedium,
                 )
                 TextButton(onClick = dismiss) { Text(stringResource(R.string.auth_dismiss)) }
             }
@@ -93,7 +89,6 @@ internal fun AuthMessages(state: AuthUiState, dismiss: () -> Unit) {
                 CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 ),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth().testTag("auth-notice").semantics { liveRegion = LiveRegionMode.Polite },
         ) {
             Text(
@@ -157,20 +152,3 @@ internal fun providerLabel(provider: String): String =
             else -> R.string.auth_other_provider
         }
     )
-
-@Composable
-internal fun GoogleMark(modifier: Modifier = Modifier) {
-    Icon(
-        painterResource(R.drawable.google_g),
-        contentDescription = null,
-        modifier = modifier.size(20.dp),
-        tint = Color.Unspecified,
-    )
-}
-
-@Composable
-internal fun GoogleActionLabel(label: String) {
-    GoogleMark()
-    Spacer(Modifier.width(12.dp))
-    Text(label)
-}

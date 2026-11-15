@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import argparse
 import csv
-import copy
 import hashlib
 import json
 import math
 import os
 import platform
-import re
 import shutil
 import subprocess
-import sys
 import time
 import uuid
 from collections import Counter
@@ -46,27 +43,10 @@ PROFILE_LIMIT_BYTES = 64 * 1024 * 1024
 RELEASE_MANIFEST_LIMIT_BYTES = 16 * 1024 * 1024
 REPORT_SCHEMA_VERSION = 1
 QUALIFIED_IDENTITIES = {"Windows": "S-1-5-19"}
-GPU_ONLY_POLICY = "onnxruntime-disable-cpu-fallback-v1"
 
 
 class QualificationError(RuntimeError):
     """Raised when service-context GPU qualification cannot be proven."""
-
-
-def assert_context_identity(arguments: argparse.Namespace, system: str, identity: str) -> str:
-    profile = getattr(arguments, "runtime_profile", "legacy-service")
-    if profile == "windows-user":
-        expected = getattr(arguments, "expected_user_sid", None)
-        if (system != "Windows" or arguments.provider != "directml"
-                or not isinstance(expected, str) or not re.fullmatch(r"S-1-(?:\d+-){1,14}\d+", expected)
-                or expected in {"S-1-5-18", "S-1-5-19", "S-1-5-20"} or identity != expected):
-            raise QualificationError("Qualification must run as the expected Windows user")
-    elif profile != "legacy-service" or not (
-        system == "Darwin" and identity.casefold() != "root"
-        or system == "Windows" and identity == QUALIFIED_IDENTITIES["Windows"]
-    ):
-        raise QualificationError("Qualification must run as the worker service identity")
-    return profile
 
 
 def sha256_hex(path: Path) -> str:
@@ -88,7 +68,6 @@ def service_identity() -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
-                creationflags=0x00000008 if sys.platform == "win32" else 0,
             )
             row = next(csv.reader([completed.stdout.strip()]))
         except (
@@ -141,7 +120,7 @@ def summarize_profiles(
 
     accelerated = counts[expected_provider]
     cpu = counts[CPU_PROVIDER]
-    proven = profile_count > 0 and accelerated > 0 and cpu == 0 and not (set(counts) - {expected_provider})
+    proven = profile_count > 0 and accelerated > 0 and cpu == 0
     return {
         "expectedProvider": expected_provider,
         "profileCount": profile_count,
@@ -172,41 +151,6 @@ def mps_memory_snapshot() -> dict[str, int] | None:
 
 
 def run_qualification(arguments: argparse.Namespace) -> dict[str, object]:
-    """Keep only the enrollment MP3; benchmark callers export audio explicitly."""
-    work_root = arguments.work_root.resolve(strict=True)
-    if not work_root.is_dir() or work_root.is_symlink():
-        raise QualificationError("Qualification work root is unsafe")
-    qualification_root = work_root / f"qualification-{uuid.uuid4()}"
-    qualification_root.mkdir(mode=0o700)
-    completed = False
-    benchmark_mode = getattr(arguments, "benchmark_mode", False) is True
-    try:
-        report = _run_qualification(arguments, qualification_root)
-        if not benchmark_mode:
-            candidate = report["uploadCandidate"]
-            if not isinstance(candidate, dict):
-                raise QualificationError("Qualification upload candidate is unavailable")
-            output = Path(str(candidate["path"]))
-            retained = qualification_root / "vocals.mp3"
-            shutil.move(output, retained)
-            candidate["path"] = str(retained)
-            for entry in qualification_root.iterdir():
-                if entry == retained:
-                    continue
-                if entry.is_dir() and not entry.is_symlink():
-                    shutil.rmtree(entry)
-                else:
-                    entry.unlink()
-        completed = True
-        return report
-    finally:
-        if not completed or benchmark_mode:
-            shutil.rmtree(qualification_root)
-
-
-def _run_qualification(
-    arguments: argparse.Namespace, qualification_root: Path
-) -> dict[str, object]:
     progress = getattr(arguments, "progress", None)
 
     def emit(kind: str, **fields: object) -> None:
@@ -221,11 +165,18 @@ def _run_qualification(
         save_audio_dir.mkdir(mode=0o700)
     system = platform.system()
     identity = service_identity()
-    runtime_profile = assert_context_identity(arguments, system, identity)
-    gpu_identity = None
-    if runtime_profile == "windows-user":
-        from .windows_gpu import adapter_identity
-        gpu_identity = adapter_identity(arguments.directml_device_id)
+    expected_identity = QUALIFIED_IDENTITIES.get(system)
+    if system == "Darwin":
+        identity_is_valid = identity.casefold() != "root"
+    else:
+        identity_is_valid = (
+            expected_identity is not None
+            and identity.casefold() == expected_identity.casefold()
+        )
+    if not identity_is_valid:
+        raise QualificationError(
+            "Qualification must run as the worker service identity"
+        )
 
     fixture = arguments.fixture.resolve(strict=True)
     work_root = arguments.work_root.resolve(strict=True)
@@ -252,6 +203,8 @@ def _run_qualification(
         ffprobe=arguments.ffprobe,
         provider=arguments.provider,
     )
+    qualification_root = work_root / f"qualification-{uuid.uuid4()}"
+    qualification_root.mkdir(mode=0o700)
     qualified_fixture = qualification_root / f"fixture{fixture.suffix.lower()}"
     shutil.copyfile(fixture, qualified_fixture)
     fixture_digest = sha256_hex(qualified_fixture)
@@ -278,8 +231,8 @@ def _run_qualification(
     results: list[dict[str, object]] = []
     saved_audio_artifacts: list[dict[str, object]] = []
     upload_candidate: dict[str, object] | None = None
-    started = time.perf_counter()
-    preload_started = time.perf_counter()
+    started = time.monotonic()
+    preload_started = time.monotonic()
     emit("preload-start")
     pipeline.preload(
         arguments.model_cache.resolve(strict=True),
@@ -291,13 +244,11 @@ def _run_qualification(
         import torch
 
         torch.mps.synchronize()
-    preload_seconds = time.perf_counter() - preload_started
+    preload_seconds = time.monotonic() - preload_started
     emit("preload-complete", seconds=preload_seconds)
     if not math.isfinite(preload_seconds) or preload_seconds <= 0:
         raise QualificationError("Qualification preload timing is invalid")
     profile_paths: tuple[Path, ...] = ()
-    measured_started: float | None = None
-    measured_wall_seconds: float | None = None
     try:
         selected_recipe = getattr(arguments, "recipe_id", None)
         for index, recipe_id in enumerate(selected_recipe_ids(arguments)):
@@ -308,18 +259,13 @@ def _run_qualification(
                 if index <= getattr(arguments, "warmup_runs", 0)
                 else "measured"
             )
-            if benchmark_mode and role == "measured" and measured_started is None:
-                before_measurement = getattr(arguments, "before_measurement", None)
-                if before_measurement is not None:
-                    before_measurement()
-                measured_started = time.perf_counter()
             emit("run-start", index=index + 1, role=role, recipeId=recipe_id)
             attempt_id = str(uuid.uuid4())
             attempt = qualification_root / attempt_id
             attempt.mkdir(mode=0o700)
             local_input = attempt / f"input{qualified_fixture.suffix.lower()}"
             shutil.copyfile(qualified_fixture, local_input)
-            recipe_started = time.perf_counter()
+            recipe_started = time.monotonic()
             request = ProcessRequest.from_payload(
                 {
                     "attemptId": attempt_id,
@@ -337,7 +283,7 @@ def _run_qualification(
                     "recipe": recipe_snapshot(recipe_id),
                 }
             )
-            memory_before = mps_memory_snapshot() if benchmark_mode and arguments.provider == "mps" else None
+            memory_before = mps_memory_snapshot() if benchmark_mode else None
             result = pipeline.process(request, lambda stage: emit("run-stage", index=index + 1, stage=stage))
             grouping = None
             if benchmark_mode:
@@ -354,13 +300,13 @@ def _run_qualification(
                     raise QualificationError("Benchmark window grouping evidence is invalid")
             if benchmark_mode and arguments.provider == "mps":
                 torch.mps.synchronize()
-            memory_after = mps_memory_snapshot() if benchmark_mode and arguments.provider == "mps" else None
+            memory_after = mps_memory_snapshot() if benchmark_mode else None
             output = Path(result["outputPath"]).resolve(strict=True)
             if not output.is_relative_to(qualification_root):
                 raise QualificationError("Qualification result path is unsafe")
             if system != "Windows":
                 output.chmod(0o600)
-            elapsed = time.perf_counter() - recipe_started
+            elapsed = time.monotonic() - recipe_started
             if not math.isfinite(elapsed) or elapsed <= 0:
                 raise QualificationError("Qualification benchmark is invalid")
             results.append(
@@ -409,13 +355,6 @@ def _run_qualification(
                     "resultBytes": result["bytes"],
                     "contentType": "audio/mpeg",
                 }
-        if measured_started is not None:
-            measured_wall_seconds = time.perf_counter() - measured_started
-            if not math.isfinite(measured_wall_seconds) or measured_wall_seconds <= 0:
-                raise QualificationError("Measured benchmark duration is invalid")
-            after_measurement = getattr(arguments, "after_measurement", None)
-            if after_measurement is not None:
-                after_measurement(measured_wall_seconds)
         if len(captured) != 1:
             raise QualificationError("Qualification did not use one stable Kim runtime")
         if arguments.provider == "mps":
@@ -426,16 +365,11 @@ def _run_qualification(
             dispatch = summarize_profiles(profile_paths, DIRECTML_PROVIDER)
         if not dispatch["proven"]:
             raise QualificationError("Accelerated provider dispatch was not proven")
-        if gpu_identity is not None:
-            # A driver reset/re-enumeration during qualification invalidates
-            # the attempt, even if its transient ordinal now refers elsewhere.
-            if adapter_identity(arguments.directml_device_id) != gpu_identity:
-                raise QualificationError("GPU identity changed during qualification")
     finally:
         for path in profile_paths:
             path.unlink(missing_ok=True)
 
-    total_seconds = time.perf_counter() - started
+    total_seconds = time.monotonic() - started
     if not math.isfinite(total_seconds) or total_seconds <= 0:
         raise QualificationError("Qualification benchmark is invalid")
     if upload_candidate is None:
@@ -445,7 +379,7 @@ def _run_qualification(
         "status": "PASS",
         "platform": "darwin-arm64" if system == "Darwin" else "windows-amd64",
         "provider": arguments.provider,
-        "gpuId": "gpu0" if gpu_identity is None else f"dxgi-{gpu_identity['luid']}",
+        "gpuId": "gpu0",
         "directmlDeviceId": arguments.directml_device_id,
         "serviceIdentity": identity,
         "releaseManifestDigest": release_manifest_digest,
@@ -457,15 +391,7 @@ def _run_qualification(
         "uploadCandidate": upload_candidate,
         "preloadSeconds": preload_seconds,
         "totalSeconds": total_seconds,
-        **({"gpuOnlyPolicy": GPU_ONLY_POLICY} if arguments.provider == "directml" else {}),
-        **({"runtimeProfile": runtime_profile, "gpuIdentity": gpu_identity,
-            "resourceObservations": {
-                "dedicatedVideoMemoryLimitBytes": gpu_identity["dedicatedVideoMemoryBytes"],
-                "sharedSystemMemoryLimitBytes": gpu_identity["sharedSystemMemoryLimitBytes"],
-                "inferenceSlots": 1,
-            }} if gpu_identity is not None else {}),
-        **({"savedAudioArtifacts": saved_audio_artifacts,
-            "measuredWallSeconds": measured_wall_seconds} if benchmark_mode else {}),
+        **({"savedAudioArtifacts": saved_audio_artifacts} if benchmark_mode else {}),
     }
 
 
@@ -498,20 +424,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ffmpeg", type=Path, required=True)
     parser.add_argument("--ffprobe", type=Path, required=True)
     parser.add_argument("--directml-device-id", type=int, default=0)
-    parser.add_argument("--runtime-profile", choices=("legacy-service", "windows-user"), default="legacy-service")
-    parser.add_argument("--expected-user-sid")
-    parser.add_argument("--auto-select", action="store_true")
-    parser.add_argument("--preferred-gpu-receipt", type=Path)
     parser.add_argument("--recipe-id", choices=tuple(RECIPE_DEFINITIONS))
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--report", type=Path, required=True)
     arguments = parser.parse_args()
-    if arguments.runtime_profile == "windows-user" and (arguments.provider != "directml" or not arguments.expected_user_sid):
-        parser.error("windows-user requires DirectML and --expected-user-sid")
-    if arguments.auto_select and arguments.runtime_profile != "windows-user":
-        parser.error("--auto-select requires the windows-user runtime profile")
-    if arguments.preferred_gpu_receipt is not None and (not arguments.auto_select or not arguments.preferred_gpu_receipt.is_absolute()):
-        parser.error("--preferred-gpu-receipt requires --auto-select and an absolute path")
     if not all(
         path.is_absolute()
         for path in (
@@ -544,33 +460,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     arguments = parse_args()
-    if getattr(arguments, "auto_select", False):
-        from .windows_gpu import qualify_candidates, validate_identity
-        preference = None
-        preference_path = getattr(arguments, "preferred_gpu_receipt", None)
-        if preference_path is not None:
-            if preference_path.is_symlink() or not preference_path.is_file() or not 2 <= preference_path.stat().st_size <= 64 * 1024:
-                raise QualificationError("Preferred GPU receipt is unsafe")
-            receipt = json.loads(preference_path.read_text(encoding="utf-8"))
-            if not isinstance(receipt, dict):
-                raise QualificationError("Preferred GPU receipt is invalid")
-            preference = validate_identity(receipt.get("gpuIdentity"))
-
-        def qualify(candidate: dict[str, object]) -> dict[str, object]:
-            selected = copy.copy(arguments)
-            selected.directml_device_id = candidate["deviceIndex"]
-            return run_qualification(selected)
-
-        report = qualify_candidates(qualify, preference=preference)
-    else:
-        report = run_qualification(arguments)
-    try:
-        write_private_report(arguments.report, report)
-    except Exception:
-        # Without durable evidence this candidate cannot be uploaded or reused.
-        candidate = Path(str(report["uploadCandidate"]["path"]))
-        shutil.rmtree(candidate.parent)
-        raise
+    report = run_qualification(arguments)
+    write_private_report(arguments.report, report)
     print(json.dumps({"status": "ok", "report": str(arguments.report)}))
     return 0
 

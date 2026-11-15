@@ -1,10 +1,3 @@
-import type { RevisionCommand } from "@/api/contracts";
-
-export interface DeleteWorkerMachineCommand extends RevisionCommand {
-  registrationUserId?: string;
-  expectedUserRevision?: number;
-}
-
 export const WORKER_MACHINE_STATUSES = [
   "pending",
   "active",
@@ -27,7 +20,6 @@ export interface WorkerCapability {
 
 export interface WorkerMachine {
   machineId: string;
-  registeredByUserId: string | null;
   status: WorkerMachineStatus;
   label: string;
   groupId: string | null;
@@ -49,7 +41,6 @@ export interface WorkerMachine {
     }>;
   } | null;
   runtime: {
-    installationProfile?: "windows-user";
     workerVersion: string;
     protocolVersion: number;
     manifestDigest: string;
@@ -125,7 +116,6 @@ export interface WorkerCommand {
 }
 
 export interface WorkerMachineDetail {
-  asOf?: string;
   machine: WorkerMachine;
   slots: WorkerSlot[];
   attempts: WorkerAttemptSummary[];
@@ -158,7 +148,32 @@ export interface WorkerDiagnosticPage {
     metrics: Array<{ name: string; value: number; unit: string }>;
     createdAt: string;
   }>;
-  nextCursor: string | null;
+}
+
+export interface WorkerInvitation {
+  invitationId: string;
+  state: "active" | "consumed" | "expired" | "revoked";
+  createdByUid: string;
+  initialPolicyId: string | null;
+  expiresAt: string;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  installationSessionId: string | null;
+  installation: {
+    phase: string;
+    outcomeCode: string | null;
+    reportSummary: string | null;
+    lastSeenAt: string | null;
+    machineId: string | null;
+    activatedAt: string | null;
+    updatedAt: string;
+  } | null;
+  revision: number;
+}
+
+export interface WorkerInvitationPage {
+  items: WorkerInvitation[];
+  asOf: string;
 }
 
 export interface WorkerFleetPolicy {
@@ -173,4 +188,12 @@ export interface WorkerFleetPolicy {
   processingDeadlineSeconds: number;
   maxAttempts: number;
   updatedAt: string;
+}
+
+export interface WorkerInvitationCredential {
+  invitationId: string;
+  revision: number;
+  credential: string | null;
+  expiresAt: string | null;
+  replayed: boolean;
 }

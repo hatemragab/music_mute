@@ -28,7 +28,7 @@ export class AdminAccountRecoveryController {
     return this.recovery.detail(id);
   }
 
-  @Post(':id/approvals')
+  @Post(':id/approve')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
   approve(
@@ -39,7 +39,7 @@ export class AdminAccountRecoveryController {
     return this.recovery.decide(request.adminActor!, id, body, true);
   }
 
-  @Post(':id/rejections')
+  @Post(':id/reject')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
   reject(

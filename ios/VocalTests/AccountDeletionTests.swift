@@ -33,7 +33,7 @@ final class AccountDeletionTests: XCTestCase {
     let staging = root.appendingPathComponent("staging")
     let store = ProcessingStore(root: root.appendingPathComponent("store"), stagingRoot: staging)
     for uid in ["owner-a", "owner-b"] {
-      try await store.saveLibraryJobs([], ownerUid: uid)
+      try await store.saveJobs([], ownerUid: uid)
       let directory = staging.appendingPathComponent(ProcessingStore.ownerDirectoryName(uid))
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       try Data([1]).write(to: directory.appendingPathComponent("input.mp3"))
@@ -49,10 +49,10 @@ final class AccountDeletionTests: XCTestCase {
         atPath: staging.appendingPathComponent(ProcessingStore.ownerDirectoryName("owner-b")).path))
     XCTAssertEqual(try Data(contentsOf: original), Data([2]))
     do {
-      try await store.saveLibraryJobs([], ownerUid: "owner-a")
+      try await store.saveJobs([], ownerUid: "owner-a")
       XCTFail("Late writes must stay fenced")
     } catch { XCTAssertEqual(error as? ProcessingStoreFailure, .missingOperation) }
-    let foreign = try await store.libraryJobs(ownerUid: "owner-b")
+    let foreign = try await store.cachedJobs(ownerUid: "owner-b")
     XCTAssertTrue(foreign.isEmpty)
   }
 }
@@ -98,7 +98,7 @@ final class AccountDeletionTests: XCTestCase {
     let id = "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19"
     defer { RecoveryURLProtocol.handler = nil }
     RecoveryURLProtocol.handler = { request in
-      XCTAssertEqual(request.url?.path, "/users/me/devices/\(id)")
+      XCTAssertEqual(request.url?.path, "/api/v1/users/me/devices/\(id)")
       XCTAssertEqual(request.httpMethod, "DELETE")
       XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token")
       XCTAssertTrue(recoveryRequestData(request).isEmpty)
@@ -126,13 +126,13 @@ final class AccountDeletionTests: XCTestCase {
     var requests: [URLRequest] = []
     RecoveryURLProtocol.handler = { request in
       requests.append(request)
-      if request.url?.path == "/users/me" {
+      if request.url?.path == "/api/v1/users/me" {
         return (403, Data(#"{"code":"ACCOUNT_DELETION_PENDING"}"#.utf8))
       }
       return (
         202,
         Data(
-          #"{"id":"recovery-1","status":"pending","reason":null,"requested_at":"2026-09-11T00:00:00.000Z","reviewed_at":null,"review_reason":null,"revision":0}"#
+          #"{"id":"recovery-1","status":"pending","reason":null,"requestedAt":"2026-09-11T00:00:00.000Z","reviewedAt":null,"reviewReason":null,"revision":0}"#
             .utf8)
       )
     }
@@ -148,7 +148,7 @@ final class AccountDeletionTests: XCTestCase {
     XCTAssertEqual(request.id, "recovery-1")
     XCTAssertEqual(request.status, "pending")
     XCTAssertEqual(requests.last?.httpMethod, "POST")
-    XCTAssertEqual(requests.last?.url?.path, "/users/me/account-recovery")
+    XCTAssertEqual(requests.last?.url?.path, "/api/v1/users/me/account-recovery")
     XCTAssertEqual(recoveryRequestData(requests.last!), Data("{}".utf8))
     XCTAssertEqual(requests.last?.value(forHTTPHeaderField: "Authorization"), "Bearer token")
   }
@@ -290,82 +290,6 @@ final class AccountDeletionTests: XCTestCase {
   }
 }
 
-@MainActor final class AccountVerificationSessionTests: XCTestCase {
-  func testVerificationRefreshRequiresBackendConfirmationAndFreshToken() async throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer {
-      RecoveryURLProtocol.handler = nil
-      try? FileManager.default.removeItem(at: root)
-    }
-    let firebase = DeletionFirebase()
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [RecoveryURLProtocol.self]
-    let api = AuthAPIClient(
-      configuration: AuthConfiguration(apiOrigin: URL(string: "https://api.example")!),
-      tokenSource: firebase, sessionConfiguration: configuration)
-    let model = AuthSessionModel(
-      firebase: firebase, apple: AppleCredentialProvider(),
-      installationStore: InstallationStore(file: root.appendingPathComponent("installation.json")),
-      api: api, deletionStore: AccountDeletionStore(root: root.appendingPathComponent("deletion")))
-    var backendVerified = false
-    var synchronizationFails = false
-    var paths: [String] = []
-    let policy = AppPolicy(
-      requireVerifiedEmail: false,
-      platforms: .init(android: .init(minimumBuild: nil), ios: .init(minimumBuild: nil)),
-      revision: 1, updatedAt: Date())
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    RecoveryURLProtocol.handler = { request in
-      let path = request.url!.path
-      paths.append(path)
-      let profile = AccountProfile(
-        id: "owner-a", displayName: "Fixture owner", email: "owned@example.test",
-        emailVerified: backendVerified, providers: [.password])
-      if path == "/auth/profile-synchronizations" {
-        if synchronizationFails { return (503, Data()) }
-        let result = ProfileSyncResponse(user: profile, policy: policy)
-        return (200, try! ApiWireJSON.request(encoder.encode(result))!)
-      }
-      XCTAssertEqual(path, "/auth/sessions")
-      let report = try! JSONDecoder.authDecoder().decode(
-        InstallationReport.self,
-        from: ApiWireJSON.response(recoveryRequestData(request)))
-      let device = RegisteredDevice(
-        installationId: report.installationId, platform: "ios", appVersion: report.appVersion,
-        buildNumber: report.buildNumber, metadataRevision: report.metadataRevision,
-        osVersion: report.osVersion, deviceModel: report.deviceModel,
-        firstSeenAt: Date(), lastSeenAt: Date(), versionHistory: [])
-      let result = SessionResponse(
-        user: profile, device: device, policy: policy, access: .init(allowed: true, reason: nil))
-      return (200, try! ApiWireJSON.request(encoder.encode(result))!)
-    }
-
-    await model.signInEmail(email: "owned@example.test", password: "password")
-    XCTAssertEqual(model.phase, .authenticated)
-    XCTAssertEqual(model.profile?.emailVerified, false)
-    firebase.identity = IdentitySnapshot(
-      uid: "owner-a", email: "owned@example.test", emailVerified: true, providers: [.password])
-    synchronizationFails = true
-    await model.refreshAccount()
-    XCTAssertEqual(model.profile?.emailVerified, false)
-    XCTAssertTrue(model.profileSyncPending)
-
-    synchronizationFails = false
-    await model.refreshAccount()
-    XCTAssertEqual(model.identity?.emailVerified, true)
-    XCTAssertEqual(model.profile?.emailVerified, false)
-
-    backendVerified = true
-    await model.refreshAccount()
-    XCTAssertEqual(model.profile?.emailVerified, true)
-    XCTAssertFalse(model.profileSyncPending)
-    XCTAssertNil(model.lastFailure)
-    XCTAssertEqual(firebase.tokenRefreshRequests.filter { $0 }.count, 3)
-    XCTAssertEqual(paths.filter { $0 == "/auth/profile-synchronizations" }.count, 3)
-  }
-}
-
 @MainActor private final class DeletionFixture {
   let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   let firebase = DeletionFirebase()
@@ -400,7 +324,6 @@ final class AccountDeletionTests: XCTestCase {
   var appleProviderUserID: String? { nil }
   var reauthFailure: AuthFailure?
   var reauthenticated = 0
-  var tokenRefreshRequests: [Bool] = []
   func observe(_ listener: @escaping @MainActor (IdentitySnapshot?) -> Void) -> NSObjectProtocol {
     NSObject()
   }
@@ -418,10 +341,7 @@ final class AccountDeletionTests: XCTestCase {
     guard let identity else { throw AuthFailure.sessionExpired }
     return identity
   }
-  func idToken(forceRefresh: Bool) async throws -> String {
-    tokenRefreshRequests.append(forceRefresh)
-    return "fixture-token"
-  }
+  func idToken(forceRefresh: Bool) async throws -> String { "fixture-token" }
   func reauthenticatePassword(_ password: String) async throws {
     reauthenticated += 1
     if let reauthFailure { throw reauthFailure }

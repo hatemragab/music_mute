@@ -1,16 +1,4 @@
-import { isStorageEtag } from '../storage/object-identity.js';
-import {
-  MAX_AUDIO_DURATION_SECONDS,
-  MAX_PREPARED_AUDIO_BYTES,
-} from './media-limits.js';
-import {
-  StageMeasurementSchema,
-  AttemptMeasurementsSchema,
-  type StageMeasurement,
-  type AttemptMeasurements,
-} from './job-stage-timing.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { normalizeExtraData, type JobExtraData } from './job-extra-data.js';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import { AUDIO_TYPES, JOB_FAILURE_CODES, JOB_STATUSES } from './job.types.js';
 import type {
@@ -67,12 +55,7 @@ const workerProgressSnapshot = new MongoSchema<WorkerProgressSnapshot>(
 const objectIdentity = new MongoSchema<ObjectIdentity>(
   {
     key: { type: String, required: true, maxlength: 1024 },
-    etag: {
-      type: String,
-      required: true,
-      maxlength: 1024,
-      validate: isStorageEtag,
-    },
+    versionId: { type: String, required: true, maxlength: 1024 },
     bytes: {
       type: Number,
       required: true,
@@ -81,33 +64,6 @@ const objectIdentity = new MongoSchema<ObjectIdentity>(
     },
     sha256: { type: String, required: true, validate: isSha256 },
     contentType: { type: String, required: true, maxlength: 100 },
-  },
-  { _id: false, strict: 'throw' },
-);
-
-export interface JobRenditionPending {
-  full: ObjectIdentity;
-  attemptId: string;
-  queuedAt: Date;
-  nextAt: Date;
-  leaseUntil: Date | null;
-  leaseToken: string | null;
-  attempts: number;
-}
-const renditionPending = new MongoSchema<JobRenditionPending>(
-  {
-    full: { type: objectIdentity, required: true },
-    attemptId: { type: String, required: true, match: /^[a-f0-9-]{36}$/i },
-    queuedAt: { type: Date, required: true },
-    nextAt: { type: Date, required: true },
-    leaseUntil: { type: Date, default: null },
-    leaseToken: { type: String, default: null, match: /^[a-f0-9-]{36}$/i },
-    attempts: {
-      type: Number,
-      default: 0,
-      min: 0,
-      validate: Number.isSafeInteger,
-    },
   },
   { _id: false, strict: 'throw' },
 );
@@ -125,14 +81,13 @@ const inputReservation = new MongoSchema<InputReservation>(
       type: Number,
       required: true,
       min: 1,
-      max: MAX_PREPARED_AUDIO_BYTES,
+      max: 50_000_000,
       validate: Number.isInteger,
     },
     durationSeconds: {
       type: Number,
       required: true,
-      validate: (v: number) =>
-        Number.isFinite(v) && v > 0 && v <= MAX_AUDIO_DURATION_SECONDS,
+      validate: (v: number) => Number.isFinite(v) && v > 0 && v <= 1_200,
     },
     sha256: { type: String, required: true, validate: isSha256 },
   },
@@ -146,13 +101,13 @@ const admissionSnapshot = new MongoSchema<AdmissionSnapshot>(
       type: Number,
       required: true,
       min: Number.MIN_VALUE,
-      max: MAX_AUDIO_DURATION_SECONDS,
+      max: 1_200,
     },
     maxInputBytes: {
       type: Number,
       required: true,
       min: 1,
-      max: MAX_PREPARED_AUDIO_BYTES,
+      max: 50_000_000,
       validate: Number.isSafeInteger,
     },
     preparationProfileId: { type: String, required: true, maxlength: 100 },
@@ -325,37 +280,6 @@ const workerExecutionOwnership = new MongoSchema<WorkerExecutionOwnership>(
 })
 export class Job {
   _id!: Types.ObjectId;
-  @Prop({
-    type: String,
-    default: null,
-    immutable: true,
-    enum: ['local_device', null],
-  })
-  processingOrigin!: 'local_device' | null;
-  @Prop({ type: Date, default: null }) serverTimingStartedAt!: Date | null;
-  @Prop({ type: Date, default: null }) queueTimingStartedAt!: Date | null;
-  @Prop({
-    type: Number,
-    default: null,
-    min: 0,
-    validate: (v: number | null) => v === null || Number.isSafeInteger(v),
-  })
-  queueAccumulatedMs!: number | null;
-  @Prop({
-    type: Number,
-    default: null,
-    min: 0,
-    validate: (v: number | null) => v === null || Number.isSafeInteger(v),
-  })
-  retryWaitAccumulatedMs!: number | null;
-  @Prop({ type: [StageMeasurementSchema], default: [] })
-  importStageTimings!: StageMeasurement[];
-  @Prop({
-    type: [AttemptMeasurementsSchema],
-    default: [],
-    validate: (v: AttemptMeasurements[]) => v.length <= 10,
-  })
-  stageTimingAttempts!: AttemptMeasurements[];
   @Prop({ type: MongoSchema.Types.ObjectId, required: true, immutable: true })
   userId!: Types.ObjectId;
   @Prop({ required: true, immutable: true, maxlength: 36 }) requestId!: string;
@@ -380,13 +304,6 @@ export class Job {
     validate: (v: string | null) => v === null || isAudioName(v),
   })
   sourceTitle!: string | null;
-
-  @Prop({
-    type: MongoSchema.Types.Mixed,
-    default: null,
-    set: normalizeExtraData,
-  })
-  extra_data!: JobExtraData | null;
   @Prop({
     type: String,
     default: null,
@@ -402,25 +319,10 @@ export class Job {
     match: YOUTUBE_SOURCE_URL_PATTERN,
   })
   sourceUrl!: string | null;
-  @Prop({
-    type: String,
-    default: null,
-    immutable: true,
-    match: /^[a-f0-9]{64}$/,
-  })
-  sharedSourceKey!: string | null;
-  @Prop({
-    type: String,
-    default: null,
-    immutable: true,
-    match: /^[a-f0-9]{64}$/,
-  })
-  sharedResultKey!: string | null;
   @Prop({ type: Date, default: null }) clientStartedAt!: Date | null;
   @Prop({ type: Date, default: null }) deletedAt!: Date | null;
   @Prop({ type: Date, default: null })
   reservationCleanupScheduledAt!: Date | null;
-  @Prop({ type: Date, default: null }) cleanupFirstDeletedAt!: Date | null;
   @Prop({ type: Date, default: null }) cleanupNextAt!: Date | null;
   @Prop({ type: Date, default: null }) cleanupLeaseUntil!: Date | null;
   @Prop({ type: String, default: null, maxlength: 36 }) cleanupToken!:
@@ -428,7 +330,6 @@ export class Job {
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   cleanupAttempts!: number;
   @Prop({ type: Date, default: null }) cleanupCompletedAt!: Date | null;
-  @Prop({ type: Date, default: null }) retentionNextAt!: Date | null;
   @Prop({
     type: String,
     enum: JOB_STATUSES,
@@ -458,20 +359,10 @@ export class Job {
   outputObject!: ObjectIdentity | null;
   @Prop({ type: Date, default: null })
   retainedOutputAccountedAt!: Date | null;
-  @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
-  retainedInputBytes!: number;
-  @Prop({ type: [[Number]], default: null })
-  comparisonRanges!: number[][] | null;
   @Prop({ type: Date, default: null })
   retainedOutputReleasedAt!: Date | null;
   @Prop({ type: workerRecipeSnapshot, default: null, immutable: true })
   recipeSnapshot!: WorkerRecipeSnapshot | null;
-  @Prop({ type: Boolean, default: null, immutable: true })
-  requestedTrimEnabled!: boolean | null;
-  @Prop({ type: workerRecipeSnapshot, default: null })
-  outputRecipeSnapshot!: WorkerRecipeSnapshot | null;
-  @Prop({ type: renditionPending, default: null })
-  renditionPending!: JobRenditionPending | null;
   @Prop({ type: workerRetryEligibility, default: null })
   retryEligibility!: WorkerRetryEligibility | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
@@ -492,19 +383,9 @@ export class Job {
     type: Number,
     default: null,
     validate: (value: number | null) =>
-      value === null ||
-      (Number.isFinite(value) &&
-        value > 0 &&
-        value <= MAX_AUDIO_DURATION_SECONDS),
+      value === null || (Number.isFinite(value) && value > 0 && value <= 1_200),
   })
   measuredDurationSeconds!: number | null;
-  @Prop({
-    type: Number,
-    default: null,
-    min: Number.MIN_VALUE,
-    max: MAX_AUDIO_DURATION_SECONDS,
-  })
-  measuredOutputDurationSeconds!: number | null;
   @Prop({ type: Date, default: null }) uploadingResultAt!: Date | null;
   @Prop({ type: Date, default: null })
   processingIntervalStartedAt!: Date | null;
@@ -526,15 +407,6 @@ export class Job {
   updatedAt!: Date;
 }
 export const JobSchema = SchemaFactory.createForClass(Job);
-JobSchema.index(
-  {
-    status: 1,
-    'renditionPending.nextAt': 1,
-    'renditionPending.leaseUntil': 1,
-    _id: 1,
-  },
-  { name: 'jobs_rendition_pending' },
-);
 // Keep the public administrative CAS authority synchronized across document and query writers.
 // Save uses the driver collection directly, so it does not also invoke query middleware.
 const adminVisibleFields = new Set([
@@ -556,8 +428,6 @@ const adminVisibleFields = new Set([
   'uploadingResultAt',
   'lastError',
   'recipeSnapshot',
-  'requestedTrimEnabled',
-  'outputRecipeSnapshot',
   'retryEligibility',
   'attemptNumber',
   'currentExecution',
@@ -604,18 +474,6 @@ JobSchema.index(
 );
 JobSchema.index({ userId: 1, status: 1 }, { name: 'jobs_owner_running' });
 JobSchema.index(
-  { userId: 1, 'outputObject.key': 1 },
-  {
-    name: 'jobs_owner_cached_output',
-    partialFilterExpression: {
-      sourceKind: 'url',
-      status: 'ready',
-      deletedAt: null,
-      'outputObject.key': { $type: 'string' },
-    },
-  },
-);
-JobSchema.index(
   {
     status: 1,
     reservationCleanupScheduledAt: 1,
@@ -635,13 +493,6 @@ JobSchema.index(
   },
 );
 JobSchema.index(
-  { retentionNextAt: 1, cleanupCompletedAt: 1, _id: 1 },
-  {
-    name: 'jobs_deleted_retention_due',
-    partialFilterExpression: { deletedAt: { $type: 'date' } },
-  },
-);
-JobSchema.index(
   {
     status: 1,
     queuedAt: 1,
@@ -650,6 +501,15 @@ JobSchema.index(
     _id: 1,
   },
   { name: 'jobs_worker_claim_eligibility' },
+);
+JobSchema.index(
+  { 'currentExecution.leaseExpiresAt': 1, _id: 1 },
+  {
+    name: 'jobs_worker_lease_expiry',
+    partialFilterExpression: {
+      'currentExecution.leaseExpiresAt': { $type: 'date' },
+    },
+  },
 );
 JobSchema.index(
   { 'currentExecution.attemptId': 1 },

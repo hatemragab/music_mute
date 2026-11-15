@@ -1,4 +1,3 @@
-import { AdminNotificationsController } from '../src/admin-notifications/admin-notifications.controller.js';
 import 'reflect-metadata';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +17,6 @@ import {
 import { AdminAccessController } from '../src/admin/admin-access.controller.js';
 import { AdminAuditController } from '../src/admin/admin-audit.controller.js';
 import { AdminOperationsController } from '../src/admin/admin-operations.controller.js';
-import { AdminRealtimeTicketController } from '../src/realtime/realtime-ticket.controller.js';
 import { AdminSessionController } from '../src/admin/admin-session.controller.js';
 import { AdminUsersController } from '../src/admin-users/admin-users.controller.js';
 import { AdminAccountRecoveryController } from '../src/admin-users/admin-account-recovery.controller.js';
@@ -30,7 +28,6 @@ import { AdminSettingsController } from '../src/admin-settings/admin-settings.co
 import { AdminReleasesController } from '../src/releases/admin-releases.controller.js';
 import { AdminReleaseUploadsController } from '../src/releases/admin-release-uploads.controller.js';
 import { AdminUpdatePolicyController } from '../src/releases/admin-update-policy.controller.js';
-import { AdminMacosUpdatesController } from '../src/macos-updates/admin-macos-updates.controller.js';
 import { AdminOverviewController } from '../src/admin-observability/admin-overview.controller.js';
 import { AdminHealthController } from '../src/admin-observability/admin-health.controller.js';
 import { AdminAlertsController } from '../src/admin-observability/admin-alerts.controller.js';
@@ -50,7 +47,6 @@ import { ADMIN_RATE_LIMIT_DEFAULTS } from '../src/config/environment.js';
 import {
   createAdminHarness,
   type AdminHarness,
-  wireJson,
 } from './helpers/admin-harness.js';
 
 interface RouteFixture {
@@ -73,8 +69,6 @@ const inventory = JSON.parse(
   ),
 ) as { roles: AdminRole[]; routes: RouteFixture[] };
 const controllers: Type[] = [
-  AdminNotificationsController,
-  AdminRealtimeTicketController,
   AdminSessionController,
   AdminAccessController,
   AdminAuditController,
@@ -88,7 +82,6 @@ const controllers: Type[] = [
   AdminReleasesController,
   AdminReleaseUploadsController,
   AdminUpdatePolicyController,
-  AdminMacosUpdatesController,
   AdminOverviewController,
   AdminHealthController,
   AdminAlertsController,
@@ -243,7 +236,7 @@ describe('complete administration route authorization contract', () => {
       const method = route.method.toLowerCase() as
         'get' | 'post' | 'put' | 'patch' | 'delete';
       const send = (token?: string, body: unknown = route.requestBody) =>
-        harness.request(method, endpoint(route), wireJson(body), token);
+        harness.request(method, endpoint(route), body, token);
       for (const token of [
         undefined,
         'ordinary-google-token',
@@ -269,11 +262,7 @@ describe('complete administration route authorization contract', () => {
           allowed ? route.successStatus : 403,
         );
         expect(response.headers['cache-control']).toBe('no-store');
-        if (
-          !allowed ||
-          route.path === '/admin/session' ||
-          route.responseCategory === 'retired'
-        )
+        if (!allowed || route.path === '/admin/session')
           expect(domainCalls).toEqual([]);
         else expect(domainCalls.length).toBe(1);
       }
@@ -294,25 +283,15 @@ describe('complete administration route authorization contract', () => {
       );
       if (route.validationOwner === 'dto') {
         domainCalls.length = 0;
-        const invalid =
-          route.method === 'GET'
-            ? await harness.request(
-                'get',
-                `${endpoint(route)}?unrecognized_property=true`,
-                undefined,
-                owner,
-              )
-            : await send(owner, {
-                ...route.requestBody,
-                unrecognizedProperty: true,
-              });
+        const invalid = await send(owner, {
+          ...route.requestBody,
+          unrecognizedProperty: true,
+        });
         expect(invalid.status, invalid.text).toBe(400);
         expect(domainCalls).toEqual([]);
-        if (route.method !== 'GET') {
-          const missing = await send(owner, {});
-          expect(missing.status, missing.text).toBe(400);
-          expect(domainCalls).toEqual([]);
-        }
+        const missing = await send(owner, {});
+        expect(missing.status, missing.text).toBe(400);
+        expect(domainCalls).toEqual([]);
       }
       domainCalls.length = 0;
       reserve.mockClear();

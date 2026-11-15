@@ -1,9 +1,6 @@
 import Joi from 'joi';
-import { PUBLIC_POLICY_DEFAULTS } from './public-policy.js';
 
 export const AUTH_RATE_LIMIT_DEFAULTS = {
-  DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE: 10,
-  DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE: 300,
   AUTH_UID_PER_MINUTE: 120,
   PROFILE_UID_PER_MINUTE: 5,
   PROFILE_IP_PER_MINUTE: 10,
@@ -41,20 +38,6 @@ export const ADMIN_RATE_LIMIT_DEFAULTS = {
   ADMIN_SERVICE_PER_MINUTE: 1_000,
 } as const;
 
-export const WORKER_RATE_LIMIT_DEFAULTS = {
-  WORKER_PREAUTH_IP_PER_MINUTE: 300,
-  WORKER_PREAUTH_SERVICE_PER_MINUTE: 3_000,
-  WORKER_MACHINE_PER_MINUTE: 300,
-  WORKER_INSTALLATION_PER_MINUTE: 120,
-  WORKER_ENROLLMENT_PER_MINUTE: 20,
-  WORKER_STANDARD_PER_MINUTE: 120,
-  WORKER_POLL_PER_MINUTE: 240,
-  WORKER_TRANSFER_PER_MINUTE: 30,
-  WORKER_TELEMETRY_PER_MINUTE: 30,
-  WORKER_ENDPOINT_PER_MINUTE: 1_200,
-  WORKER_SERVICE_PER_MINUTE: 3_000,
-} as const;
-
 const allowance = (defaultValue: number) =>
   Joi.number().integer().min(1).max(1_000_000).default(defaultValue);
 
@@ -69,90 +52,29 @@ const schema = Joi.object({
   NODE_ENV: Joi.string()
     .valid('development', 'production', 'test')
     .default('development'),
-  MUSICMUTE_LOG_ENABLED: Joi.string()
-    .valid('0', '1', 'false', 'true')
-    .default('0'),
-  MUSICMUTE_LOG_PAYLOADS: Joi.string()
-    .valid('0', '1', 'false', 'true')
-    .default('0'),
-  MUSICMUTE_LOG_CONSOLE: Joi.string()
-    .valid('0', '1', 'false', 'true')
-    .default('0'),
-  MUSICMUTE_LOG_ENDPOINT: Joi.string()
-    .uri({ scheme: ['http'] })
-    .default('http://127.0.0.1:19740/ingest/backend'),
-  MUSICMUTE_LOG_KEY: Joi.string().max(256).allow('').default(''),
-  MUSICMUTE_LOG_CAPTURE_ID: Joi.string()
-    .pattern(/^[A-Za-z0-9_.-]{1,128}$/)
-    .optional(),
   HOST: Joi.string().hostname().default('127.0.0.1'),
   PORT: Joi.number().integer().min(1).max(65535).default(3000),
   MONGODB_URI: Joi.string()
     .pattern(/^mongodb(?:\+srv)?:\/\//)
     .required(),
   REDIS_URL: Joi.string().required(),
-  STORAGE_PROVIDER: Joi.string().valid('r2').required(),
-  STORAGE_ENDPOINT: Joi.string()
-    .uri({ scheme: ['https'] })
+  AWS_REGION: Joi.string()
+    .pattern(/^[a-z]{2}(?:-[a-z]+)+-\d$/)
     .required(),
-  STORAGE_REGION: Joi.string().valid('auto').required(),
-  STORAGE_BUCKET: Joi.string()
-    .pattern(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/)
+  S3_BUCKET: Joi.string()
+    .pattern(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
     .required(),
-  STORAGE_ACCESS_KEY_ID: Joi.string().trim().min(1).required(),
-  STORAGE_SECRET_ACCESS_KEY: Joi.string().trim().min(1).required(),
-  AWS_REGION: Joi.forbidden(),
-  S3_BUCKET: Joi.forbidden(),
-  S3_TRANSFER_ACCELERATION_ENABLED: Joi.forbidden(),
-  AWS_ACCESS_KEY_ID: Joi.forbidden(),
-  AWS_SECRET_ACCESS_KEY: Joi.forbidden(),
-  AWS_SESSION_TOKEN: Joi.forbidden(),
   WORKER_INSTALLATION_CATALOG_PATH: Joi.string()
     .pattern(/^\//)
     .max(4096)
     .optional(),
   FIREBASE_PROJECT_ID: Joi.string().trim().min(1).required(),
   FIREBASE_WEB_API_KEY: Joi.string().trim().min(1).required(),
-  GOOGLE_DESKTOP_CLIENT_ID: Joi.string()
-    .pattern(/^[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com(?![\s\S])/)
-    .max(256)
-    .optional(),
-  GOOGLE_DESKTOP_CLIENT_SECRET: Joi.string()
-    .pattern(/^[\x21-\x7e]{1,256}(?![\s\S])/)
-    .optional(),
   FIREBASE_SERVICE_ACCOUNT_BASE64: Joi.string().trim().base64().optional(),
   RATE_LIMIT_HASH_SECRET: Joi.string().required(),
   GOOGLE_APPLICATION_CREDENTIALS: Joi.string().min(1).optional(),
   FIREBASE_AUTH_EMULATOR_HOST: Joi.string().min(1).optional(),
   AUDIO_PROCESSING_ENABLED: Joi.boolean().default(false),
-  URL_IMPORT_ENABLED: Joi.boolean().default(false),
-  URL_IMPORT_PROCESSOR_ENABLED: Joi.boolean().default(false),
-  URL_IMPORT_CONCURRENCY: Joi.number().integer().min(1).max(20).default(20),
-  URL_IMPORT_REQUESTS_PER_SECOND: Joi.number()
-    .integer()
-    .min(1)
-    .max(5)
-    .default(5),
-  URL_IMPORT_MAX_OUTSTANDING: Joi.number()
-    .integer()
-    .min(1)
-    .max(100)
-    .default(100),
-  URL_IMPORT_TEMP_ROOT: Joi.string()
-    .pattern(/^\//)
-    .default('/tmp/musicmute-url-imports'),
-  URL_IMPORT_MIN_FREE_BYTES: Joi.number()
-    .integer()
-    .min(50_000_000)
-    .max(10_000_000_000)
-    .default(128_000_000),
-  URL_IMPORT_FFPROBE_PATH: Joi.string()
-    .pattern(/^\//)
-    .default('/usr/bin/ffprobe'),
-  AUDIO_ACQUISITION_API_URL: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .optional(),
-  AUDIO_ACQUISITION_API_KEY: Joi.string().min(32).max(256).optional(),
   APK_AAPT2_PATH: Joi.string().pattern(/^\//).max(4096).optional(),
   APK_APKSIGNER_PATH: Joi.string().pattern(/^\//).max(4096).optional(),
   APK_EXPECTED_PACKAGE_ID: Joi.string()
@@ -195,40 +117,18 @@ const schema = Joi.object({
     .optional(),
   PROCESSING_URL_SECONDS: Joi.number().integer().min(60).max(600).default(600),
   CORS_ORIGINS: Joi.string().allow('').default(''),
-  PUBLIC_SITE_ORIGIN: Joi.string()
-    .uri({ scheme: ['https'] })
-    .default(PUBLIC_POLICY_DEFAULTS.publicOrigin),
   PUBLIC_SUPPORT_EMAIL: Joi.string()
     .email({ tlds: { allow: false } })
     .max(254)
-    .default(PUBLIC_POLICY_DEFAULTS.supportEmail),
-  PUBLIC_DEVELOPER_NAME: Joi.string()
-    .trim()
-    .min(1)
-    .max(160)
-    .default(PUBLIC_POLICY_DEFAULTS.developerName),
-  PUBLIC_DELETION_TIMEFRAME: Joi.string()
-    .trim()
-    .min(1)
-    .max(2000)
-    .default(PUBLIC_POLICY_DEFAULTS.deletionTimeframe),
-  PUBLIC_RETENTION_NOTICE: Joi.string()
-    .trim()
-    .min(1)
-    .max(4000)
-    .default(PUBLIC_POLICY_DEFAULTS.retentionNotice),
+    .optional(),
+  PUBLIC_DEVELOPER_NAME: Joi.string().trim().min(1).max(160).optional(),
+  PUBLIC_DELETION_TIMEFRAME: Joi.string().trim().min(1).max(1000).optional(),
+  PUBLIC_RETENTION_NOTICE: Joi.string().trim().min(1).max(4000).optional(),
   TRUST_PROXY: Joi.string().valid('false', '1').default('false'),
   RATE_LIMIT: Joi.number().integer().min(1).max(10000).default(60),
-  PUBLIC_RELEASE_GRANTS_PER_MINUTE: allowance(300),
   RATE_IP_CEILING_PER_MINUTE: allowance(600),
   RATE_TTL_MS: Joi.number().integer().min(1000).max(3600000).default(60000),
   AUTH_UID_PER_MINUTE: allowance(AUTH_RATE_LIMIT_DEFAULTS.AUTH_UID_PER_MINUTE),
-  DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE: allowance(
-    AUTH_RATE_LIMIT_DEFAULTS.DESKTOP_GOOGLE_EXCHANGE_IP_PER_MINUTE,
-  ),
-  DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE: allowance(
-    AUTH_RATE_LIMIT_DEFAULTS.DESKTOP_GOOGLE_EXCHANGE_SERVICE_PER_MINUTE,
-  ),
   PROCESSING_READ_UID_PER_MINUTE: allowance(
     AUTH_RATE_LIMIT_DEFAULTS.PROCESSING_READ_UID_PER_MINUTE,
   ),
@@ -314,12 +214,6 @@ const schema = Joi.object({
     .min(60)
     .max(300)
     .default(ADMIN_RATE_LIMIT_DEFAULTS.ADMIN_REAUTH_MAX_AGE_SECONDS),
-  ...Object.fromEntries(
-    Object.entries(WORKER_RATE_LIMIT_DEFAULTS).map(([key, value]) => [
-      key,
-      allowance(value),
-    ]),
-  ),
   BODY_LIMIT_BYTES: Joi.number()
     .integer()
     .min(1024)
@@ -338,59 +232,6 @@ export function validateEnvironment(
     );
   }
   const env = result.value as Record<string, unknown>;
-  if (
-    Boolean(env.GOOGLE_DESKTOP_CLIENT_ID) !==
-    Boolean(env.GOOGLE_DESKTOP_CLIENT_SECRET)
-  )
-    throw new Error(
-      'Invalid environment: GOOGLE_DESKTOP_CLIENT_ID, GOOGLE_DESKTOP_CLIENT_SECRET',
-    );
-  const publicSiteOrigin = new URL(String(env.PUBLIC_SITE_ORIGIN));
-  if (
-    publicSiteOrigin.origin !== env.PUBLIC_SITE_ORIGIN ||
-    publicSiteOrigin.username ||
-    publicSiteOrigin.password ||
-    publicSiteOrigin.pathname !== '/' ||
-    publicSiteOrigin.search ||
-    publicSiteOrigin.hash
-  )
-    throw new Error('Invalid environment: PUBLIC_SITE_ORIGIN');
-  const storageEndpoint = new URL(String(env.STORAGE_ENDPOINT));
-  if (
-    storageEndpoint.origin !== env.STORAGE_ENDPOINT ||
-    storageEndpoint.username ||
-    storageEndpoint.password ||
-    storageEndpoint.port ||
-    storageEndpoint.pathname !== '/' ||
-    storageEndpoint.search ||
-    storageEndpoint.hash ||
-    !/^[a-f0-9]{32}\.r2\.cloudflarestorage\.com$/.test(storageEndpoint.hostname)
-  )
-    throw new Error('Invalid environment: STORAGE_ENDPOINT');
-  if (
-    env.URL_IMPORT_ENABLED === true &&
-    (env.URL_IMPORT_PROCESSOR_ENABLED !== true ||
-      env.AUDIO_PROCESSING_ENABLED !== true)
-  )
-    throw new Error('URL importing requires audio processing');
-  if (
-    env.URL_IMPORT_PROCESSOR_ENABLED === true &&
-    (!env.AUDIO_ACQUISITION_API_URL || !env.AUDIO_ACQUISITION_API_KEY)
-  )
-    throw new Error('URL importing requires audio acquisition configuration');
-  if (env.AUDIO_ACQUISITION_API_URL) {
-    const downloader = new URL(String(env.AUDIO_ACQUISITION_API_URL));
-    if (
-      downloader.username ||
-      downloader.password ||
-      downloader.search ||
-      downloader.hash ||
-      downloader.pathname !== '/'
-    )
-      throw new Error(
-        'AUDIO_ACQUISITION_API_URL must be a base URL without credentials',
-      );
-  }
   const production = env.APP_ENV === 'production';
   if (production !== (env.NODE_ENV === 'production'))
     throw new Error('APP_ENV and NODE_ENV disagree');
@@ -398,9 +239,7 @@ export function validateEnvironment(
     for (const key of [
       'MONGODB_URI',
       'REDIS_URL',
-      'STORAGE_BUCKET',
-      'STORAGE_ACCESS_KEY_ID',
-      'STORAGE_SECRET_ACCESS_KEY',
+      'S3_BUCKET',
       'FIREBASE_PROJECT_ID',
       'FIREBASE_WEB_API_KEY',
       'RATE_LIMIT_HASH_SECRET',

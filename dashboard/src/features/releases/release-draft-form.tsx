@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type {
   ReleasePlatform,
   ReleaseProposal,
-  ReleaseWriteSource,
+  ReleaseSource,
 } from "@/api/contracts";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,10 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  GOOGLE_PLAY_LISTING_URL,
-  type ReleaseDraftInput,
-} from "./releases-api";
+import type { ReleaseDraftInput } from "./releases-api";
 
 interface ReleaseDraftFormProps {
   open: boolean;
@@ -35,7 +32,7 @@ interface ReleaseDraftFormProps {
   onSubmit(input: ReleaseDraftInput & { reason: string }): Promise<void>;
   getProposal?(
     platform: ReleasePlatform,
-    source: ReleaseWriteSource,
+    source: ReleaseSource,
   ): Promise<ReleaseProposal>;
   initial?: ReleaseDraftInput;
 }
@@ -72,8 +69,9 @@ function OpenReleaseDraftForm({
   const [platform, setPlatform] = useState<ReleasePlatform>(
     initial?.platform ?? "android",
   );
-  const source: ReleaseWriteSource =
-    platform === "ios" ? "app_store" : "google_play";
+  const [source, setSource] = useState<ReleaseSource>(
+    initial?.source ?? "direct_apk",
+  );
   const [versionName, setVersionName] = useState(initial?.versionName ?? "");
   const [buildNumber, setBuildNumber] = useState(
     initial ? String(initial.buildNumber) : "",
@@ -115,8 +113,12 @@ function OpenReleaseDraftForm({
     };
   }, [getProposal, initial, platform, source]);
 
-  const selectChannel = (nextPlatform: ReleasePlatform) => {
+  const selectChannel = (
+    nextPlatform: ReleasePlatform,
+    nextSource: ReleaseSource,
+  ) => {
     setPlatform(nextPlatform);
+    setSource(nextSource);
     if (!initial) {
       setProposal(null);
       setProposalRequestError(null);
@@ -134,7 +136,7 @@ function OpenReleaseDraftForm({
     !initial && !!getProposal && !proposal && !proposalRequestError;
 
   const build = Number(buildNumber);
-  const needsStoreUrl = platform === "ios";
+  const needsStore = source !== "direct_apk";
   const versionIsNewer =
     !!initial ||
     (!!proposal &&
@@ -150,7 +152,7 @@ function OpenReleaseDraftForm({
     buildIsNewer &&
     changelogEn.trim() &&
     reason.trim() &&
-    (!needsStoreUrl || /^https:\/\//.test(storeUrl));
+    (!needsStore || /^https:\/\//.test(storeUrl));
 
   const submit = async () => {
     setBusy(true);
@@ -162,7 +164,7 @@ function OpenReleaseDraftForm({
         versionName: versionName.trim(),
         buildNumber: build,
         changelogEn: changelogEn.trim(),
-        storeUrl: needsStoreUrl ? storeUrl.trim() : GOOGLE_PLAY_LISTING_URL,
+        storeUrl: needsStore ? storeUrl.trim() : null,
         reason: reason.trim(),
       });
       onOpenChange(false);
@@ -185,8 +187,8 @@ function OpenReleaseDraftForm({
             {initial ? "Edit release draft" : "Create release draft"}
           </DialogTitle>
           <DialogDescription>
-            Drafts record the version served by the store. Publication is a
-            separate reviewed step.
+            Draft lifecycle and artifact verification remain separate from
+            publication.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -195,7 +197,14 @@ function OpenReleaseDraftForm({
             <Select
               value={platform}
               onValueChange={(value) => {
-                selectChannel(value as ReleasePlatform);
+                const nextPlatform = value as ReleasePlatform;
+                const nextSource =
+                  nextPlatform === "ios"
+                    ? "app_store"
+                    : source === "app_store"
+                      ? "direct_apk"
+                      : source;
+                selectChannel(nextPlatform, nextSource);
               }}
             >
               <SelectTrigger id="release-platform" aria-label="Platform">
@@ -209,7 +218,12 @@ function OpenReleaseDraftForm({
           </div>
           <div className="space-y-2">
             <Label htmlFor="release-distribution">Distribution</Label>
-            <Select value={source} disabled>
+            <Select
+              value={source}
+              onValueChange={(value) =>
+                selectChannel(platform, value as ReleaseSource)
+              }
+            >
               <SelectTrigger
                 id="release-distribution"
                 aria-label="Distribution"
@@ -218,7 +232,10 @@ function OpenReleaseDraftForm({
               </SelectTrigger>
               <SelectContent>
                 {platform === "android" ? (
-                  <SelectItem value="google_play">Google Play</SelectItem>
+                  <>
+                    <SelectItem value="direct_apk">Direct APK</SelectItem>
+                    <SelectItem value="google_play">Google Play</SelectItem>
+                  </>
                 ) : (
                   <SelectItem value="app_store">App Store</SelectItem>
                 )}
@@ -278,14 +295,7 @@ function OpenReleaseDraftForm({
               </p>
             ) : null}
           </div>
-          {platform === "android" ? (
-            <p className="text-sm text-muted-foreground sm:col-span-2">
-              Upload the Android App Bundle in Play Console. This form records
-              the version name and build number Play is serving. MusicMute does
-              not receive the file.
-            </p>
-          ) : null}
-          {needsStoreUrl ? (
+          {needsStore ? (
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="store-url">Store URL</Label>
               <Input

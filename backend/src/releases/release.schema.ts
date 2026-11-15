@@ -1,4 +1,3 @@
-import { isStorageEtag } from '../storage/object-identity.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import type {
@@ -15,7 +14,7 @@ import {
 @Schema({ _id: false, strict: 'throw' })
 export class ReleaseArtifact {
   @Prop({ required: true }) key!: string;
-  @Prop({ required: true, validate: isStorageEtag }) etag!: string;
+  @Prop({ required: true }) versionId!: string;
   @Prop({ required: true, min: 1, max: 268435456 }) bytes!: number;
   @Prop({ required: true, match: /^[a-f0-9]{64}$/ }) sha256Hex!: string;
   @Prop({ required: true, match: /^[a-f0-9]{64}$/ }) signerSha256Hex!: string;

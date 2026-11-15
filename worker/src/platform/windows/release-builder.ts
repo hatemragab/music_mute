@@ -100,10 +100,6 @@ export async function buildWindowsRelease(
       join(temporary, "installer", "manage-windows-service.ps1"),
     );
     await copyFile(
-      join(workerRoot, "scripts", "windows-service-functions.ps1"),
-      join(temporary, "installer", "windows-service-functions.ps1"),
-    );
-    await copyFile(
       join(nodeRoot, "node.exe"),
       join(temporary, "runtime", "node", "node.exe"),
     );

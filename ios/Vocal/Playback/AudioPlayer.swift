@@ -2,27 +2,18 @@ import AVFoundation
 import MediaPlayer
 
 @MainActor final class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
-  @Published private(set) var original = false
   @Published private(set) var currentID: UUID?
   @Published private(set) var playing = false
   @Published private(set) var loading = false
   @Published private(set) var position: Double = 0
   @Published private(set) var duration: Double = 0
-  @Published private(set) var speed: Float = 1
-  @Published private(set) var volume: Float = 1
   @Published var failed = false
-  var onFinished: (() -> Void)?
-  var onNext: (() -> Void)?
-  var onPrevious: (() -> Void)?
-  var onPlaybackStarted: ((UUID) -> Void)?
   private var player: AVAudioPlayer?
   private var title = ""
   private var timer: Timer?
   private var notifications: [NSObjectProtocol] = []
   private var remoteTargets: [(MPRemoteCommand, Any)] = []
   private var resumeAfterInterruption = false
-  private var pendingPlaybackStart = false
-  private var finishedPlayback = false
 
   override init() {
     super.init()
@@ -48,22 +39,6 @@ import MediaPlayer
         commands.playCommand,
         commands.playCommand.addTarget { [weak self] _ in
           Task { @MainActor in self?.resume() }
-          return .success
-        }
-      ))
-    remoteTargets.append(
-      (
-        commands.nextTrackCommand,
-        commands.nextTrackCommand.addTarget { [weak self] _ in
-          Task { @MainActor in self?.onNext?() }
-          return .success
-        }
-      ))
-    remoteTargets.append(
-      (
-        commands.previousTrackCommand,
-        commands.previousTrackCommand.addTarget { [weak self] _ in
-          Task { @MainActor in self?.onPrevious?() }
           return .success
         }
       ))
@@ -99,67 +74,37 @@ import MediaPlayer
       ))
   }
 
-  func toggle(id: UUID, title: String, file: URL?) {
-    LocalDiagnostics.emit(
-      "action.playback_toggle", category: "action",
-      data: [
-        "trackId": id.uuidString.lowercased(), "fileAvailable": file != nil, "result": "requested",
-      ])
+  func toggle(_ record: AudioRecord, file: URL?) {
     guard let file else {
       failed = true
       return
     }
     failed = false
-    if currentID != id || player == nil {
+    if currentID != record.id || player == nil {
       pause()
       loading = true
       do {
         let audio = try AVAudioPlayer(contentsOf: file)
         audio.delegate = self
-        audio.enableRate = true
-        audio.rate = speed
-        audio.volume = volume
-        guard audio.prepareToPlay() else { throw CocoaError(.fileReadCorruptFile) }
+        guard audio.prepareToPlay() else { throw AudioFailure.invalidAudio }
         player = audio
-        currentID = id
-        original = false
-        self.title = title
+        currentID = record.id
+        title = record.title
         duration = audio.duration
         position = 0
-        pendingPlaybackStart = true
-        finishedPlayback = false
         loading = false
         resume()
       } catch {
         player = nil
-        pendingPlaybackStart = false
-        finishedPlayback = false
         loading = false
         failed = true
       }
     } else if playing {
       pause()
     } else {
+      if position >= duration - 0.1 { seek(to: 0) }
       resume()
     }
-  }
-
-  func replaceSource(file: URL, original: Bool, position: Double) throws {
-    let audio = try AVAudioPlayer(contentsOf: file)
-    guard audio.prepareToPlay() else { throw CocoaError(.fileReadCorruptFile) }
-    let wasPlaying = playing
-    pause()
-    audio.delegate = self
-    audio.enableRate = true
-    audio.rate = speed
-    audio.volume = volume
-    player = audio
-    self.original = original
-    duration = audio.duration
-    audio.currentTime = min(max(0, position), duration)
-    self.position = audio.currentTime
-    failed = false
-    if wasPlaying { resume() } else { updateNowPlaying() }
   }
 
   func resume() {
@@ -167,19 +112,10 @@ import MediaPlayer
     do {
       try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
       try AVAudioSession.sharedInstance().setActive(true)
-      if finishedPlayback {
-        player.currentTime = 0
-        position = 0
-      }
       playing = player.play()
       failed = !playing
       timer?.invalidate()
       if playing {
-        finishedPlayback = false
-        if pendingPlaybackStart, let currentID {
-          pendingPlaybackStart = false
-          onPlaybackStarted?(currentID)
-        }
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
           Task { @MainActor in
             guard let self else { return }
@@ -191,16 +127,7 @@ import MediaPlayer
       updateNowPlaying()
     } catch { failed = true }
   }
-
-  func restart() {
-    guard player != nil else { return }
-    pendingPlaybackStart = true
-    seek(to: 0)
-    resume()
-  }
-
   func stopAndClear() {
-    original = false
     player?.stop()
     player = nil
     timer?.invalidate()
@@ -211,15 +138,11 @@ import MediaPlayer
     duration = 0
     title = ""
     resumeAfterInterruption = false
-    pendingPlaybackStart = false
-    finishedPlayback = false
     MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
   }
 
   func pause() {
-    LocalDiagnostics.emit(
-      "action.playback_pause", category: "action", data: ["result": "requested"])
     player?.pause()
     playing = false
     loading = false
@@ -234,30 +157,15 @@ import MediaPlayer
     player?.currentTime = position
     updateNowPlaying()
   }
-  func setSpeed(_ value: Float) {
-    guard value.isFinite else { return }
-    speed = min(2, max(0.5, value))
-    player?.enableRate = true
-    player?.rate = speed
-    updateNowPlaying()
-  }
-  func setVolume(_ value: Float) {
-    guard value.isFinite else { return }
-    volume = min(1, max(0, value))
-    player?.volume = volume
-  }
   nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
     Task { @MainActor in
       guard self.player === player else { return }
       self.playing = false
       self.position = self.duration
       self.failed = !flag
-      self.finishedPlayback = flag
-      self.pendingPlaybackStart = flag
       self.timer?.invalidate()
       self.timer = nil
       self.updateNowPlaying()
-      if flag { self.onFinished?() }
     }
   }
   nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
@@ -272,7 +180,7 @@ import MediaPlayer
     MPNowPlayingInfoCenter.default().nowPlayingInfo = [
       MPMediaItemPropertyTitle: title, MPMediaItemPropertyPlaybackDuration: duration,
       MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
-      MPNowPlayingInfoPropertyPlaybackRate: playing ? speed : 0.0,
+      MPNowPlayingInfoPropertyPlaybackRate: playing ? 1.0 : 0.0,
       MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
     ]
   }

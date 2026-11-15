@@ -29,24 +29,19 @@ describe('create-job HTTP declaration', () => {
       await transform({
         ...payload,
         sourceTitle: '  لقاء صوتي  ',
-        sourceKind: 'file',
+        sourceKind: 'url',
+        sourceUrl: '  https://www.youtube.com/watch?v=jNQXAC9IVRw  ',
         clientStartedAt: '2026-09-10T10:00:00.000Z',
       }),
     ).toMatchObject({
       sourceTitle: 'لقاء صوتي',
-      sourceKind: 'file',
+      sourceKind: 'url',
+      sourceUrl: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
       clientStartedAt: '2026-09-10T10:00:00.000Z',
     });
   });
-  it('rejects client URL uploads; server imports use the dedicated endpoint', async () => {
-    await expect(
-      transform({ ...payload, source: 'youtube' }),
-    ).rejects.toThrow();
-    await expect(
-      transform({ ...payload, sourceKind: 'url' }),
-    ).rejects.toThrow();
+  it('rejects non-canonical YouTube source URLs', async () => {
     for (const sourceUrl of [
-      'https://www.youtube.com/watch?v=jNQXAC9IVRw',
       'https://youtu.be/jNQXAC9IVRw',
       'https://www.youtube.com/watch?v=jNQXAC9IVRw&t=5',
       'https://example.test/watch?v=jNQXAC9IVRw',
@@ -88,21 +83,18 @@ describe('create-job HTTP declaration', () => {
         ...payload,
         input: {
           ...payload.input,
-          bytes: 100_000_000,
-          durationSeconds: 1_800,
+          bytes: 50_000_000,
+          durationSeconds: 1_200,
         },
       }),
     ).resolves.toBeInstanceOf(CreateJobDto);
     await expect(
-      transform({
-        ...payload,
-        input: { ...payload.input, bytes: 100_000_001 },
-      }),
+      transform({ ...payload, input: { ...payload.input, bytes: 50_000_001 } }),
     ).rejects.toThrow();
     await expect(
       transform({
         ...payload,
-        input: { ...payload.input, durationSeconds: 1_800.001 },
+        input: { ...payload.input, durationSeconds: 1_200.001 },
       }),
     ).rejects.toThrow();
   });

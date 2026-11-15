@@ -7,11 +7,6 @@ import {
   type WorkerProvider,
   type WorkerRecipeId,
 } from "../../protocol/v1/protocol.js";
-import {
-  MAX_RETRY_DELAY_MS,
-  retryAfterMilliseconds,
-} from "../runtime/retry-after.js";
-import { fromWireCase, toWireCase } from "../runtime/wire-case.js";
 
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
@@ -39,7 +34,6 @@ export interface WorkerHardwareReport {
 }
 
 export interface WorkerRuntimeReport {
-  installationProfile?: "windows-user";
   workerVersion: string;
   protocolVersion: typeof WORKER_PROTOCOL_VERSION;
   manifestDigest: string;
@@ -98,7 +92,6 @@ export interface InstallationArtifactGrant {
 
 export interface InstallationReleaseGrant extends InstallationArtifactGrant {
   version: string;
-  signed?: unknown;
 }
 
 export interface InstallationModelDescriptor {
@@ -114,26 +107,11 @@ export interface InstallationModelDescriptor {
 
 export interface InstallationArtifactsResult {
   schemaVersion: 1;
-  installationProfile?: "windows-user";
   platform: WorkerPlatform;
   release: InstallationReleaseGrant;
   model: InstallationModelDescriptor;
   fixture: InstallationArtifactGrant;
 }
-export interface StoreQualificationArtifactsResult {
-  schemaVersion: 1;
-  purpose: "store-qualification-data";
-  platform: "windows-amd64";
-  installationProfile: "windows-user";
-  model: InstallationModelDescriptor;
-  fixture: InstallationArtifactGrant;
-}
-/** Same existing Kim model; this descriptor authorizes data integrity only. */
-export const STORE_QUALIFICATION_MODEL = Object.freeze({
-  filename: "Kim_Vocal_2.onnx",
-  bytes: 66_759_214,
-  sha256: "ce74ef3b6a6024ce44211a07be9cf8bc6d87728cc852a68ab34eb8e58cde9c8b",
-});
 
 export interface QualificationUploadGrant {
   method: "PUT";
@@ -172,7 +150,6 @@ export class WorkerEnrollmentError extends Error {
     readonly code: string,
     readonly status: number,
     readonly retryable: boolean,
-    readonly retryAfterMs?: number,
   ) {
     super(`Worker enrollment request failed (${code})`);
     this.name = "WorkerEnrollmentError";
@@ -212,38 +189,20 @@ export class WorkerEnrollmentClient {
     installationCredential: string,
     platform: WorkerPlatform,
     signal?: AbortSignal,
-    installationProfile?: "windows-user",
   ): Promise<InstallationArtifactsResult> {
     assertUuid(installationId, "Installation ID");
     assertCredential(installationCredential, "Installation credential");
     oneOf(platform, WORKER_PLATFORMS, "worker platform");
-    if (
-      installationProfile !== undefined &&
-      (installationProfile !== "windows-user" || platform !== "windows-amd64")
-    )
-      throw new TypeError("Installation artifact profile is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/installations/${installationId}/artifacts`,
+        `worker/v1/installations/${installationId}/artifacts`,
         installationCredential,
-        {
-          platform,
-          ...(installationProfile === undefined ? {} : { installationProfile }),
-        },
+        { platform },
         signal,
       ),
-      new Set([
-        "schemaVersion",
-        "platform",
-        "installationProfile",
-        "release",
-        "model",
-        "fixture",
-      ]),
+      new Set(["schemaVersion", "platform", "release", "model", "fixture"]),
       "Installation artifacts response",
     );
-    if (value.installationProfile !== installationProfile)
-      throw new TypeError("Installation artifact profile changed");
     if (value.schemaVersion !== 1)
       throw new TypeError("Installation artifacts schema is invalid");
     const responsePlatform = oneOf(
@@ -275,99 +234,7 @@ export class WorkerEnrollmentClient {
     return {
       schemaVersion: 1,
       platform: responsePlatform,
-      ...(installationProfile === undefined ? {} : { installationProfile }),
       release,
-      model,
-      fixture,
-    };
-  }
-
-  async storeQualificationArtifacts(
-    installationId: string,
-    installationCredential: string,
-    signal?: AbortSignal,
-  ): Promise<StoreQualificationArtifactsResult> {
-    assertUuid(installationId, "Installation ID");
-    assertCredential(installationCredential, "Installation credential");
-    const value = strictRecord(
-      await this.request(
-        `worker/installations/${installationId}/store-qualification-artifacts`,
-        installationCredential,
-        {},
-        signal,
-      ),
-      new Set([
-        "schemaVersion",
-        "purpose",
-        "platform",
-        "installationProfile",
-        "model",
-        "fixture",
-      ]),
-      "Store qualification data",
-      true,
-    );
-    if (
-      value.schemaVersion !== 1 ||
-      value.purpose !== "store-qualification-data" ||
-      value.platform !== "windows-amd64" ||
-      value.installationProfile !== "windows-user"
-    )
-      throw new TypeError("Store qualification data identity is invalid");
-    strictRecord(
-      value.model,
-      new Set([
-        "filename",
-        "bytes",
-        "sha256",
-        "contentType",
-        "url",
-        "sourcePolicy",
-        "allowedHosts",
-        "maxRedirects",
-      ]),
-      "Store model data",
-      true,
-    );
-    strictRecord(
-      value.fixture,
-      new Set([
-        "filename",
-        "bytes",
-        "sha256",
-        "contentType",
-        "url",
-        "expiresAt",
-      ]),
-      "Store fixture data",
-      true,
-    );
-    const model = parseModelDescriptor(value.model, false),
-      fixture = parseArtifactGrant(
-        value.fixture,
-        "fixture",
-        "audio/wav",
-        false,
-        false,
-      );
-    if (
-      model.filename !== STORE_QUALIFICATION_MODEL.filename ||
-      model.bytes !== STORE_QUALIFICATION_MODEL.bytes ||
-      model.sha256 !== STORE_QUALIFICATION_MODEL.sha256 ||
-      fixture.bytes < 44 ||
-      fixture.bytes > 64 * 1024 ** 2 ||
-      !/\.wav$/iu.test(fixture.filename) ||
-      Date.parse(fixture.expiresAt) <= Date.now() ||
-      fixture.filename === model.filename
-    )
-      throw new TypeError(
-        "Store qualification data differs from approved inputs",
-      );
-    return {
-      schemaVersion: 1,
-      purpose: "store-qualification-data",
-      platform: "windows-amd64",
-      installationProfile: "windows-user",
       model,
       fixture,
     };
@@ -382,7 +249,7 @@ export class WorkerEnrollmentClient {
     assertUuid(requestId, "Exchange request ID");
     const value = strictRecord(
       await this.request(
-        "worker/installations",
+        "worker/v1/installations",
         enrollmentCredential,
         { requestId },
         signal,
@@ -436,7 +303,7 @@ export class WorkerEnrollmentClient {
     assertInstallationReport(report);
     const value = strictRecord(
       await this.request(
-        `worker/installations/${installationId}/reports`,
+        `worker/v1/installations/${installationId}/report`,
         installationCredential,
         { requestId, expectedRevision, ...report },
         signal,
@@ -485,7 +352,7 @@ export class WorkerEnrollmentClient {
       throw new TypeError("Qualification output digest is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/installations/${installationId}/qualification-output-grants`,
+        `worker/v1/installations/${installationId}/qualification-output/grant`,
         installationCredential,
         { requestId, bytes, sha256 },
         signal,
@@ -532,19 +399,19 @@ export class WorkerEnrollmentClient {
     installationId: string,
     installationCredential: string,
     requestId: string,
-    etag: string,
+    versionId: string,
     signal?: AbortSignal,
   ): Promise<QualificationUploadConfirmation> {
     assertUuid(installationId, "Installation ID");
     assertCredential(installationCredential, "Installation credential");
     assertUuid(requestId, "Qualification confirmation request ID");
-    if (!/^"[\x21\x23-\x7e]{1,1022}"$/u.test(etag))
-      throw new TypeError("Qualification upload ETag is invalid");
+    if (!/^[A-Za-z0-9+/=_.,:-]{1,1024}$/u.test(versionId))
+      throw new TypeError("Qualification upload version is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/installations/${installationId}/qualification-output-confirmations`,
+        `worker/v1/installations/${installationId}/qualification-output/confirm`,
         installationCredential,
-        { requestId, etag },
+        { requestId, versionId },
         signal,
       ),
       new Set(["requestId", "confirmed", "replayed"]),
@@ -583,7 +450,7 @@ export class WorkerEnrollmentClient {
       throw new TypeError("Machine credential digest is invalid");
     const value = strictRecord(
       await this.request(
-        `worker/installations/${installationId}/activations`,
+        `worker/v1/installations/${installationId}/activate`,
         installationCredential,
         {
           requestId,
@@ -617,7 +484,7 @@ export class WorkerEnrollmentClient {
     const url = new URL(path, this.baseUrl);
     if (url.origin !== this.baseUrl.origin)
       throw new TypeError("Enrollment request escaped the configured origin");
-    const serialized = JSON.stringify(toWireCase(body));
+    const serialized = JSON.stringify(body);
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       if (signal?.aborted) throw signal.reason;
@@ -637,7 +504,7 @@ export class WorkerEnrollmentClient {
           },
           body: serialized,
         });
-        if (response.ok) return fromWireCase(await readJson(response));
+        if (response.ok) return await readJson(response);
         const error = await responseError(response);
         if (!error.retryable || attempt === this.maxAttempts) throw error;
         lastError = error;
@@ -648,20 +515,7 @@ export class WorkerEnrollmentClient {
         lastError = error;
         if (attempt === this.maxAttempts) break;
       }
-      if (
-        lastError instanceof WorkerEnrollmentError &&
-        lastError.status === 429
-      ) {
-        if (lastError.retryAfterMs !== undefined) {
-          if (lastError.retryAfterMs > MAX_RETRY_DELAY_MS) throw lastError;
-          await abortableDelay(lastError.retryAfterMs, signal);
-          continue;
-        }
-      }
-      await abortableDelay(
-        Math.min(MAX_RETRY_DELAY_MS, 200 * 2 ** (attempt - 1)),
-        signal,
-      );
+      await abortableDelay(Math.min(2_000, 200 * 2 ** (attempt - 1)), signal);
     }
     if (lastError instanceof WorkerEnrollmentError) throw lastError;
     throw new WorkerEnrollmentError("NETWORK_UNAVAILABLE", 0, true);
@@ -811,7 +665,6 @@ function parseArtifactGrant(
   return {
     version: boundedText(record.version, "installation release version", 100),
     ...artifact,
-    ...(record.signed === undefined ? {} : { signed: record.signed }),
   };
 }
 
@@ -853,20 +706,13 @@ function parseQualificationUploadGrant(
     throw new TypeError("Qualification upload method is invalid");
   const headers = strictRecord(
     record.headers,
-    new Set([
-      "Content-Type",
-      "x-amz-checksum-sha256",
-      "x-amz-meta-sha256",
-      "If-None-Match",
-    ]),
+    new Set(["Content-Type", "x-amz-checksum-sha256", "If-None-Match"]),
     "Qualification upload headers",
-    true,
   );
   const expectedChecksum = Buffer.from(sha256, "hex").toString("base64");
   if (
     headers["Content-Type"] !== "audio/mpeg" ||
     headers["x-amz-checksum-sha256"] !== expectedChecksum ||
-    headers["x-amz-meta-sha256"] !== expectedChecksum ||
     headers["If-None-Match"] !== "*"
   )
     throw new TypeError("Qualification upload headers are invalid");
@@ -880,7 +726,6 @@ function parseQualificationUploadGrant(
     headers: {
       "Content-Type": "audio/mpeg",
       "x-amz-checksum-sha256": expectedChecksum,
-      "x-amz-meta-sha256": expectedChecksum,
       "If-None-Match": "*",
     },
     expiresAt: isoDate(record.expiresAt, "qualification upload expiry"),
@@ -901,7 +746,6 @@ export function assertInstallationReport(
       "summary",
     ]),
     "Installation report",
-    true,
   );
   boundedText(value.label, "report label", 120);
   if (value.groupId !== undefined)
@@ -911,7 +755,6 @@ export function assertInstallationReport(
     value.hardware,
     new Set(["os", "osBuild", "architecture", "cpu", "memoryBytes", "gpus"]),
     "Hardware report",
-    true,
   );
   boundedText(hardware.os, "hardware OS", 100);
   boundedText(hardware.osBuild, "hardware OS build", 100);
@@ -934,7 +777,6 @@ export function assertInstallationReport(
       item,
       new Set(["id", "name", "driverVersion", "memoryBytes"]),
       "GPU report",
-      true,
     );
     boundedText(gpu.id, "GPU ID", 128);
     boundedText(gpu.name, "GPU name", 200);
@@ -950,10 +792,8 @@ export function assertInstallationReport(
       "manifestDigest",
       "modelDigest",
       "providerRuntimeVersion",
-      "installationProfile",
     ]),
     "Runtime report",
-    true,
   );
   boundedText(runtime.workerVersion, "worker version", 100);
   if (runtime.protocolVersion !== WORKER_PROTOCOL_VERSION)
@@ -967,16 +807,6 @@ export function assertInstallationReport(
     throw new TypeError("Runtime digest is invalid");
   boundedText(runtime.providerRuntimeVersion, "provider runtime version", 100);
   if (
-    runtime.installationProfile !== undefined &&
-    runtime.installationProfile !== "windows-user"
-  )
-    throw new TypeError("Worker installation profile is unsupported");
-  if (
-    runtime.installationProfile === "windows-user" &&
-    (hardware.os !== "Windows" || hardware.architecture !== "x86_64")
-  )
-    throw new TypeError("Windows user installation hardware is invalid");
-  if (
     !Array.isArray(value.capabilities) ||
     value.capabilities.length < 1 ||
     value.capabilities.length > 16
@@ -987,17 +817,9 @@ export function assertInstallationReport(
       item,
       new Set(["platform", "provider", "gpuId", "recipeIds", "maxSlots"]),
       "Worker capability",
-      true,
     );
     oneOf(capability.platform, WORKER_PLATFORMS, "worker platform");
     oneOf(capability.provider, WORKER_PROVIDERS, "worker provider");
-    if (
-      runtime.installationProfile === "windows-user" &&
-      (capability.platform !== "windows-amd64" ||
-        capability.provider !== "directml" ||
-        capability.maxSlots !== 1)
-    )
-      throw new TypeError("Windows user installation capability is invalid");
     boundedText(capability.gpuId, "capability GPU ID", 128);
     if (
       !Array.isArray(capability.recipeIds) ||
@@ -1021,24 +843,16 @@ function validatedBaseUrl(value: string, allowInsecureLoopback: boolean): URL {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash)
     throw new TypeError("Enrollment URL contains forbidden components");
-  if (url.pathname !== "/")
-    throw new TypeError("Enrollment URL must be an API origin");
   const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
   if (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
     throw new TypeError("Enrollment URL must use HTTPS");
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return url;
 }
 
-async function readJson(
-  response: Response,
-  mediaType = "application/json",
-): Promise<unknown> {
-  const contentType = response.headers
-    .get("content-type")
-    ?.split(";", 1)[0]
-    ?.trim()
-    .toLowerCase();
-  if (contentType !== mediaType)
+async function readJson(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json"))
     throw new WorkerEnrollmentError("RESPONSE_INVALID", response.status, false);
   const contentLength = Number(response.headers.get("content-length") ?? "0");
   if (contentLength > RESPONSE_LIMIT_BYTES)
@@ -1079,17 +893,12 @@ async function responseError(
   let code = `HTTP_${response.status}`;
   try {
     const body = strictRecord(
-      await readJson(response, "application/problem+json"),
-      new Set(["type", "title", "status", "detail", "code", "request_id"]),
+      await readJson(response),
+      new Set(["statusCode", "code", "message", "path", "timestamp"]),
       "Enrollment error response",
       false,
     );
-    if (
-      body.type === "about:blank" &&
-      body.status === response.status &&
-      typeof body.code === "string" &&
-      /^[A-Z][A-Z0-9_]{1,79}$/.test(body.code)
-    )
+    if (typeof body.code === "string" && body.code.length <= 100)
       code = body.code;
   } catch {
     // The bounded status is sufficient when an upstream omitted safe JSON.
@@ -1098,9 +907,6 @@ async function responseError(
     code,
     response.status,
     RETRYABLE_STATUS.has(response.status),
-    response.status === 429
-      ? retryAfterMilliseconds(response.headers.get("retry-after"))
-      : undefined,
   );
 }
 
@@ -1108,7 +914,7 @@ function strictRecord(
   value: unknown,
   allowed: ReadonlySet<string>,
   label: string,
-  rejectUnknown = false,
+  rejectUnknown = true,
 ): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError(`${label} must be an object`);

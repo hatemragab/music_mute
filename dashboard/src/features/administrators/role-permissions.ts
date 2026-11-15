@@ -9,14 +9,11 @@ export const ROLE_DETAILS: Record<
     description:
       "Full operational access, administrator management, audit, settings and releases.",
     permissions: [
-      "notifications.read",
-      "notifications.send",
       "overview.read",
       "jobs.read",
       "jobs.manage",
       "users.read",
       "users.processing.manage",
-      "users.worker-registration.manage",
       "users.restrictions.manage",
       "users.account-recovery.manage",
       "abuse.read",
@@ -52,7 +49,6 @@ export const ROLE_DETAILS: Record<
       "jobs.manage",
       "users.read",
       "users.processing.manage",
-      "users.worker-registration.manage",
       "users.restrictions.manage",
       "users.account-recovery.manage",
       "abuse.read",

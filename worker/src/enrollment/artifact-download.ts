@@ -17,13 +17,8 @@ import type {
   InstallationModelDescriptor,
 } from "./enrollment-client.js";
 
-import { TransferBudget } from "./transfer-budget.js";
-
 const SHA256 = /^[a-f0-9]{64}$/u;
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024 * 1024;
-// Runtime archives can take more than ten minutes over a slow Wi-Fi connection.
-// Progress still has the separate thirty-second inactivity deadline.
-const ARTIFACT_DOWNLOAD_TIMEOUT_MS = 60 * 60_000;
 
 export interface VerifiedArtifactDownloadOptions {
   url: string;
@@ -34,8 +29,6 @@ export interface VerifiedArtifactDownloadOptions {
   fetch?: typeof fetch;
   allowInsecureLoopback?: boolean;
   timeoutMs?: number;
-  idleTimeoutMs?: number;
-  signal?: AbortSignal;
   allowedRedirectHosts?: readonly string[];
   maxRedirects?: number;
 }
@@ -53,8 +46,6 @@ export interface InstallationArtifactDownloadOptions {
   fetch?: typeof fetch;
   allowInsecureLoopback?: boolean;
   timeoutMs?: number;
-  idleTimeoutMs?: number;
-  signal?: AbortSignal;
   availableDiskBytes?: () => Promise<number>;
 }
 
@@ -86,10 +77,6 @@ export async function downloadInstallationArtifacts(
   }
 
   const common = {
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-    ...(options.idleTimeoutMs === undefined
-      ? {}
-      : { idleTimeoutMs: options.idleTimeoutMs }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.allowInsecureLoopback === undefined
       ? {}
@@ -201,65 +188,36 @@ export async function downloadVerifiedArtifact(
   options: VerifiedArtifactDownloadOptions,
 ): Promise<VerifiedArtifactDownload> {
   validateOptions(options);
-  options.signal?.throwIfAborted();
   await assertProtectedDirectory(dirname(options.outputPath));
   const existing = await verifyExisting(options);
   if (existing) return result(options, true);
 
   const temporary = `${options.outputPath}.${randomUUID()}.tmp`;
   let handle: FileHandle | undefined;
-  let response: Response | undefined;
-  const budget = new TransferBudget(
-    options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS,
-    options.idleTimeoutMs,
-    options.signal,
-  );
   try {
-    budget.signal.throwIfAborted();
-    response = await fetchArtifact(options, budget);
+    const response = await fetchArtifact(options);
     if (!response.ok || response.body === null)
       throw new Error("Artifact download failed");
     assertResponseHeaders(response, options);
 
     handle = await open(temporary, "wx", 0o600);
     const reader = response.body.getReader();
-    const cancelReader = () => {
-      void reader.cancel().catch(() => undefined);
-    };
-    budget.signal.addEventListener("abort", cancelReader, { once: true });
     const digest = createHash("sha256");
     let bytes = 0;
     try {
       while (true) {
-        budget.signal.throwIfAborted();
         const current = await reader.read();
-        budget.signal.throwIfAborted();
         if (current.done) break;
         const chunk = current.value;
         bytes += chunk.byteLength;
         if (bytes > options.expectedBytes)
           throw new TypeError("Artifact download exceeds its declared size");
         digest.update(chunk);
-        if (chunk.byteLength > 0) budget.progress();
-        let offset = 0;
-        while (offset < chunk.byteLength) {
-          budget.signal.throwIfAborted();
-          const { bytesWritten } = await handle.write(
-            chunk,
-            offset,
-            chunk.byteLength - offset,
-          );
-          if (bytesWritten <= 0)
-            throw new Error("Artifact write made no progress");
-          offset += bytesWritten;
-        }
+        await handle.write(chunk);
       }
     } catch (error) {
       await reader.cancel().catch(() => undefined);
       throw error;
-    } finally {
-      budget.signal.removeEventListener("abort", cancelReader);
-      reader.releaseLock();
     }
     if (
       bytes !== options.expectedBytes ||
@@ -269,7 +227,6 @@ export async function downloadVerifiedArtifact(
     await handle.sync();
     await handle.close();
     handle = undefined;
-    budget.signal.throwIfAborted();
     try {
       await link(temporary, options.outputPath);
     } catch (error) {
@@ -283,17 +240,9 @@ export async function downloadVerifiedArtifact(
     if (process.platform !== "win32") await chmod(options.outputPath, 0o600);
     return result(options, false);
   } catch (error) {
-    try {
-      await handle?.close();
-    } catch {
-      throw new Error("Artifact file closure failed; partial file preserved");
-    }
+    await handle?.close().catch(() => undefined);
     await rm(temporary, { force: true });
     throw error;
-  } finally {
-    budget.dispose();
-    if (response?.body && !response.body.locked)
-      await response.body.cancel().catch(() => undefined);
   }
 }
 
@@ -302,7 +251,7 @@ async function downloadModelDescriptor(
   outputRoot: string,
   common: Pick<
     VerifiedArtifactDownloadOptions,
-    "fetch" | "allowInsecureLoopback" | "timeoutMs" | "idleTimeoutMs" | "signal"
+    "fetch" | "allowInsecureLoopback" | "timeoutMs"
   >,
 ): Promise<VerifiedArtifactDownload> {
   return await downloadVerifiedArtifact({
@@ -319,7 +268,6 @@ async function downloadModelDescriptor(
 
 async function fetchArtifact(
   options: VerifiedArtifactDownloadOptions,
-  budget: TransferBudget,
 ): Promise<Response> {
   const allowedHosts = new Set(options.allowedRedirectHosts ?? []);
   let current = new URL(options.url);
@@ -327,15 +275,13 @@ async function fetchArtifact(
     throw new TypeError("Artifact download host is not approved");
   const maximum = options.maxRedirects ?? 0;
   for (let redirect = 0; ; redirect += 1) {
-    budget.signal.throwIfAborted();
     const response = await (options.fetch ?? fetch)(current, {
       method: "GET",
       redirect: "manual",
-      signal: budget.signal,
+      signal: AbortSignal.timeout(options.timeoutMs ?? 10 * 60_000),
       headers: { Accept: options.expectedContentType },
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-    await response.body?.cancel();
     if (redirect >= maximum)
       throw new TypeError("Artifact download exceeded approved redirects");
     const location = response.headers.get("location");
@@ -359,7 +305,7 @@ async function downloadManifestEntry(
   outputRoot: string,
   common: Pick<
     VerifiedArtifactDownloadOptions,
-    "fetch" | "allowInsecureLoopback" | "timeoutMs" | "idleTimeoutMs" | "signal"
+    "fetch" | "allowInsecureLoopback" | "timeoutMs"
   >,
 ): Promise<VerifiedArtifactDownload> {
   return await downloadVerifiedArtifact({
@@ -411,9 +357,9 @@ function validateOptions(options: VerifiedArtifactDownloadOptions): void {
     !/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/u.test(
       options.expectedContentType,
     ) ||
-    !Number.isSafeInteger(options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS) ||
-    (options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS) < 1_000 ||
-    (options.timeoutMs ?? ARTIFACT_DOWNLOAD_TIMEOUT_MS) > 60 * 60_000 ||
+    !Number.isSafeInteger(options.timeoutMs ?? 10 * 60_000) ||
+    (options.timeoutMs ?? 10 * 60_000) < 1_000 ||
+    (options.timeoutMs ?? 10 * 60_000) > 60 * 60_000 ||
     !Number.isSafeInteger(options.maxRedirects ?? 0) ||
     (options.maxRedirects ?? 0) < 0 ||
     (options.maxRedirects ?? 0) > 4 ||

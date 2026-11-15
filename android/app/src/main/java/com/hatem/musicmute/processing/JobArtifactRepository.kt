@@ -11,7 +11,6 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
-import kotlin.math.ceil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -31,34 +30,7 @@ import kotlinx.coroutines.withContext
 fun outputCacheKey(uid: String, jobId: String): String = MessageDigest.getInstance("SHA-256")
     .digest("$uid:$jobId".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-data class ArtifactProgress(
-    val bytes: Long,
-    val totalBytes: Long?,
-    val artifact: String = "output",
-    val estimatedRemainingMs: Long? = null,
-)
-
-internal fun artifactTransferProgress(
-    bytes: Long,
-    totalBytes: Long?,
-    artifact: String,
-    startedAtNanos: Long,
-    nowNanos: Long,
-): ArtifactProgress {
-    val received = bytes.coerceAtLeast(0)
-    val total = totalBytes?.takeIf { it > 0 }
-    val remaining = total?.minus(received)?.coerceAtLeast(0)
-    val elapsedNanos = (nowNanos - startedAtNanos).coerceAtLeast(0)
-    val estimate = when {
-        remaining == null -> null
-        remaining == 0L -> 0L
-        received == 0L || elapsedNanos < 500_000_000L -> null
-        else -> ceil(remaining.toDouble() * elapsedNanos.toDouble() / received / 1_000_000.0)
-            .toLong()
-            .coerceAtLeast(1)
-    }
-    return ArtifactProgress(received, total, artifact, estimate)
-}
+data class ArtifactProgress(val bytes: Long, val totalBytes: Long?)
 enum class ArtifactProblem { NOT_READY, INVALID_OUTPUT, TRANSFER, STORAGE, EXPIRED_GRANT }
 class ArtifactException(val problem: ArtifactProblem) : IOException(problem.name)
 
@@ -71,11 +43,9 @@ class JobArtifactRepository(
     private val isPlayableMp3: (File) -> Boolean = ::isPlayableProcessingMp3,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val now: () -> Instant = Instant::now,
-    private val isPlayableAudio: (File) -> Boolean = { isPlayableProcessingAudio(it) },
-    private val elapsedNanos: () -> Long = System::nanoTime,
 ) {
     private val downloads = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[CoroutineJob]))
-    private data class Request(val session: ProcessingSession, val jobId: String, val revision: Long, val artifact: String = "output")
+    private data class Request(val session: ProcessingSession, val jobId: String, val revision: Long)
     private val lock = Any()
     private var revision = 0L
     private val requests = mutableMapOf<Request, Deferred<File>>()
@@ -108,26 +78,20 @@ class JobArtifactRepository(
         result
     }
 
-    suspend fun ensureOutput(jobId: String): File = ensureArtifact(jobId, "output")
-
-    suspend fun ensureOriginal(jobId: String): File = ensureArtifact(jobId, "input")
-
-    private suspend fun ensureArtifact(jobId: String, artifact: String): File {
+    suspend fun ensureOutput(jobId: String): File {
         if (!jobId.matches(Regex("[a-fA-F0-9]{24}"))) throw JobsFailure(JobsProblem.INVALID_INPUT)
         val (request, task) = synchronized(lock) {
             val session = sessionProvider()?.takeIf { it.uid.isNotBlank() }
                 ?: throw JobsFailure(JobsProblem.UNAUTHENTICATED)
             if (cacheIdentity(session.uid, jobId) in deleted)
                 throw ArtifactException(ArtifactProblem.NOT_READY)
-            val request = Request(session, jobId.lowercase(java.util.Locale.ROOT), revision, artifact)
+            val request = Request(session, jobId.lowercase(java.util.Locale.ROOT), revision)
             val task = requests[request] ?: downloads.async(start = CoroutineStart.LAZY) {
                 try { fetch(request) }
                 finally {
                     synchronized(lock) {
                         requests.remove(request)
-                        if (current(request) && mutableProgress.value[request.jobId]?.artifact == request.artifact) {
-                            mutableProgress.value = mutableProgress.value - request.jobId
-                        }
+                        if (current(request)) mutableProgress.value = mutableProgress.value - request.jobId
                     }
                 }
             }.also { requests[request] = it }
@@ -139,7 +103,7 @@ class JobArtifactRepository(
             currentCoroutineContext().ensureActive()
             synchronized(lock) {
                 requireCurrent(request)
-                if (artifact == "output") mutableAvailability.value = mutableAvailability.value + (request.jobId to true)
+                mutableAvailability.value = mutableAvailability.value + (request.jobId to true)
             }
         }
     }
@@ -178,8 +142,7 @@ class JobArtifactRepository(
         val identity = cacheIdentity(session.uid, normalized)
         val cancelled = synchronized(lock) {
             deleted += identity
-            grantRequestIds.remove("$identity:input")
-            grantRequestIds.remove("$identity:output")
+            grantRequestIds.remove(identity)
             mutableProgress.value = mutableProgress.value - normalized
             mutableAvailability.value = mutableAvailability.value + (normalized to false)
             requests.filterKeys { it.session == session && it.jobId == normalized }.values.toList().also {
@@ -192,8 +155,6 @@ class JobArtifactRepository(
             "${outputCacheKey(session.uid, normalized)}.mp3",
         )
         if (destination.isFile && !destination.delete()) throw ArtifactException(ArtifactProblem.STORAGE)
-        val original = File(File(processingOwnerDirectory(root, session.uid), "originals"), "${outputCacheKey(session.uid, normalized)}.audio")
-        if (original.isFile && !original.delete()) throw ArtifactException(ArtifactProblem.STORAGE)
         destination.parentFile?.listFiles()?.filter {
             it.name.startsWith(destination.name + ".") && it.name.endsWith(".partial")
         }?.forEach { it.delete() }
@@ -210,22 +171,19 @@ class JobArtifactRepository(
     private fun valid(file: File): Boolean = file.isFile && file.length() > 0 &&
         runCatching { isPlayableMp3(file) }.getOrDefault(false)
 
-    private fun validArtifact(file: File, artifact: String): Boolean =
-        if (artifact == "input") runCatching { isPlayableAudio(file) }.getOrDefault(false) else valid(file)
-
     private suspend fun fetch(request: Request): File {
         requireCurrent(request)
-        val directory = File(processingOwnerDirectory(root, request.session.uid), if (request.artifact == "input") "originals" else "outputs")
-        val destination = File(directory, "${outputCacheKey(request.session.uid, request.jobId)}.${if (request.artifact == "input") "audio" else "mp3"}")
+        val directory = File(processingOwnerDirectory(root, request.session.uid), "outputs")
+        val destination = File(directory, "${outputCacheKey(request.session.uid, request.jobId)}.mp3")
         val partial = File(directory, "${destination.name}.${UUID.randomUUID()}.partial")
-        val identity = cacheIdentity(request.session.uid, request.jobId) + ":" + request.artifact
+        val identity = cacheIdentity(request.session.uid, request.jobId)
         var grantRequestId = synchronized(lock) {
             grantRequestIds.getOrPut(identity) { UUID.randomUUID().toString() }
         }
         try {
             if (!destination.canonicalPath.startsWith(root.canonicalPath + File.separator))
                 throw ArtifactException(ArtifactProblem.STORAGE)
-            if (validArtifact(destination, request.artifact)) {
+            if (valid(destination)) {
                 requireCurrent(request)
                 synchronized(lock) { grantRequestIds.remove(identity) }
                 return destination
@@ -242,17 +200,10 @@ class JobArtifactRepository(
                     continue
                 }
                 try {
-                    val startedAtNanos = elapsedNanos()
                     downloader.download(grant.url, partial) { bytes, total ->
                         synchronized(lock) {
                             if (current(request)) mutableProgress.value = mutableProgress.value +
-                                (request.jobId to artifactTransferProgress(
-                                    bytes,
-                                    total,
-                                    request.artifact,
-                                    startedAtNanos,
-                                    elapsedNanos(),
-                                ))
+                                (request.jobId to ArtifactProgress(bytes, total))
                         }
                     }
                 } catch (error: ArtifactHttpException) {
@@ -269,11 +220,11 @@ class JobArtifactRepository(
                 }
                 currentCoroutineContext().ensureActive()
                 requireCurrent(request)
-                if (!validArtifact(partial, request.artifact)) throw ArtifactException(ArtifactProblem.INVALID_OUTPUT)
+                if (!valid(partial)) throw ArtifactException(ArtifactProblem.INVALID_OUTPUT)
                 return synchronized(lock) {
                     requireCurrent(request)
                     // Never replace a valid cache created while this attempt was in flight.
-                    if (!validArtifact(destination, request.artifact)) {
+                    if (!valid(destination)) {
                         try {
                             Files.move(partial.toPath(), destination.toPath(),
                                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
@@ -300,31 +251,19 @@ class JobArtifactRepository(
 
     private suspend fun readyGrant(request: Request, requestId: String): DownloadGrant {
         requireCurrent(request)
-        if (request.artifact == "input") {
-            val job = api.detail(request.jobId)
-            requireCurrent(request)
-            if (job.id != request.jobId || job.status != "ready" || !job.canDownloadInput)
-                throw ArtifactException(ArtifactProblem.NOT_READY)
-        }
-        // Output grants already enforce ownership, ready state and immutable object
-        // identity. A separate detail read adds a round trip and can still go stale.
-        return try {
-            api.download(request.jobId, request.artifact, requestId).also { requireCurrent(request) }
-        } catch (error: JobsFailure) {
-            requireCurrent(request)
-            if (error.problem == JobsProblem.JOB_STATE_CONFLICT) throw ArtifactException(ArtifactProblem.NOT_READY)
-            throw error
-        }
+        val job = api.detail(request.jobId)
+        requireCurrent(request)
+        if (job.id != request.jobId || job.status != "ready" || !job.canDownloadOutput)
+            throw ArtifactException(ArtifactProblem.NOT_READY)
+        return api.download(request.jobId, "output", requestId).also { requireCurrent(request) }
     }
 }
 
 private fun cacheIdentity(uid: String, jobId: String) = "$uid:$jobId"
 
 /** Require an actual MP3 audio track, a platform decoder and readable sample data. */
-internal fun isPlayableProcessingMp3(file: File): Boolean = isPlayableProcessingAudio(file, true)
-
-internal fun isPlayableProcessingAudio(file: File, mp3Only: Boolean = false): Boolean {
-    if (!file.isFile || file.length() <= 0 || (mp3Only && sniffProcessingContainer(file) != "audio/mpeg")) return false
+internal fun isPlayableProcessingMp3(file: File): Boolean {
+    if (!file.isFile || file.length() <= 0 || sniffProcessingContainer(file) != "audio/mpeg") return false
     val extractor = MediaExtractor()
     return try {
         extractor.setDataSource(file.absolutePath)
@@ -334,7 +273,7 @@ internal fun isPlayableProcessingAudio(file: File, mp3Only: Boolean = false): Bo
             val mime = format.getString(MediaFormat.KEY_MIME).orEmpty()
             if (mime.startsWith("video/")) return false
             if (mime.startsWith("audio/")) {
-                if ((mp3Only && mime != "audio/mpeg") || !format.containsKey(MediaFormat.KEY_DURATION) ||
+                if (mime != "audio/mpeg" || !format.containsKey(MediaFormat.KEY_DURATION) ||
                     format.getLong(MediaFormat.KEY_DURATION) <= 0 ||
                     MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) == null) return false
                 audioTrack = index

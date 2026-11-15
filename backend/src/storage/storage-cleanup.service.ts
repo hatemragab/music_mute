@@ -7,10 +7,10 @@ import {
   type StorageCleanupReason,
 } from './storage-cleanup-task.schema.js';
 import { StorageTransfersService } from './storage-transfers.service.js';
-import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 export interface ScheduleStorageCleanup {
   key: string;
+  versionId?: string | null;
   ownerUserId: Types.ObjectId | null;
   reason: StorageCleanupReason;
   nextAt: Date;
@@ -20,7 +20,6 @@ export interface ScheduleStorageCleanup {
 @Injectable()
 export class StorageCleanupService implements OnModuleInit {
   static readonly LEASE_MILLISECONDS = 60_000;
-  static readonly LATE_UPLOAD_RECHECK_MS = 7_200_000;
 
   constructor(
     @InjectModel(StorageCleanupTask.name)
@@ -37,17 +36,18 @@ export class StorageCleanupService implements OnModuleInit {
     session?: ClientSession,
   ): Promise<void> {
     this.validate(task);
+    const versionId = task.versionId ?? null;
     await this.tasks.updateOne(
       { key: task.key },
       {
         $setOnInsert: {
           key: task.key,
+          versionId,
           ownerUserId: task.ownerUserId,
           reason: task.reason,
           leaseUntil: null,
           leaseToken: null,
           attempts: 0,
-          firstDeletedAt: null,
           completedAt: null,
         },
         $min: { nextAt: task.nextAt },
@@ -62,7 +62,10 @@ export class StorageCleanupService implements OnModuleInit {
   }
 
   async cancelScheduled(key: string, session?: ClientSession): Promise<void> {
-    await this.tasks.deleteOne({ key, leaseToken: null }, { session });
+    await this.tasks.deleteOne(
+      { key, versionId: null, leaseToken: null },
+      { session },
+    );
   }
 
   /** Claims and advances one bounded task. Safe across API replicas. */
@@ -88,27 +91,31 @@ export class StorageCleanupService implements OnModuleInit {
       .lean();
     if (!task) return false;
     try {
-      if (isSharedMediaKey(task.key))
-        throw new TypeError('Shared media is permanently retained');
-      // Expiry blocks new requests, not a PUT already in flight. Two free exact
-      // deletes cover the existing client transfer timeout without HEAD/list loops.
-      const readyAt = Math.max(
-        task.settleUntil.getTime(),
-        task.firstDeletedAt
-          ? task.firstDeletedAt.getTime() +
-              StorageCleanupService.LATE_UPLOAD_RECHECK_MS
-          : 0,
-      );
-      const settled = now.getTime() >= readyAt;
-      const referenced =
-        settled &&
-        (await this.isReferenced(task.key, task.reason, task.ownerUserId));
-      if (settled && !referenced) await this.transfers.deleteObject(task.key);
-      const completed = settled && !referenced && task.firstDeletedAt != null;
-      const firstDeletedAt =
-        settled && !referenced
-          ? (task.firstDeletedAt ?? now)
-          : (task.firstDeletedAt ?? null);
+      if (task.versionId) {
+        await this.transfers.deleteExactVersion(task.key, task.versionId);
+        const update = await this.tasks.updateOne(
+          {
+            _id: task._id,
+            leaseToken: token,
+            settleUntil: task.settleUntil,
+          },
+          {
+            $set: {
+              leaseToken: null,
+              leaseUntil: null,
+              attempts: 0,
+              completedAt: now,
+              nextAt: null,
+            },
+          },
+        );
+        if (update.matchedCount !== 1) await this.releaseLease(task._id, token);
+        return true;
+      }
+      const sweep = await this.transfers.sweepVersionsForKey(task.key);
+      const settled = now.getTime() >= task.settleUntil.getTime();
+      const completed = sweep.complete && settled && sweep.deleted === 0;
+      const retrySoon = !sweep.complete || (settled && sweep.deleted > 0);
       const update = await this.tasks.updateOne(
         {
           _id: task._id,
@@ -120,21 +127,12 @@ export class StorageCleanupService implements OnModuleInit {
             leaseToken: null,
             leaseUntil: null,
             attempts: 0,
-            firstDeletedAt,
             completedAt: completed ? now : null,
-            nextAt: referenced
-              ? new Date(now.getTime() + 3_600_000)
-              : completed
-                ? null
-                : new Date(
-                    Math.max(
-                      task.settleUntil.getTime(),
-                      firstDeletedAt
-                        ? firstDeletedAt.getTime() +
-                            StorageCleanupService.LATE_UPLOAD_RECHECK_MS
-                        : readyAt,
-                    ),
-                  ),
+            nextAt: completed
+              ? null
+              : retrySoon
+                ? new Date(now.getTime() + 1_000)
+                : task.settleUntil,
           },
         },
       );
@@ -163,41 +161,6 @@ export class StorageCleanupService implements OnModuleInit {
     return true;
   }
 
-  private async isReferenced(
-    key: string,
-    reason: StorageCleanupReason,
-    ownerUserId: Types.ObjectId | null,
-  ): Promise<boolean> {
-    if (reason === 'RELEASE_UPLOAD_ORPHANED')
-      return Boolean(
-        await this.tasks.db
-          .collection('app_releases')
-          .findOne(
-            { 'artifact.key': key },
-            { projection: { _id: 1 }, maxTimeMS: 5000 },
-          ),
-      );
-    // A retry shares the immutable input key. Retained originals and completed
-    // outputs stay protected until every owning job releases them.
-    return Boolean(
-      await this.tasks.db.collection('audio_jobs').findOne(
-        {
-          userId: ownerUserId,
-          deletedAt: null,
-          $or: [
-            {
-              'inputReservation.key': key,
-              reservationCleanupScheduledAt: null,
-            },
-            { 'inputObject.key': key, reservationCleanupScheduledAt: null },
-            { 'outputObject.key': key },
-          ],
-        },
-        { projection: { _id: 1 }, maxTimeMS: 5000 },
-      ),
-    );
-  }
-
   private async releaseLease(_id: Types.ObjectId, token: string) {
     await this.tasks.updateOne(
       { _id, leaseToken: token },
@@ -212,13 +175,20 @@ export class StorageCleanupService implements OnModuleInit {
       task.key.includes('..') ||
       task.key.includes('//') ||
       !/^[A-Za-z0-9][A-Za-z0-9/_.-]*$/.test(task.key) ||
+      (task.versionId !== undefined &&
+        task.versionId !== null &&
+        (task.versionId.length < 1 ||
+          task.versionId.length > 1024 ||
+          Array.from(task.versionId).some((character) => {
+            const code = character.charCodeAt(0);
+            return code < 32 || code === 127;
+          }) ||
+          task.versionId === 'null')) ||
       !Number.isFinite(task.nextAt.getTime()) ||
       !Number.isFinite(task.settleUntil.getTime()) ||
       task.settleUntil < task.nextAt
     )
       throw new TypeError('Invalid storage cleanup task');
-    if (isSharedMediaKey(task.key))
-      throw new TypeError('Shared media is permanently retained');
     const owner = /^users\/([a-f0-9]{24})\//.exec(task.key)?.[1];
     const audio = task.reason !== 'RELEASE_UPLOAD_ORPHANED';
     if (

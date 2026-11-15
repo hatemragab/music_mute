@@ -12,7 +12,6 @@ import { ROLE_DETAILS } from "@/features/administrators/role-permissions";
 import { requestMediaGrant } from "@/features/jobs/jobs-api";
 import {
   getReleaseProposal,
-  getUpdatePolicy,
   previewUpdatePolicy,
   publishRelease,
   updateRelease,
@@ -22,80 +21,33 @@ import {
   decideAccountRecoveryRequest,
   getAccountRecoverySummary,
 } from "@/features/account-recovery/account-recovery-api";
-import { setWorkerRegistration } from "@/features/users/users-api";
 
 const client = () =>
   ({
     get: vi.fn().mockResolvedValue({}),
     post: vi.fn().mockResolvedValue({}),
     patch: vi.fn().mockResolvedValue({}),
-    put: vi.fn().mockResolvedValue({}),
   }) as unknown as ApiClient;
 
 const policy = {
   revision: 7,
   android: {
     minimumBuild: 10,
-    source: "google_play" as const,
-    directReleaseId: null,
-    storeReleaseId: "release-android",
+    source: "direct_apk" as const,
+    directReleaseId: "release-android",
+    storeReleaseId: null,
   },
   ios: { minimumBuild: 11, storeReleaseId: "release-ios" },
 };
 
 describe("dashboard/backend contract alignment", () => {
-  it.each([null, "release-android"])(
-    "maps a legacy direct selection without changing minimum or store target %s",
-    async (storeReleaseId) => {
-      const api = client();
-      vi.mocked(api.get).mockResolvedValue({
-        ...policy,
-        android: {
-          ...policy.android,
-          source: "direct_apk",
-          directReleaseId: "legacy-release",
-          storeReleaseId,
-        },
-      });
-      const current = await getUpdatePolicy(api);
-      expect(current).toEqual({
-        ...policy,
-        android: { ...policy.android, storeReleaseId },
-      });
-      expect(api.post).not.toHaveBeenCalled();
-      expect(api.patch).not.toHaveBeenCalled();
-    },
-  );
-
-  it("shows only Play examples for Android from a legacy backend preview", async () => {
-    const api = client();
-    const play = {
-      platform: "android",
-      distribution: "play",
-      installedBuild: 9,
-      decision: "required",
-      targetBuild: 20,
-    };
-    const ios = { ...play, platform: "ios", distribution: "app_store" };
-    vi.mocked(api.post).mockResolvedValue({
-      currentRevision: 7,
-      valid: true,
-      errors: [],
-      examples: [{ ...play, distribution: "direct" }, play, ios],
-    });
-    expect((await previewUpdatePolicy(api, policy)).examples).toEqual([
-      play,
-      ios,
-    ]);
-  });
-
   it("requests the release proposal for the selected channel", async () => {
     const api = client();
 
-    await getReleaseProposal(api, "android", "google_play");
+    await getReleaseProposal(api, "android", "direct_apk");
 
     expect(api.get).toHaveBeenCalledWith(
-      "/admin/releases/proposal?platform=android&source=google_play",
+      "/admin/releases/proposal?platform=android&source=direct_apk",
     );
   });
 
@@ -149,35 +101,6 @@ describe("dashboard/backend contract alignment", () => {
     expect(ROLE_DETAILS.support.permissions).not.toContain("workers.manage");
     expect(ROLE_DETAILS.viewer.permissions).toContain("workers.read");
     expect(ROLE_DETAILS.viewer.permissions).not.toContain("workers.logs.read");
-    expect(PERMISSIONS).toContain("users.worker-registration.manage");
-    expect(ROLE_DETAILS.owner.permissions).toContain(
-      "users.worker-registration.manage",
-    );
-    expect(ROLE_DETAILS.support.permissions).toContain(
-      "users.worker-registration.manage",
-    );
-    expect(ROLE_DETAILS.viewer.permissions).not.toContain(
-      "users.worker-registration.manage",
-    );
-    expect(ROLE_DETAILS.release_manager.permissions).not.toContain(
-      "users.worker-registration.manage",
-    );
-  });
-
-  it("saves registration approval with a revision then reads the user", async () => {
-    const api = client();
-    const input = {
-      workerRegistrationAllowed: true,
-      expectedRevision: 3,
-      operationId: "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-      reason: "Approve new Mac registrations",
-    };
-    await setWorkerRegistration(api, "user/unsafe", input);
-    expect(api.put).toHaveBeenCalledWith(
-      "/admin/users/user%2Funsafe/worker-registration",
-      input,
-    );
-    expect(api.get).toHaveBeenCalledWith("/admin/users/user%2Funsafe");
   });
 
   it("removes immutable fields from release edits", async () => {
@@ -185,7 +108,7 @@ describe("dashboard/backend contract alignment", () => {
 
     await updateRelease(api, "release-1", {
       platform: "android",
-      source: "google_play",
+      source: "direct_apk",
       versionName: "2.0.0",
       buildNumber: 20,
       changelogEn: "Safer processing",
@@ -221,7 +144,7 @@ describe("dashboard/backend contract alignment", () => {
 
     expect(api.post).toHaveBeenNthCalledWith(
       1,
-      "/admin/update-policy/previews",
+      "/admin/update-policy/preview",
       {
         android: policy.android,
         ios: policy.ios,
@@ -229,7 +152,7 @@ describe("dashboard/backend contract alignment", () => {
     );
     expect(api.post).toHaveBeenNthCalledWith(
       2,
-      "/admin/releases/release-1/publications",
+      "/admin/releases/release-1/publish",
       {
         expectedRevision: 7,
         expectedReleaseRevision: 3,
@@ -253,7 +176,7 @@ describe("dashboard/backend contract alignment", () => {
     });
 
     expect(api.post).toHaveBeenCalledWith(
-      "/admin/releases/release-1/withdrawals",
+      "/admin/releases/release-1/withdraw",
       {
         expectedRevision: 7,
         expectedReleaseRevision: 3,
@@ -318,7 +241,7 @@ describe("dashboard/backend contract alignment", () => {
       "/admin/account-recovery-requests/summary",
     );
     expect(api.post).toHaveBeenCalledWith(
-      "/admin/account-recovery-requests/recovery-1/approvals",
+      "/admin/account-recovery-requests/recovery-1/approve",
       command,
     );
   });

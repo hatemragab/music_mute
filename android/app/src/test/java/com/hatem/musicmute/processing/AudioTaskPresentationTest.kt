@@ -5,124 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AudioTaskPresentationTest {
-    @Test fun homeHidesTerminalJobsWithoutRemovingLibraryOrDetailData() {
-        for (status in listOf("ready", "failed", "cancelled")) {
-            val tasks = audioTaskPresentations(emptyList(), listOf(job(status)), 0)
-            assertEquals(1, tasks.size)
-            assertFalse(tasks.single().visibleOnHome)
-        }
-        for (status in listOf("awaiting_upload", "queued", "validating", "processing", "uploading_result", "interrupted", "cancel_requested")) {
-            assertTrue(audioTaskPresentations(emptyList(), listOf(job(status)), 0).single().visibleOnHome)
-        }
-        val failedImport = UrlImportRecord("owner", "https://example.com/media", "request", status = "failed")
-        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 0, listOf(failedImport)).single().visibleOnHome)
-    }
-
-    @Test fun importBecomesOneNamedJobAndDoesNotReappearAfterDeletion() {
-        val record = UrlImportRecord("owner", "https://example.com/media", "import-request",
-            status = "downloading", sourceTitle = "عنوان 🎵", createdAtMillis = 100)
-        val importing = audioTaskPresentations(emptyList(), emptyList(), 200, listOf(record)).single()
-        assertEquals(AudioTaskStage.DOWNLOADING_SOURCE, importing.stage)
-        assertEquals("عنوان 🎵", importing.displayName)
-        assertEquals(100, importing.createdAtMillis)
-        assertFalse(importing.canCancel)
-        assertNull(importing.jobId)
-        val ready = job("ready").copy(sourceTitle = record.sourceTitle, displayName = record.sourceTitle)
-        val uploading = record.copy(status = "uploading", jobId = ready.id)
-        val uploadTask = audioTaskPresentations(emptyList(), listOf(ready.copy(status = "awaiting_upload")),
-            300, listOf(uploading)).single()
-        assertEquals(AudioTaskStage.UPLOADING_INPUT, uploadTask.stage)
-        assertTrue(uploadTask.importOnly)
-        assertFalse(uploadTask.canCancel)
-        val submitted = record.copy(status = "submitted", jobId = ready.id)
-        val merged = audioTaskPresentations(emptyList(), listOf(ready), 300, listOf(submitted)).single()
-        assertEquals(AudioTaskStage.READY, merged.stage)
-        assertEquals(record.requestId, merged.importRequestId)
-        assertEquals(record.sourceTitle, merged.displayName)
-        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300,
-            listOf(submitted.copy(jobObserved = true))).isEmpty())
-        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300,
-            listOf(submitted.copy(createdAtMillis = 0))).isEmpty())
-        assertTrue(audioTaskPresentations(emptyList(), emptyList(), 300, listOf(submitted)).isEmpty())
-        val processing = audioTaskPresentations(emptyList(), listOf(ready.copy(status = "processing")), 300,
-            listOf(submitted)).single()
-        assertEquals(AudioTaskStage.PROCESSING, processing.stage)
-        assertTrue(processing.visibleOnHome)
-    }
-
-    @Test fun importFailuresCanBeRemovedWithoutCloudJobActions() {
-        val record = UrlImportRecord("owner", "https://example.com/media", "request",
-            status = "failed", errorCode = "IMPORT_UPSTREAM_REFUSED")
-        val task = audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()
-        assertFalse(task.active)
-        assertTrue(task.canRetry)
-        assertTrue(task.canDelete)
-        assertFalse(audioTaskPresentations(emptyList(), emptyList(), 0,
-            listOf(record.copy(status = "downloading"))).single().canDelete)
-        assertFalse(audioTaskPresentations(emptyList(), emptyList(), 0,
-            listOf(record.copy(jobId = "68c000000000000000000002"))).single().canDelete)
-        assertEquals(record.errorCode, task.errorCode)
-    }
-
-    @Test fun onlyServiceAvailabilityImportFailuresOfferRetryAndOtherFailuresRemainRemovable() {
-        val record = UrlImportRecord("owner", "https://soundcloud.com/artist/track", "request",
-            status = "failed", errorCode = "IMPORT_DEPENDENCY_FAILED")
-        for (code in listOf("IMPORT_DEPENDENCY_FAILED", "IMPORT_DISK_FULL", "IMPORT_QUEUE_FULL",
-            "IMPORT_UPSTREAM_REFUSED", "IMPORT_SOURCE_UNAVAILABLE", "IMPORT_DISABLED", "PROCESSING_UNAVAILABLE",
-            "OFFLINE", "SERVICE_UNAVAILABLE", "RATE_LIMITED")) {
-            val task = audioTaskPresentations(emptyList(), emptyList(), 0,
-                listOf(record.copy(errorCode = code))).single()
-            assertTrue(code, task.canRetry)
-            assertTrue(task.importOnly)
-            assertNull(task.operationId)
-            assertNull(task.jobId)
-            assertFalse(task.canCancel)
-        }
-        for (code in listOf("IMPORT_INVALID_URL", "IMPORT_UNSUPPORTED_PROVIDER", "IMPORT_SINGLE_ITEM_REQUIRED",
-            "IMPORT_INVALID_AUDIO", "IMPORT_TOO_LARGE", "IMPORT_TOO_LONG", "IMPORT_REQUEST_CONFLICT",
-            "ACCOUNT_DISABLED", "PROCESSING_ALLOWANCE_EXHAUSTED", "FUTURE_ERROR", null)) {
-            val task = audioTaskPresentations(emptyList(), emptyList(), 0,
-                listOf(record.copy(errorCode = code))).single()
-            assertFalse(code, task.canRetry)
-            assertTrue(task.canDelete)
-            assertTrue(task.visibleOnHome)
-        }
-        assertFalse(record.copy(status = "downloading").retryable)
-        assertFalse(record.copy(jobId = job("failed").id).retryable)
-        assertEquals(com.hatem.musicmute.R.string.url_import_dependency,
-            com.hatem.musicmute.ui.audioTaskFailureLabel(
-                audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()))
-    }
-
-    @Test fun queuedAutomaticRetryHidesPreviousFailureUntilTheSeriesFinallyFails() {
-        val record = UrlImportRecord("owner", "https://soundcloud.com/artist/track", "request",
-            status = "queued", errorCode = "IMPORT_DEPENDENCY_FAILED")
-        val queued = audioTaskPresentations(emptyList(), emptyList(), 0, listOf(record)).single()
-        assertEquals(AudioTaskStage.WAITING, queued.stage)
-        assertTrue(queued.active)
-        assertFalse(queued.canRetry)
-        assertFalse(queued.canDelete)
-        assertNull(queued.errorCode)
-        assertNull(com.hatem.musicmute.ui.audioTaskFailureLabel(queued))
-        assertEquals("IMPORT_DEPENDENCY_FAILED", record.errorCode)
-
-        val failed = audioTaskPresentations(emptyList(), emptyList(), 0,
-            listOf(record.copy(status = "failed"))).single()
-        assertEquals(AudioTaskStage.FAILED, failed.stage)
-        assertFalse(failed.active)
-        assertTrue(failed.canRetry)
-        assertTrue(failed.canDelete)
-        assertEquals(record.errorCode, failed.errorCode)
-        assertEquals(com.hatem.musicmute.R.string.url_import_dependency,
-            com.hatem.musicmute.ui.audioTaskFailureLabel(failed))
-    }
-
     @Test fun audioDurationUsesSecondsFromMediaAndIsIndependentOfProcessingTime() {
         val ready = job("ready").copy(input = JobInput("mp3", 1000, 125.75),
             timing = JobTiming(totalElapsedMs = 9_000))
         val task = audioTaskPresentations(emptyList(), listOf(ready), 99_000).single()
         assertEquals(125_750L, task.audioDurationMs)
-        assertNull(task.totalElapsedMs)
+        assertEquals(9_000L, task.totalElapsedMs)
         for (duration in listOf(Double.NaN, Double.POSITIVE_INFINITY, -1.0, 0.0)) {
             assertNull(audioTaskPresentations(emptyList(), listOf(ready.copy(
                 input = ready.input.copy(durationSeconds = duration))), 0).single().audioDurationMs)
@@ -160,7 +48,7 @@ class AudioTaskPresentationTest {
         val finished = job("failed").copy(finishedAt = Instant.ofEpochMilli(6_000))
         val first = audioTaskPresentations(listOf(operation), listOf(finished), 10_000).single()
         val later = audioTaskPresentations(listOf(operation), listOf(finished), 90_000).single()
-        assertNull(first.totalElapsedMs)
+        assertEquals(5_000L, first.totalElapsedMs)
         assertEquals(first.totalElapsedMs, later.totalElapsedMs)
     }
 
@@ -192,7 +80,7 @@ class AudioTaskPresentationTest {
         assertEquals("68c000000000000000000002", tasks.single().jobId)
         assertEquals(AudioTaskStage.PROCESSING, tasks.single().stage)
         assertNull(tasks.single().progressFraction)
-        assertNull(tasks.single().totalElapsedMs)
+        assertEquals(9_000L, tasks.single().totalElapsedMs)
     }
 
     @Test fun stagesActionsAndServerTimingsAreHonestForTerminalAndUnknownStates() {
@@ -212,23 +100,6 @@ class AudioTaskPresentationTest {
         assertEquals(AudioTaskStage.UNKNOWN, tasks[1].stage)
         assertFalse(tasks[1].canDelete)
         assertNull(tasks[1].operationId)
-    }
-
-    @Test fun everyJobStateKeepsNewestFirstCreationOrder() {
-        val olderReady = job("ready").copy(
-            id = "68c000000000000000000010",
-            createdAt = Instant.ofEpochMilli(1_000),
-        )
-        val newerFailed = job("failed").copy(
-            id = "68c000000000000000000011",
-            createdAt = Instant.ofEpochMilli(2_000),
-        )
-
-        val tasks = audioTaskPresentations(emptyList(), listOf(olderReady, newerFailed), 0)
-
-        assertEquals(listOf(newerFailed.id, olderReady.id), tasks.map { it.jobId })
-        assertEquals(listOf(AudioTaskStage.FAILED, AudioTaskStage.READY), tasks.map { it.stage })
-        assertEquals(listOf(2_000L, 1_000L), tasks.map { it.createdAtMillis })
     }
 
     @Test fun activeLocalTransferAndCancellationOverrideOnlyNonterminalServerState() {
@@ -279,30 +150,6 @@ class AudioTaskPresentationTest {
         )
     }
 
-    @Test fun confirmedCloudJobStaysOffHomeUntilALiveSnapshotIncludesIt() {
-        val operation = ProcessingOperation(
-            operationId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
-            ownerUid = "owner",
-            requestId = "c21a2eaa-7e73-4f08-89da-6ac35baa83e1",
-            jobId = job("queued").id,
-            phase = ProcessingPhase.COMPLETE,
-            serverStatus = "queued",
-        )
-        val hidden = audioTaskPresentations(listOf(operation), emptyList(), 0).single()
-        assertEquals(AudioTaskStage.QUEUED, hidden.stage)
-        assertFalse(hidden.visibleOnHome)
-        val uploading = audioTaskPresentations(
-            listOf(operation.copy(phase = ProcessingPhase.UPLOADING, serverStatus = "awaiting_upload")),
-            emptyList(),
-            0,
-        ).single()
-        assertTrue(uploading.visibleOnHome)
-        val live = audioTaskPresentations(listOf(operation), listOf(job("processing")), 0).single()
-        assertEquals(AudioTaskStage.PROCESSING, live.stage)
-        assertTrue(live.visibleOnHome)
-        assertFalse(audioTaskPresentations(listOf(operation), listOf(job("ready")), 0).single().visibleOnHome)
-    }
-
     @Test fun confirmedUploadNeverReturnsToWaitingWhileHistoryStillAwaitsUpload() {
         val operation = ProcessingOperation("operation", "owner", "request",
             jobId = job("awaiting_upload").id, phase = ProcessingPhase.CONFIRMING,
@@ -333,6 +180,9 @@ class AudioTaskPresentationTest {
             phase = ProcessingPhase.UPLOADING,
             input = InputDeclaration("mp3", "audio/mpeg", 1000, 30.0, "hash"))
         assertEquals(0f, audioTaskPresentations(listOf(operation), emptyList(), 0).single().progressFraction)
+        assertEquals(0f, audioTaskPresentations(listOf(operation.copy(
+            phase = ProcessingPhase.DOWNLOADING_SOURCE, sourceTotalBytes = 1000)), emptyList(), 0)
+            .single().progressFraction)
     }
 
     @Test fun authoritativeRecoveryAndTerminalStatesOverridePersistedSubmission() {

@@ -29,7 +29,6 @@ fun ProcessingHistoryScreen(
     onDelete: (AudioTaskPresentation) -> Unit,
     onNotifications: () -> Unit,
 ) {
-    val visibleTasks = tasks.filter { it.visibleOnHome }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
         Modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxSize().testTag("processing-history"),
@@ -44,6 +43,9 @@ fun ProcessingHistoryScreen(
                 Button(onClick = onImport, enabled = !preparing, modifier = Modifier.testTag("processing-import")) {
                     Text(stringResource(R.string.processing_import))
                 }
+                TextButton(onClick = onRefresh, enabled = !state.loading) {
+                    Text(stringResource(R.string.processing_refresh))
+                }
             }
             TextButton(onClick = onNotifications) { Text(stringResource(R.string.processing_notifications)) }
             Text(stringResource(R.string.processing_notifications_optional), style = MaterialTheme.typography.bodySmall)
@@ -57,12 +59,9 @@ fun ProcessingHistoryScreen(
             Text(stringResource(processingFailureLabel(state.failure)), color = MaterialTheme.colorScheme.error)
         }
         if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (!state.loading && !preparing && state.failure == null && visibleTasks.isEmpty()) item { Text(stringResource(R.string.processing_empty)) }
-        items(visibleTasks, key = { it.operationId ?: it.jobId.orEmpty() }) { task ->
-            AudioTaskCard(
-                task, { onOpen(task) }, { onCancel(task) }, { onRetry(task) }, { onDelete(task) },
-                job = state.jobs.firstOrNull { it.id == task.jobId }, connection = state.connection,
-            )
+        if (!state.loading && !preparing && state.failure == null && tasks.isEmpty()) item { Text(stringResource(R.string.processing_empty)) }
+        items(tasks, key = { it.operationId ?: it.jobId.orEmpty() }) { task ->
+            AudioTaskCard(task, { onOpen(task) }, { onCancel(task) }, { onRetry(task) }, { onDelete(task) })
         }
         if (state.nextCursor != null) item {
             TextButton(onClick = onMore, enabled = !state.loadingMore && !state.loading) {

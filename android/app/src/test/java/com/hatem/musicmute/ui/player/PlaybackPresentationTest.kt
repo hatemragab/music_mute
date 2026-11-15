@@ -1,51 +1,15 @@
 package com.hatem.musicmute.ui.player
 
-import com.hatem.musicmute.R
-import com.hatem.musicmute.library.LibraryEntry
-import com.hatem.musicmute.library.LibraryKey
-import com.hatem.musicmute.library.OfflineStatus
 import com.hatem.musicmute.playback.PlaybackState
-import com.hatem.musicmute.playback.QueueTrack
-import com.hatem.musicmute.playback.RepeatMode
-import com.hatem.musicmute.processing.ArtifactProgress
 import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackPresentationTest {
-    @Test fun artworkFollowsTheSelectedOwnerAndJobWithoutKeepingPreviousTrack() {
-        val first = LibraryEntry(LibraryKey("owner", "first"), "First", 0, null, false, false,
-            OfflineStatus.REMOTE_ONLY, thumbnailUrl = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg")
-        val second = first.copy(key = LibraryKey("owner", "second"), title = "Second", thumbnailUrl = null)
-        val state = PlaybackState(trackId = "processing:first", currentIndex = 0,
-            queue = listOf(QueueTrack(first.key, first.title), QueueTrack(second.key, second.title)))
-        assertEquals(first, state.matchingLibraryEntry(first))
-        assertNull(state.matchingLibraryEntry(first.copy(key = LibraryKey("other-owner", "first"))))
-        val changed = state.copy(trackId = "processing:second", currentIndex = 1)
-        assertNull(changed.matchingLibraryEntry(first))
-        assertEquals(second, changed.matchingLibraryEntry(second))
-        assertNull(changed.matchingLibraryEntry(second)?.thumbnailUrl)
-    }
-
-    @Test fun delayedThumbnailEnrichmentAndRemovalUseCurrentLibrarySnapshot() {
-        val entry = LibraryEntry(LibraryKey("owner", "song"), "Song", 0, null, false, false,
-            OfflineStatus.AVAILABLE)
-        val state = PlaybackState(trackId = "processing:song", currentIndex = 0,
-            queue = listOf(QueueTrack(entry.key, entry.title)))
-        val enriched = entry.copy(thumbnailUrl = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg")
-        assertNull(state.matchingLibraryEntry(entry)?.thumbnailUrl)
-        assertEquals(enriched.thumbnailUrl, state.matchingLibraryEntry(enriched)?.thumbnailUrl)
-        assertNull(state.matchingLibraryEntry(entry)?.thumbnailUrl)
-        assertNull(state.matchingLibraryEntry(null))
-        assertNull(state.copy(trackId = null).matchingLibraryEntry(enriched))
-        assertNull(state.copy(currentIndex = -1).matchingLibraryEntry(enriched))
-    }
-
     @Test fun unavailableOrFailedAudioCannotSeekEvenWithStaleDuration() {
         assertFalse(PlaybackState(durationMs = 120_000).canSeekAudio())
         assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, failed = true).canSeekAudio())
         assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, buffering = true).canSeekAudio())
         assertFalse(PlaybackState(trackId = "track", durationMs = 0).canSeekAudio())
-        assertFalse(PlaybackState(trackId = "track", durationMs = 120_000, switching = true).canSeekAudio())
         assertTrue(PlaybackState(trackId = "track", durationMs = 120_000).canSeekAudio())
     }
 
@@ -55,48 +19,5 @@ class PlaybackPresentationTest {
         assertEquals(0f, playbackProgress(-1, 60_000), 0f)
         assertEquals(0.5f, playbackProgress(30_000, 60_000), 0.001f)
         assertEquals(1f, playbackProgress(Long.MAX_VALUE, 60_000), 0f)
-    }
-
-    @Test fun repeatSongControlTogglesCurrentTrackRepeatOnly() {
-        assertEquals(RepeatMode.ONE, RepeatMode.OFF.toggleCurrentTrackRepeat())
-        assertEquals(RepeatMode.ONE, RepeatMode.ALL.toggleCurrentTrackRepeat())
-        assertEquals(RepeatMode.OFF, RepeatMode.ONE.toggleCurrentTrackRepeat())
-    }
-
-    @Test fun miniPlayerIsHiddenWithoutASelectedTrack() {
-        assertFalse(PlaybackState().shouldShowMiniPlayer())
-        assertFalse(PlaybackState(playing = true).shouldShowMiniPlayer())
-    }
-
-    @Test fun miniPlayerRemainsVisibleWhileATrackIsSelected() {
-        assertTrue(PlaybackState(trackId = "active-track", playing = true).shouldShowMiniPlayer())
-        assertTrue(PlaybackState(trackId = "paused-track", positionMs = 30_000).shouldShowMiniPlayer())
-        assertTrue(PlaybackState(trackId = "buffering-track", buffering = true).shouldShowMiniPlayer())
-        assertTrue(PlaybackState(trackId = "failed-track", failed = true).shouldShowMiniPlayer())
-        assertTrue(PlaybackState(trackId = "finished-track", positionMs = 60_000, durationMs = 60_000).shouldShowMiniPlayer())
-    }
-
-    @Test fun downloadPresentationClampsProgressAndRoundsRemainingTimeUp() {
-        assertEquals(25, ArtifactProgress(250, 1_000).downloadPercent())
-        assertEquals(0f, ArtifactProgress(-1, 1_000).downloadFraction()!!, 0f)
-        assertEquals(100, ArtifactProgress(1_500, 1_000).downloadPercent())
-        assertNull(ArtifactProgress(10, null).downloadPercent())
-        assertEquals(2_000L, ArtifactProgress(10, 100, estimatedRemainingMs = 1_001).displayRemainingMs())
-    }
-
-    @Test fun saveLabelFollowsTheSelectedTrack() {
-        assertEquals(R.string.save_voice, playerSaveLabel(original = false))
-        assertEquals(R.string.save_original, playerSaveLabel(original = true))
-    }
-
-    @Test fun downloadValuesFollowReceivedBytesForBothAudioVariants() {
-        for (artifact in listOf("input", "output")) {
-            val values = listOf(0L, 250L, 680L, 1_000L).map {
-                ArtifactProgress(it, 1_000, artifact).downloadPercent()
-            }
-            assertEquals(listOf(0, 25, 68, 100), values)
-            assertNull(ArtifactProgress(680, 0, artifact).downloadFraction())
-            assertNull(ArtifactProgress(680, -1, artifact).downloadPercent())
-        }
     }
 }

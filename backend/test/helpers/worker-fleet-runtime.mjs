@@ -34,13 +34,13 @@ const { WorkerRuntime } =
 const { WorkerChildProcess } =
   await import('../../../worker/dist/src/agent/child-process.js');
 
-const useRealR2 = process.env.WORKER_INTEGRATION_STORAGE === 'r2';
+const useRealS3 = process.env.WORKER_INTEGRATION_STORAGE === 's3';
 const externalService = process.env.WORKER_INTEGRATION_EXTERNAL === 'true';
 const realGpu = process.env.WORKER_INTEGRATION_REAL_GPU === 'true';
-if (realGpu && (externalService || useRealR2))
+if (realGpu && (externalService || useRealS3))
   throw new Error('Real GPU fixture requires isolated local storage');
-if (externalService && !useRealR2)
-  throw new Error('External worker integration requires real R2');
+if (externalService && !useRealS3)
+  throw new Error('External worker integration requires real S3');
 const externalPlatform =
   process.env.WORKER_INTEGRATION_EXTERNAL_PLATFORM ?? 'windows-amd64';
 if (
@@ -116,7 +116,7 @@ const inputDurationSeconds = realGpu
 if (!Number.isFinite(inputDurationSeconds) || inputDurationSeconds <= 0)
   throw new Error('Invalid real GPU fixture duration');
 const output = Buffer.from('musicmute-worker-integration-output');
-const transferTimeoutMs = useRealR2 || realGpu ? 120_000 : 10_000;
+const transferTimeoutMs = useRealS3 || realGpu ? 120_000 : 10_000;
 const digestBase64 = (value) =>
   createHash('sha256').update(value).digest('base64');
 
@@ -146,7 +146,7 @@ const firebase = {
   revokeSessions: async () => undefined,
 };
 
-class R2ObjectFixture {
+class VersionedObjectFixture {
   constructor() {
     this.objects = new Map();
     this.grants = new Map();
@@ -180,7 +180,6 @@ class R2ObjectFixture {
         'Content-Type': reservation.contentType,
         'If-None-Match': '*',
         'x-amz-checksum-sha256': reservation.sha256,
-        'x-amz-meta-sha256': reservation.sha256,
       },
       expiresAt: new Date(Date.now() + 300_000).toISOString(),
     };
@@ -200,12 +199,13 @@ class R2ObjectFixture {
   }
 
   async verifyInput(job) {
-    const object = this.objects.get(job.inputReservation.key);
+    const object = this.latest(job.inputReservation.key);
     this.assertObject(job.inputReservation, object);
     return this.identity(object);
   }
 
   async createDownloadGrant(object) {
+    this.assertObject(object, this.version(object.key, object.versionId));
     return this.downloadGrant(object);
   }
 
@@ -221,36 +221,52 @@ class R2ObjectFixture {
     return this.uploadGrant(reservation);
   }
 
-  async findUploadedObject(reservation) {
-    const object = this.objects.get(reservation.key);
+  async findUploadedVersion(reservation) {
+    const object = this.latest(reservation.key);
     if (!object) return null;
     this.assertObject(reservation, object);
     return this.identity(object);
   }
 
-  async verifyUploadedObject(reservation, etag) {
-    const object = this.objects.get(reservation.key);
-    this.assertObject({ ...reservation, etag }, object);
+  async verifyUploadedVersion(reservation, versionId) {
+    const object = this.version(reservation.key, versionId);
+    this.assertObject(reservation, object);
     return this.identity(object);
   }
 
-  async isObjectAvailable(object) {
+  async isPinnedObjectAvailable(object) {
     try {
-      this.assertObject(object, this.objects.get(object.key));
+      this.assertObject(object, this.version(object.key, object.versionId));
       return true;
     } catch {
       return false;
     }
   }
 
-  async deleteObject(key) {
+  async deleteVersionsForKey(key) {
     this.objects.delete(key);
+    return true;
+  }
+
+  async sweepVersionsForKey(key) {
+    const deleted = this.objects.get(key)?.size ?? 0;
+    this.objects.delete(key);
+    return { complete: true, deleted };
+  }
+
+  latest(key) {
+    const versions = this.objects.get(key);
+    return versions ? ([...versions.values()].at(-1) ?? null) : null;
+  }
+
+  version(key, versionId) {
+    return this.objects.get(key)?.get(versionId) ?? null;
   }
 
   identity(object) {
     assert.ok(object);
-    const { key, etag, bytes, sha256, contentType } = object;
-    return { key, etag, bytes, sha256, contentType };
+    const { key, versionId, bytes, sha256, contentType } = object;
+    return { key, versionId, bytes, sha256, contentType };
   }
 
   assertObject(reservation, object) {
@@ -259,7 +275,8 @@ class R2ObjectFixture {
     assert.equal(object.bytes, reservation.bytes);
     assert.equal(object.sha256, reservation.sha256);
     assert.equal(object.contentType, reservation.contentType);
-    if (reservation.etag) assert.equal(object.etag, reservation.etag);
+    if (reservation.versionId)
+      assert.equal(object.versionId, reservation.versionId);
   }
 
   async handle(request, response) {
@@ -270,20 +287,16 @@ class R2ObjectFixture {
       const grant = token ? this.grants.get(token) : null;
       if (!grant) return this.send(response, 404);
       if (grant.type === 'download') {
-        if (!['GET', 'HEAD'].includes(request.method))
-          return this.send(response, 405);
-        const object = this.objects.get(grant.object.key);
-        if (!object) return this.send(response, 404);
+        if (request.method !== 'GET') return this.send(response, 405);
+        const object = this.version(grant.object.key, grant.object.versionId);
         this.assertObject(grant.object, object);
         response.writeHead(200, {
           'Content-Type': object.contentType,
           'Content-Length': object.bytes,
           'Content-Encoding': 'identity',
           'Cache-Control': 'no-store',
-          ETag: object.etag,
-          'x-amz-meta-sha256': object.sha256,
         });
-        response.end(request.method === 'HEAD' ? undefined : object.body);
+        response.end(object.body);
         return;
       }
       if (request.method !== 'PUT') return this.send(response, 405);
@@ -292,7 +305,6 @@ class R2ObjectFixture {
         request.headers['content-type'] !== reservation.contentType ||
         request.headers['if-none-match'] !== '*' ||
         request.headers['x-amz-checksum-sha256'] !== reservation.sha256 ||
-        request.headers['x-amz-meta-sha256'] !== reservation.sha256 ||
         this.objects.has(reservation.key)
       )
         return this.send(response, 412);
@@ -310,12 +322,10 @@ class R2ObjectFixture {
         digestBase64(body) !== reservation.sha256
       )
         return this.send(response, 422);
-      // R2 evaluates conditional creation atomically after receiving the payload.
-      if (this.objects.has(reservation.key)) return this.send(response, 412);
-      const etag = `"${createHash('md5').update(body).digest('hex')}"`;
-      const object = { ...reservation, etag, body };
-      this.objects.set(reservation.key, object);
-      response.writeHead(200, { ETag: etag });
+      const versionId = randomUUID();
+      const object = { ...reservation, versionId, body };
+      this.objects.set(reservation.key, new Map([[versionId, object]]));
+      response.writeHead(200, { 'x-amz-version-id': versionId });
       response.end();
     } catch (error) {
       response.writeHead(500, { 'Content-Type': 'application/json' });
@@ -381,7 +391,7 @@ class FixtureChild {
   }
 }
 
-async function cleanupR2Objects(application) {
+async function cleanupS3Objects(application) {
   const jobs = application.get(getModelToken('Job'));
   const attempts = application.get(getModelToken('WorkerAttempt'));
   const [jobDocuments, attemptDocuments] = await Promise.all([
@@ -403,14 +413,19 @@ async function cleanupR2Objects(application) {
   let deleted = 0;
   for (const key of keys) {
     if (!safeKey.test(key))
-      throw new Error('Refusing unsafe worker integration R2 cleanup key');
-    await transfers.deleteObject(key);
-    deleted += 1;
+      throw new Error('Refusing unsafe worker integration S3 cleanup key');
+    for (let pass = 0; pass < 20; pass += 1) {
+      const sweep = await transfers.sweepVersionsForKey(key);
+      deleted += sweep.deleted;
+      if (sweep.complete && sweep.deleted === 0) break;
+      if (pass === 19)
+        throw new Error('Worker integration cleanup exceeded bounded passes');
+    }
   }
   return deleted;
 }
 
-const storage = useRealR2 ? null : new R2ObjectFixture();
+const storage = useRealS3 ? null : new VersionedObjectFixture();
 await storage?.start();
 const root = await mkdtemp(join(tmpdir(), 'musicmute-worker-integration-'));
 let app;
@@ -435,31 +450,8 @@ try {
     throw new Error('Invalid worker integration port');
   await app.listen(listenPort, externalService ? '0.0.0.0' : '127.0.0.1');
   const baseUrl = externalService
-    ? `http://127.0.0.1:${listenPort}`
-    : await app.getUrl();
-  const convertWireKeys = (value, keyTransform, parentKey) => {
-    if (Array.isArray(value))
-      return value.map((entry) =>
-        convertWireKeys(entry, keyTransform, parentKey),
-      );
-    if (value === null || typeof value !== 'object') return value;
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        keyTransform(key),
-        key === 'headers' || (parentKey === 'signed' && key === 'metadata')
-          ? entry
-          : convertWireKeys(entry, keyTransform, key),
-      ]),
-    );
-  };
-  const toWire = (value) =>
-    convertWireKeys(value, (key) =>
-      key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-    );
-  const fromWire = (value) =>
-    convertWireKeys(value, (key) =>
-      key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
-    );
+    ? `http://127.0.0.1:${listenPort}/api/v1`
+    : `${await app.getUrl()}/api/v1`;
   const api = async (method, route, body, { worker, expected = 200 } = {}) => {
     const response = await fetch(`${baseUrl}${route}`, {
       method,
@@ -468,12 +460,12 @@ try {
         ...(worker ? {} : { 'X-Installation-Id': installationId }),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(toWire(body)) }),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(transferTimeoutMs),
     });
     const text = await response.text();
     assert.equal(response.status, expected, `${method} ${route}: ${text}`);
-    return text ? fromWire(JSON.parse(text)) : null;
+    return text ? JSON.parse(text) : null;
   };
 
   const device = {
@@ -485,7 +477,7 @@ try {
     osVersion: '16',
     deviceModel: 'Worker integration fixture',
   };
-  await api('POST', '/auth/sessions', device);
+  await api('POST', '/auth/session', device);
 
   const created = await api(
     'POST',
@@ -515,20 +507,11 @@ try {
     signal: AbortSignal.timeout(transferTimeoutMs),
   });
   assert.equal(uploaded.status, 200);
-  assert.ok(uploaded.headers.get('etag'));
-  const queued = await api(
-    'POST',
-    `/jobs/${created.id}/upload-completions`,
-    {},
-  );
+  assert.ok(uploaded.headers.get('x-amz-version-id'));
+  const queued = await api('POST', `/jobs/${created.id}/upload-complete`, {});
   assert.equal(queued.status, 'queued');
 
   const machines = app.get(getModelToken('WorkerMachine'));
-  // Reproduce enrollment after the fleet policy has already been published.
-  // New machines retain schema defaults until their first configuration sync.
-  await app
-    .get(getModelToken('WorkerFleetPolicy'))
-    .updateOne({ _id: 'worker-fleet' }, { $set: { revision: 1 } });
   await machines.create({
     _id: machineId,
     credentialDigest: machineCredentialDigest,
@@ -582,55 +565,6 @@ try {
     revokedAt: null,
     revision: 0,
   });
-  // Exercise the real transactional approval and idempotent replay before runtime startup.
-  const { WorkerControlService } =
-    await import('../../dist/worker-fleet/control/worker-control.service.js');
-  const capacityActor = {
-    uid: 'capacity-owner',
-    verifiedEmail: 'capacity@example.invalid',
-    role: 'owner',
-    permissions: ['workers.manage'],
-    accessRevision: 0,
-    authTimeSec: Math.floor(Date.now() / 1000),
-  };
-  await app.get(getModelToken('AdminAccess')).create({
-    uid: capacityActor.uid,
-    verifiedEmail: capacityActor.verifiedEmail,
-    role: 'owner',
-    active: true,
-    revision: 0,
-  });
-  const capacityCommand = {
-    operationId: randomUUID(),
-    expectedRevision: 0,
-    gpuId,
-    qualificationConfirmed: true,
-    reason: 'Reviewed synthetic two-worker qualification',
-  };
-  const control = app.get(WorkerControlService);
-  const approved = await control.approveCapacity(
-    capacityActor,
-    machineId,
-    capacityCommand,
-  );
-  assert.equal(approved.maxSlots, 2);
-  assert.equal(approved.revision, 1);
-  assert.equal(
-    (await control.approveCapacity(capacityActor, machineId, capacityCommand))
-      .replayed,
-    true,
-  );
-  assert.equal(
-    (await machines.findById(machineId).lean()).approvedCapabilities[0]
-      .maxSlots,
-    2,
-  );
-  assert.equal(
-    await app
-      .get(getModelToken('AdminAuditEvent'))
-      .countDocuments({ operationId: capacityCommand.operationId }),
-    1,
-  );
 
   if (externalService) {
     console.log(
@@ -742,10 +676,6 @@ try {
         }
       }
       await runtime.waitForIdle();
-      const synchronizedMachine = await machines.findById(machineId).lean();
-      assert.equal(synchronizedMachine.policyRevision, 1);
-      assert.equal(synchronizedMachine.desiredRevision, 1);
-      assert.equal(synchronizedMachine.appliedRevision, 1);
       const flowDurationMs = performance.now() - flowStartedAt;
       const state = await api('GET', `/jobs/${created.id}`);
       if (state.status !== 'ready') {
@@ -790,27 +720,7 @@ try {
 
   const completed = await api('GET', `/jobs/${created.id}`);
   assert.equal(completed.status, 'ready');
-  if (!externalService) {
-    assert.equal(completed.serverStageTimings.totalComplete, true);
-    assert.ok(Number.isSafeInteger(completed.serverStageTimings.totalMs));
-    assert.ok(completed.serverStageTimings.totalMs >= 0);
-    for (const stage of [
-      'queue',
-      'input-download',
-      'output-upload',
-      'completion',
-    ]) {
-      const measurement = completed.serverStageTimings.stages.find(
-        (entry) => entry.stage === stage,
-      );
-      assert.ok(measurement, `Missing server measurement: ${stage}`);
-      assert.ok(Number.isSafeInteger(measurement.durationMs));
-      assert.ok(measurement.durationMs >= 0);
-      assert.equal(measurement.complete, true);
-    }
-    assert.equal(completed.serverStageTimings.attempts.length, 1);
-  }
-  const download = await api('POST', `/jobs/${created.id}/download-grants`, {
+  const download = await api('POST', `/jobs/${created.id}/download-url`, {
     artifact: 'output',
     requestId: randomUUID(),
   });
@@ -904,7 +814,7 @@ try {
       assert.equal(put.status, 200);
       const queuedJob = await api(
         'POST',
-        `/jobs/${job.id}/upload-completions`,
+        `/jobs/${job.id}/upload-complete`,
         {},
       );
       assert.equal(queuedJob.status, 'queued');
@@ -968,13 +878,13 @@ try {
       const incarnation = randomUUID();
       await api(
         'POST',
-        '/worker/sessions',
+        '/worker/v1/session',
         { sessionId, incarnation },
         { worker: credential, expected: 201 },
       );
       await api(
         'POST',
-        '/worker/slots',
+        '/worker/v1/slots',
         {
           workerId: slotId,
           sessionId,
@@ -983,22 +893,6 @@ try {
           slotIndex: 0,
           recipeIds: ['kim-vocals-v2', 'kim-vocals-v2-trim'],
         },
-        { worker: credential, expected: 201 },
-      );
-      const config = await api(
-        'GET',
-        `/worker/config?session_id=${sessionId}&incarnation=${incarnation}`,
-        undefined,
-        { worker: credential },
-      );
-      assert.equal(config.desiredRevision, 1);
-      assert.equal(config.policy.revision, 1);
-      assert.equal(config.appliedRevision, 0);
-      assert.equal(config.claimAllowed, false);
-      await api(
-        'POST',
-        '/worker/config/applications',
-        { requestId: randomUUID(), sessionId, incarnation, revision: 1 },
         { worker: credential, expected: 201 },
       );
       return { id, credential, gpuId, slotId, sessionId, incarnation };
@@ -1010,7 +904,7 @@ try {
       incarnation: machine.incarnation,
       gpuId: machine.gpuId,
       slotIndex: 0,
-      appliedPolicyRevision: 1,
+      appliedPolicyRevision: 0,
     });
     const ownership = (machine) => ({
       requestId: randomUUID(),
@@ -1020,46 +914,16 @@ try {
     });
 
     const machineA = await seedMachine('Race machine A');
-    const logClient = new WorkerControlPlaneClient({
-      baseUrl,
-      credential: machineA.credential,
-      allowInsecureLoopback: true,
-    });
-    assert.equal(
-      await logClient.diagnosticLogCursor(
-        machineA.sessionId,
-        machineA.incarnation,
-      ),
-      0,
-    );
-    await logClient.appendDiagnosticLogs({
-      sessionId: machineA.sessionId,
-      incarnation: machineA.incarnation,
-      sequenceStart: 1,
-      sequenceEnd: 1,
-      lines: ['isolated cursor acceptance'],
-    });
-    assert.equal(
-      await logClient.diagnosticLogCursor(
-        machineA.sessionId,
-        machineA.incarnation,
-      ),
-      1,
-    );
-    await assert.rejects(
-      logClient.diagnosticLogCursor(randomUUID(), machineA.incarnation),
-      (error) => error.code === 'WORKER_UNAUTHENTICATED',
-    );
     const machineB = await seedMachine('Race machine B');
     const racedJob = await createQueuedJob('Worker ownership race');
     const claimA = claimBody(machineA);
     const claimB = claimBody(machineB);
     const raced = await Promise.all([
-      api('POST', '/worker/claims', claimA, {
+      api('POST', '/worker/v1/claims', claimA, {
         worker: machineA.credential,
         expected: 201,
       }),
-      api('POST', '/worker/claims', claimB, {
+      api('POST', '/worker/v1/claims', claimB, {
         worker: machineB.credential,
         expected: 201,
       }),
@@ -1071,14 +935,14 @@ try {
     const loser = winnerIndex === 0 ? machineB : machineA;
     const winnerClaimBody = winnerIndex === 0 ? claimA : claimB;
     const winnerClaim = raced[winnerIndex].claim;
-    const replay = await api('POST', '/worker/claims', winnerClaimBody, {
+    const replay = await api('POST', '/worker/v1/claims', winnerClaimBody, {
       worker: winner.credential,
       expected: 201,
     });
     assert.equal(replay.claim.attemptId, winnerClaim.attemptId);
     assert.equal(replay.claim.replayed, true);
 
-    const progressPath = `/worker/attempts/${winnerClaim.attemptId}/progress-events`;
+    const progressPath = `/worker/v1/attempts/${winnerClaim.attemptId}/progress`;
     const firstProgress = {
       ...ownership(winner),
       sequence: 1,
@@ -1120,22 +984,18 @@ try {
 
     const forged = await api(
       'POST',
-      `/worker/attempts/${winnerClaim.attemptId}/input-grants`,
+      `/worker/v1/attempts/${winnerClaim.attemptId}/input-grant`,
       ownership(loser),
       { worker: loser.credential, expected: 409 },
     );
     assert.equal(forged.code, 'WORKER_CONFLICT');
-    const cancelled = await api(
-      'POST',
-      `/jobs/${racedJob.id}/cancellations`,
-      {},
-    );
+    const cancelled = await api('POST', `/jobs/${racedJob.id}/cancel`, {});
     assert.equal(cancelled.status, 'cancelled');
     const cancelledDetail = await api('GET', `/jobs/${racedJob.id}`);
     assert.equal(cancelledDetail.processingProgress, null);
     const staleAfterCancel = await api(
       'POST',
-      `/worker/attempts/${winnerClaim.attemptId}/input-grants`,
+      `/worker/v1/attempts/${winnerClaim.attemptId}/input-grant`,
       ownership(winner),
       { worker: winner.credential, expected: 409 },
     );
@@ -1152,7 +1012,7 @@ try {
     const recoveryClaimBody = claimBody(winner);
     const recoveryClaimResponse = await api(
       'POST',
-      '/worker/claims',
+      '/worker/v1/claims',
       recoveryClaimBody,
       { worker: winner.credential, expected: 201 },
     );
@@ -1189,7 +1049,7 @@ try {
     );
     const staleAfterRecovery = await api(
       'POST',
-      `/worker/attempts/${recoveryClaim.attemptId}/input-grants`,
+      `/worker/v1/attempts/${recoveryClaim.attemptId}/input-grant`,
       ownership(winner),
       { worker: winner.credential, expected: 409 },
     );
@@ -1201,19 +1061,19 @@ try {
     );
     const revoked = await api(
       'POST',
-      '/worker/sessions',
+      '/worker/v1/session',
       { sessionId: randomUUID(), incarnation: randomUUID() },
       { worker: loser.credential, expected: 401 },
     );
     assert.equal(revoked.code, 'WORKER_UNAUTHENTICATED');
   }
   console.log(
-    `WORKER_FLEET_INTEGRATION_OK storage=${useRealR2 ? 'r2' : 'fixture'} platform=${externalService ? externalPlatformMarker : 'simulated'} status=ready ownership=${externalService ? 'not-run' : 'pass'} recovery=${externalService ? 'not-run' : 'pass'} cancellation=${externalService ? 'not-run' : 'pass'} security=${externalService ? 'not-run' : 'pass'}`,
+    `WORKER_FLEET_INTEGRATION_OK storage=${useRealS3 ? 's3' : 'fixture'} platform=${externalService ? externalPlatformMarker : 'simulated'} status=ready ownership=${externalService ? 'not-run' : 'pass'} recovery=${externalService ? 'not-run' : 'pass'} cancellation=${externalService ? 'not-run' : 'pass'} security=${externalService ? 'not-run' : 'pass'}`,
   );
 } finally {
-  if (useRealR2 && app) {
-    const deleted = await cleanupR2Objects(app);
-    console.log(`WORKER_FLEET_R2_CLEANUP_OK deleted=${deleted}`);
+  if (useRealS3 && app) {
+    const deleted = await cleanupS3Objects(app);
+    console.log(`WORKER_FLEET_S3_CLEANUP_OK deleted=${deleted}`);
   }
   await app?.close();
   await storage?.close();

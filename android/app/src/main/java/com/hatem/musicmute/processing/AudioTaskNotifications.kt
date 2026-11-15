@@ -6,11 +6,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.text.format.Formatter
-import android.view.View
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
+import androidx.work.ForegroundInfo
 import com.hatem.musicmute.MainActivity
 import com.hatem.musicmute.R
 import java.security.MessageDigest
@@ -88,8 +89,17 @@ class AudioTaskNotificationThrottle {
     }
 }
 
+/** WorkManager owns the foreground service; this class only projects its notification. */
 class AudioTaskNotifications(private val context: Context) {
     private val manager = context.getSystemService(NotificationManager::class.java)
+
+    fun foreground(target: AudioTaskNotificationTarget, projection: AudioTaskNotificationProjection): ForegroundInfo {
+        val notification = build(target, projection)
+        val id = audioTaskNotificationId(target)
+        return if (Build.VERSION.SDK_INT >= 29)
+            ForegroundInfo(id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        else ForegroundInfo(id, notification)
+    }
 
     fun updateIfVisible(target: AudioTaskNotificationTarget, projection: AudioTaskNotificationProjection) {
         val id = audioTaskNotificationId(target)
@@ -136,22 +146,10 @@ class AudioTaskNotifications(private val context: Context) {
         openIntent.data = Uri.parse("musicmute://audio-task/${notificationHash(target.ownerUid)}/${target.operationId}/${target.epoch}")
         val open = PendingIntent.getActivity(context, audioTaskNotificationId(target), openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val body = if (bytes == null) stage else "$stage · $bytes"
-        val content = RemoteViews(context.packageName, R.layout.audio_task_notification).apply {
-            setTextViewText(R.id.notification_title, projection.title)
-            setTextViewText(R.id.notification_body, body)
-            if (projection.ongoing) {
-                setViewVisibility(R.id.notification_progress, View.VISIBLE)
-                setProgressBar(R.id.notification_progress, 100, projection.percent ?: 0, projection.percent == null)
-            } else setViewVisibility(R.id.notification_progress, View.GONE)
-        }
         return NotificationCompat.Builder(context, projection.channelId)
             .setSmallIcon(R.drawable.ic_vocal_monochrome)
             .setContentTitle(projection.title)
-            .setContentText(body)
-            .setCustomContentView(content)
-            .setCustomBigContentView(content)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setContentText(if (bytes == null) stage else "$stage · $bytes")
             .setContentIntent(open)
             .setGroup(projection.group)
             .setGroupAlertBehavior(if (projection.silent) NotificationCompat.GROUP_ALERT_SUMMARY else NotificationCompat.GROUP_ALERT_ALL)

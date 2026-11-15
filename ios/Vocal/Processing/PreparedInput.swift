@@ -37,7 +37,8 @@ struct PreparedInput: Codable, Equatable, Sendable {
 
 enum AudioInputPreparationError: Error, Equatable {
   case cancelled, accessDenied, unreadable, storage, invalidSize, invalidAudio, unsupportedFormat
-  case noAudio, defaultTrackUnavailable, durationUnknown, tooLong, policyUnavailable, interrupted
+  case noAudio, defaultTrackUnavailable, durationUnknown, tooLong, policyUnavailable, youtubeLive,
+    youtubePlaylist, youtubeMetadataUnavailable, interrupted
 }
 
 func validProcessingInput(bytes: Int64, duration: Double) -> Bool {

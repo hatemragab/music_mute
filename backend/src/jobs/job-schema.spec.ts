@@ -46,41 +46,6 @@ describe('durable job schema boundaries', () => {
     expect(JobSchema.path('admissionSnapshot')?.options.immutable).toBe(true);
     expect(JobSchema.path('recipeSnapshot')?.options.immutable).toBe(true);
   });
-  it('keeps shared URL references optional, validated and immutable', () => {
-    const local = new Job();
-    expect(local.sharedSourceKey).toBeNull();
-    expect(local.sharedResultKey).toBeNull();
-    const shared = new Job({
-      sharedSourceKey: 'a'.repeat(64),
-      sharedResultKey: 'b'.repeat(64),
-    });
-    expect(shared.validateSync()?.errors).not.toHaveProperty('sharedSourceKey');
-    expect(shared.validateSync()?.errors).not.toHaveProperty('sharedResultKey');
-    expect(
-      new Job({
-        sharedSourceKey: 'raw-url',
-        sharedResultKey: 'f'.repeat(63),
-      }).validateSync()?.errors,
-    ).toHaveProperty('sharedSourceKey');
-    expect(
-      new Job({ sharedResultKey: 'f'.repeat(63) }).validateSync()?.errors,
-    ).toHaveProperty('sharedResultKey');
-    expect(JobSchema.path('sharedSourceKey')?.options.immutable).toBe(true);
-    expect(JobSchema.path('sharedResultKey')?.options.immutable).toBe(true);
-  });
-  it('indexes ready owned URL outputs without imposing uniqueness on historical jobs', () => {
-    const index = JobSchema.indexes().find(
-      ([, options]) => options.name === 'jobs_owner_cached_output',
-    );
-    expect(index?.[0]).toEqual({ userId: 1, 'outputObject.key': 1 });
-    expect(index?.[1].unique).not.toBe(true);
-    expect(index?.[1].partialFilterExpression).toEqual({
-      sourceKind: 'url',
-      status: 'ready',
-      deletedAt: null,
-      'outputObject.key': { $type: 'string' },
-    });
-  });
   it('contains no execution ownership or claim queue fields and indexes', () => {
     for (const path of [
       'workerId',

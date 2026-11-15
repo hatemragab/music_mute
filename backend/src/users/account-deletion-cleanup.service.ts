@@ -11,7 +11,6 @@ import { Job } from '../jobs/job.schema.js';
 import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 import { UserIdentityFenceService } from './user-identity-fence.service.js';
 import { User } from './user.schema.js';
-import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 const LEASE_MS = 60_000;
 const PAGE_SIZE = 20;
@@ -30,7 +29,6 @@ const ACTIVE_JOB_STATUSES = [
 
 const ACCOUNT_RECORD_COLLECTIONS = [
   ['audio_notification_outbox', 'userId'],
-  ['notification_campaign_deliveries', 'userId'],
   ['user_devices', 'userId'],
   ['device_installation_owners', 'userId'],
   ['push_registrations', 'userId'],
@@ -41,14 +39,11 @@ const ACCOUNT_RECORD_COLLECTIONS = [
   ['account_daily_usage_periods', 'accountId'],
   ['upload_grant_receipts', 'accountId'],
   ['download_grant_receipts', 'accountId'],
-  ['audio_purged_job_requests', 'accountId'],
   ['processing_reservations', 'accountId'],
   ['account_policy_overrides', 'accountId'],
   ['abuse_event_buckets', 'accountId'],
   ['abuse_monthly_summaries', 'accountId'],
   ['account_restrictions', 'accountId'],
-  ['media_imports', 'userId'],
-  ['local_media_syncs', 'userId'],
 ] as const;
 
 type PurgePhase = NonNullable<User['deletionPhase']>;
@@ -59,7 +54,7 @@ type OwnedPurge = {
 };
 
 type AttemptArtifact = Document & {
-  outputObject?: { key?: unknown; etag?: unknown } | null;
+  outputObject?: { key?: unknown; versionId?: unknown } | null;
   outputReservation?: { key?: unknown } | null;
 };
 
@@ -328,25 +323,26 @@ export class AccountDeletionCleanupService {
         typeof attempt.outputObject?.key === 'string'
           ? attempt.outputObject.key
           : null;
-      if (reservationKey && !isSharedMediaKey(reservationKey))
+      const versionId =
+        typeof attempt.outputObject?.versionId === 'string'
+          ? attempt.outputObject.versionId
+          : null;
+      if (reservationKey)
         await this.storageCleanup.schedule({
           key: reservationKey,
           ownerUserId: userId,
           reason: 'AUDIO_OUTPUT_ORPHANED',
           nextAt: now,
-          settleUntil: new Date(now.getTime() + 4_500_000),
+          settleUntil: now,
         });
-      if (
-        outputKey &&
-        outputKey !== reservationKey &&
-        !isSharedMediaKey(outputKey)
-      )
+      if (outputKey && outputKey !== reservationKey)
         await this.storageCleanup.schedule({
           key: outputKey,
+          versionId,
           ownerUserId: userId,
           reason: 'AUDIO_OUTPUT_ORPHANED',
           nextAt: now,
-          settleUntil: new Date(now.getTime() + 4_500_000),
+          settleUntil: now,
         });
     }
     await collection.deleteMany({

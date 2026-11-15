@@ -1,7 +1,6 @@
 import { SetMetadata } from '@nestjs/common';
 
 export const PUBLIC_ROUTE = Symbol('PUBLIC_ROUTE');
-export const OPTIONAL_AUTH = Symbol('OPTIONAL_AUTH');
 export const ALLOW_UNPROVISIONED = Symbol('ALLOW_UNPROVISIONED');
 export const AUTH_OPERATION = Symbol('AUTH_OPERATION');
 export const PROCESSING_ACCESS = Symbol('PROCESSING_ACCESS');
@@ -15,7 +14,6 @@ export type AuthOperation =
   | 'logout'
   | 'account-deletion'
   | 'account-recovery'
-  | 'worker-installation'
   | 'processing-read'
   | 'processing-create'
   | 'processing-upload-grant'
@@ -25,8 +23,6 @@ export type AuthOperation =
   | 'processing-cancel'
   | 'processing-mutation';
 export const Public = () => SetMetadata(PUBLIC_ROUTE, true);
-/** Guest reads are public; supplied credentials use the full account trust path. */
-export const OptionalAuth = () => SetMetadata(OPTIONAL_AUTH, true);
 export const AllowUnprovisioned = () => SetMetadata(ALLOW_UNPROVISIONED, true);
 export const LimitOperation = (operation: AuthOperation) =>
   SetMetadata(AUTH_OPERATION, operation);

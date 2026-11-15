@@ -1,43 +1,48 @@
-import { useLiveQuery, useRealtime } from "@/realtime/hooks";
-import { useState, useSyncExternalStore } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { JobStageTimings } from "./job-stage-timings";
-import { formatStageDuration } from "./job-timing-format";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Ban } from "lucide-react";
 import { Link, useParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
 import type { JobDetail } from "@/api/contracts";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import {
   ErrorState,
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime, formatDuration } from "@/lib/format";
-import { cancelJob } from "./jobs-api";
+import { useVisibleInterval } from "@/hooks/use-visible-interval";
+import { cancelJob, getJob } from "./jobs-api";
 import { JobMediaPanel } from "./job-media-panel";
 import { JobSourceLink } from "./job-source-link";
 
 export function JobDetailPage() {
   const { id = "" } = useParams();
   const client = useApiClient();
-  const realtime = useRealtime();
-  const connection = useSyncExternalStore(realtime.onState, realtime.getState);
   const queryClient = useQueryClient();
   const { can } = useAdminSession();
   const [cancelling, setCancelling] = useState(false);
-  const job = useLiveQuery({
+  const job = useQuery({
     queryKey: ["job", id],
-    resource: "admin.job",
-    params: { id },
+    queryFn: () => getJob(client, id),
     enabled: Boolean(id),
   });
+  const isTerminal = ["ready", "failed", "cancelled"].includes(
+    job.data?.status ?? "",
+  );
+  useVisibleInterval(
+    () => void job.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.criticalDetail,
+    Boolean(id) && !isTerminal,
+  );
   const mutate = useMutation({
     mutationFn: async ({
       current,
@@ -82,6 +87,10 @@ export function JobDetailPage() {
         description={data.id}
         actions={
           <>
+            <RefreshButton
+              refreshing={job.isFetching}
+              onRefresh={() => void job.refetch()}
+            />
             {can("jobs.manage") && cancelEligible ? (
               <Button variant="outline" onClick={() => setCancelling(true)}>
                 <Ban aria-hidden="true" /> Request cancellation
@@ -102,24 +111,11 @@ export function JobDetailPage() {
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Queue position</dt>
-                  <dd>
-                    {data.status !== "queued"
-                      ? "Not queued"
-                      : connection !== "live"
-                        ? "Reconnecting…"
-                        : (data.queuePosition ??
-                          "Waiting · position unavailable")}
-                  </dd>
+                  <dd>{data.queuePosition ?? "Not queued"}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Server total</dt>
-                  <dd>
-                    {data.serverStageTimings?.totalMs != null &&
-                    !data.serverStageTimings.totalComplete
-                      ? "At least "
-                      : ""}
-                    {formatStageDuration(data.serverStageTimings?.totalMs)}
-                  </dd>
+                  <dt className="text-muted-foreground">Elapsed</dt>
+                  <dd>{formatDuration(data.elapsedSeconds)}</dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Created</dt>
@@ -175,11 +171,22 @@ export function JobDetailPage() {
         </Card>
         <Card>
           <CardContent className="p-5">
-            <PageSection title="Stage durations">
-              <JobStageTimings
-                timings={data.serverStageTimings}
-                workerTimings={data.workerStageTimings}
-              />
+            <PageSection title="Stage timing">
+              <ul className="space-y-3">
+                {data.stageTimings.map((stage) => (
+                  <li
+                    key={stage.stage}
+                    className="grid grid-cols-[1fr_auto] gap-3 border-b pb-2 text-sm"
+                  >
+                    <span className="capitalize">
+                      {stage.stage.replaceAll("_", " ")}
+                    </span>
+                    <span className="font-mono text-muted-foreground">
+                      {formatDuration(stage.durationSeconds)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </PageSection>
           </CardContent>
         </Card>

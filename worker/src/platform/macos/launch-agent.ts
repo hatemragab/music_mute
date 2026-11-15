@@ -1,19 +1,8 @@
 import { execFile as nodeExecFile } from "node:child_process";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  realpath,
-  rename,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { MAC_USER_SERVICE_LABEL, type MacUserLayout } from "./user-paths.js";
-import {
-  readAppBinding,
-  resolveMacAppExecutionLayout,
-} from "./app-installation-binding.js";
 
 const execFilePromise = promisify(nodeExecFile);
 
@@ -27,24 +16,6 @@ export type LaunchAgentExecutor = (
   arguments_: readonly string[],
 ) => Promise<LaunchAgentExecutionResult>;
 
-export type MacLaunchAgentErrorCode =
-  "WORKER_SERVICE_ENABLE_FAILED" | "WORKER_SERVICE_START_FAILED";
-
-export class MacLaunchAgentError extends Error {
-  public constructor(
-    public readonly code: MacLaunchAgentErrorCode,
-    cause: unknown,
-  ) {
-    super(
-      code === "WORKER_SERVICE_ENABLE_FAILED"
-        ? "MusicMute worker service could not be enabled"
-        : "MusicMute worker service could not be started",
-      { cause },
-    );
-    this.name = "MacLaunchAgentError";
-  }
-}
-
 export interface LaunchAgentStatus {
   loaded: boolean;
   running: boolean;
@@ -57,10 +28,6 @@ export interface MacUserLaunchQualification {
   fixtureSha256: string;
   reportPath: string;
   releaseRoot: string;
-  externalExecution?: Pick<
-    MacUserLayout,
-    "pythonPath" | "ffmpegPath" | "ffprobePath" | "nodePath" | "engineRoot"
-  >;
 }
 
 export function renderLaunchAgentPlist(
@@ -92,24 +59,19 @@ export function renderLaunchAgentPlist(
   const qualificationPythonPath =
     qualification === undefined
       ? layout.pythonPath
-      : (qualification.externalExecution?.pythonPath ??
-        join(qualification.releaseRoot, "runtime", "python", "bin", "python3"));
+      : join(qualification.releaseRoot, "runtime", "python", "bin", "python3");
   const qualificationFfmpegPath =
     qualification === undefined
       ? layout.ffmpegPath
-      : (qualification.externalExecution?.ffmpegPath ??
-        join(qualification.releaseRoot, "runtime", "bin", "ffmpeg"));
+      : join(qualification.releaseRoot, "runtime", "bin", "ffmpeg");
   const qualificationFfprobePath =
     qualification === undefined
       ? layout.ffprobePath
-      : (qualification.externalExecution?.ffprobePath ??
-        join(qualification.releaseRoot, "runtime", "bin", "ffprobe"));
+      : join(qualification.releaseRoot, "runtime", "bin", "ffprobe");
   const qualificationNodeBinPath =
     qualification === undefined
       ? dirname(layout.nodePath)
-      : qualification.externalExecution
-        ? dirname(qualification.externalExecution.nodePath)
-        : join(qualification.releaseRoot, "runtime", "node", "bin");
+      : join(qualification.releaseRoot, "runtime", "node", "bin");
   const arguments_ =
     qualification === undefined
       ? [layout.nodePath, layout.cliPath, "run", "--config", layout.configPath]
@@ -139,8 +101,7 @@ export function renderLaunchAgentPlist(
   const workingDirectory =
     qualification === undefined
       ? layout.installRoot
-      : (qualification.externalExecution?.engineRoot ??
-        join(qualification.releaseRoot, "app", "engine"));
+      : join(qualification.releaseRoot, "app", "engine");
   const runtimePath = `${dirname(qualificationFfmpegPath)}:${qualificationNodeBinPath}:/usr/bin:/bin:/usr/sbin:/sbin`;
   const keepAlive =
     qualification === undefined
@@ -209,54 +170,15 @@ export async function writeLaunchAgentPlist(
   layout: MacUserLayout,
   qualification?: MacUserLaunchQualification,
 ): Promise<void> {
-  const executionLayout = await resolveMacAppExecutionLayout(
-    layout,
-    qualification?.releaseRoot,
-  );
-  const external =
-    qualification && (await readAppBinding(qualification.releaseRoot));
-  const qualified =
-    qualification && external
-      ? { ...qualification, externalExecution: executionLayout }
-      : qualification;
   await mkdir(dirname(layout.plistPath), { recursive: true, mode: 0o700 });
   const temporary = `${layout.plistPath}.${process.pid}.tmp`;
-  await writeFile(
-    temporary,
-    renderLaunchAgentPlist(executionLayout, qualified),
-    {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    },
-  );
+  await writeFile(temporary, renderLaunchAgentPlist(layout, qualification), {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
   await rename(temporary, layout.plistPath);
   await chmod(layout.plistPath, 0o600);
-  if (qualification === undefined) await writeSupportCli(executionLayout);
-}
-
-/** A current private support CLI, independent of any older global npm install. */
-async function writeSupportCli(layout: MacUserLayout): Promise<void> {
-  const root = join(layout.installRoot, "bin");
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  const info = await lstat(root);
-  if (
-    !info.isDirectory() ||
-    info.isSymbolicLink() ||
-    (info.mode & 0o077) !== 0 ||
-    (await realpath(root)) !== join(await realpath(layout.installRoot), "bin")
-  )
-    throw new TypeError("Worker support CLI directory is unsafe");
-  const quoted = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const path = join(root, "mw");
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(
-    temporary,
-    `#!/bin/sh\nexec ${quoted(layout.nodePath)} ${quoted(layout.cliPath)} "$@"\n`,
-    { flag: "wx", mode: 0o700 },
-  );
-  await rename(temporary, path);
-  await chmod(path, 0o700);
 }
 
 export class MacLaunchAgentController {
@@ -269,35 +191,11 @@ export class MacLaunchAgentController {
   }
 
   public async bootstrap(plistPath: string): Promise<void> {
-    // launchd retains a disabled override even after the plist and app data
-    // are removed. Callers fence deliberate Stop/Pause/Drain before startup;
-    // an intentional bootstrap must restore only this user's worker label.
-    try {
-      await this.execute("/bin/launchctl", ["enable", this.service]);
-    } catch (error) {
-      throw new MacLaunchAgentError("WORKER_SERVICE_ENABLE_FAILED", error);
-    }
-    try {
-      await this.execute("/bin/launchctl", [
-        "bootstrap",
-        this.domain,
-        plistPath,
-      ]);
-    } catch (error) {
-      throw new MacLaunchAgentError("WORKER_SERVICE_START_FAILED", error);
-    }
+    await this.execute("/bin/launchctl", ["bootstrap", this.domain, plistPath]);
   }
 
   public async bootout(): Promise<void> {
     await this.execute("/bin/launchctl", ["bootout", this.service]);
-    // launchctl can acknowledge removal while the label is still registered.
-    // Do not let qualification, activation or removal race that teardown.
-    const deadline = performance.now() + 30_000;
-    while ((await this.status()).loaded) {
-      if (performance.now() >= deadline)
-        throw new Error("MusicMute worker service did not unload");
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-    }
   }
 
   public async kickstart(): Promise<void> {
@@ -322,7 +220,7 @@ export class MacLaunchAgentController {
     } catch (error) {
       const code = (error as { code?: unknown }).code;
       // launchctl exits with EX_NOTFOUND (113) when the label is absent.
-      if (code === "ESRCH" || code === 113)
+      if (code === "ESRCH" || code === "ENOENT" || code === 113)
         return { loaded: false, running: false };
       throw error;
     }

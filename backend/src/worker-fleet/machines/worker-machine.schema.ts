@@ -34,7 +34,6 @@ export interface WorkerHardwareReport {
 }
 
 export interface WorkerRuntimeIdentity {
-  installationProfile?: 'windows-user';
   workerVersion: string;
   protocolVersion: number;
   manifestDigest: string;
@@ -99,7 +98,6 @@ export const WorkerHardwareReportSchema = new MongoSchema<WorkerHardwareReport>(
 export const WorkerRuntimeIdentitySchema =
   new MongoSchema<WorkerRuntimeIdentity>(
     {
-      installationProfile: { type: String, enum: ['windows-user'] },
       workerVersion: { type: String, required: true, maxlength: 100 },
       protocolVersion: {
         type: Number,
@@ -173,14 +171,6 @@ export class WorkerMachine {
     match: UUID_V4_PATTERN,
   })
   _id!: string;
-  /** Informational provenance survives sign-out, account changes and deletion. */
-  @Prop({
-    type: String,
-    immutable: true,
-    default: null,
-    match: /^[a-f0-9]{24}$/,
-  })
-  registeredByUserId!: string | null;
   @Prop({ required: true, match: SHA256_HEX_PATTERN })
   credentialDigest!: string;
   @Prop({ type: Number, default: 1, min: 1, validate: Number.isSafeInteger })
@@ -219,9 +209,6 @@ export class WorkerMachine {
   acknowledgedDiagnosticSequence!: number;
   @Prop({ type: Date, default: null }) lastSeenAt!: Date | null;
   @Prop({ type: Date, default: null }) revokedAt!: Date | null;
-  // Keep the credential digest only for authenticated deletion notice/cleanup.
-  // Deleted machines never appear in fleet reads or receive worker authority.
-  @Prop({ type: Date, default: null }) deletedAt!: Date | null;
   @Prop({ type: Number, default: 0, min: 0, validate: Number.isSafeInteger })
   revision!: number;
   createdAt!: Date;
@@ -233,9 +220,19 @@ WorkerMachineSchema.index(
   { credentialDigest: 1 },
   { unique: true, name: 'worker_machine_credential_unique' },
 );
-
-// One ordered scan serves all optional dashboard filters.
 WorkerMachineSchema.index(
-  { lastSeenAt: -1, _id: 1 },
-  { name: 'worker_machine_seen' },
+  { status: 1, lastSeenAt: -1, _id: 1 },
+  { name: 'worker_machine_status_seen' },
+);
+WorkerMachineSchema.index(
+  { groupId: 1, status: 1, _id: 1 },
+  { name: 'worker_machine_group_status' },
+);
+WorkerMachineSchema.index(
+  { 'approvedCapabilities.platform': 1, lastSeenAt: -1, _id: 1 },
+  { name: 'worker_machine_platform_seen' },
+);
+WorkerMachineSchema.index(
+  { 'runtimeIdentity.workerVersion': 1, lastSeenAt: -1, _id: 1 },
+  { name: 'worker_machine_release_seen' },
 );

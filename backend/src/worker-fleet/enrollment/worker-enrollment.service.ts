@@ -1,15 +1,10 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { ClientSession, Connection, Model } from 'mongoose';
-import { trusted } from 'mongoose';
 import { AdminOperationsService } from '../../admin/admin-operations.service.js';
-import { AdminAuditService } from '../../admin/admin-audit.service.js';
 import { adminError } from '../../admin/admin-errors.js';
 import type { AdminActor } from '../../admin/admin.types.js';
-import { User } from '../../users/user.schema.js';
-import { authError } from '../../auth/auth.errors.js';
-import type { VerifiedIdentity } from '../../auth/auth.types.js';
 import { Job } from '../../jobs/job.schema.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import { WorkerAttempt } from '../jobs/worker-attempt.schema.js';
@@ -30,10 +25,8 @@ import type {
   ExchangeWorkerInvitationDto,
   ReportWorkerInstallationDto,
   WorkerLifecycleDto,
-  WorkerMachineDeletionDto,
 } from './worker-enrollment.dto.js';
 import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-sanitizer.js';
-import { UUID_V4_PATTERN } from '../worker-fleet.types.js';
 import {
   DEFAULT_WORKER_RECIPE_ID,
   QUALIFIED_MODEL_DIGEST,
@@ -47,7 +40,7 @@ function digest(value: string): string {
 
 function deriveCredential(secret: string, domain: string, id: string): string {
   return createHmac('sha256', Buffer.from(secret, 'base64url'))
-    .update(`musicmute-worker:${domain}:${id}`, 'utf8')
+    .update(`musicmute-worker/v1:${domain}:${id}`, 'utf8')
     .digest('base64url');
 }
 
@@ -66,7 +59,6 @@ function canonical(value: unknown): string {
 }
 
 function normalizeReport(dto: ReportWorkerInstallationDto) {
-  const { installationProfile, ...runtime } = dto.runtime;
   return {
     label: dto.label,
     groupId: dto.groupId ?? null,
@@ -77,10 +69,7 @@ function normalizeReport(dto: ReportWorkerInstallationDto) {
         memoryBytes: gpu.memoryBytes ?? null,
       })),
     },
-    runtimeIdentity: {
-      ...runtime,
-      ...(installationProfile === undefined ? {} : { installationProfile }),
-    },
+    runtimeIdentity: dto.runtime,
     capabilities: dto.capabilities,
     reportSummary: sanitizeWorkerDiagnosticLine(dto.summary),
   };
@@ -96,24 +85,6 @@ function isQualified(dto: {
   const gpuIds = new Set(dto.hardware.gpus.map((gpu) => gpu.id));
   const architecture = dto.hardware.architecture.toLowerCase();
   const os = dto.hardware.os.toLowerCase();
-  if (dto.runtime.installationProfile !== undefined) {
-    const build = /^(?:10\.0\.)?([0-9]{4,6})(?:\.[0-9]+)?$/.exec(
-      dto.hardware.osBuild,
-    )?.[1];
-    if (
-      dto.runtime.installationProfile !== 'windows-user' ||
-      !os.includes('windows') ||
-      !['amd64', 'x64', 'x86_64'].includes(architecture) ||
-      !build ||
-      Number(build) < 19045 ||
-      dto.capabilities.some(
-        (capability) =>
-          capability.platform !== 'windows-amd64' ||
-          capability.provider !== 'directml',
-      )
-    )
-      return false;
-  }
   return dto.capabilities.every((capability) => {
     if (!gpuIds.has(capability.gpuId)) return false;
     if (!capability.recipeIds.includes(DEFAULT_WORKER_RECIPE_ID)) return false;
@@ -145,65 +116,7 @@ export class WorkerEnrollmentService {
     private readonly attempts: Model<WorkerAttempt>,
     @InjectModel(Job.name) private readonly jobs: Model<Job>,
     private readonly operations: AdminOperationsService,
-    @InjectModel(User.name) private readonly users: Model<User>,
-    @Optional() private readonly audit?: AdminAuditService,
   ) {}
-
-  async createUserInvitation(userId: string, identity: VerifiedIdentity) {
-    if (identity.provider !== 'google.com')
-      throw authError('GOOGLE_SIGN_IN_REQUIRED');
-    const credential = randomBytes(32).toString('base64url');
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-    const session = await this.connection.startSession();
-    try {
-      await session.withTransaction(async () => {
-        const allowed = await this.users.updateOne(
-          {
-            _id: userId,
-            firebaseUid: identity.uid,
-            status: 'active',
-            workerRegistrationAllowed: true,
-            sessionsRevokedAfterSec: trusted({ $lt: identity.authTimeSec }),
-          },
-          { $inc: { accessRevision: 1 } },
-          { session },
-        );
-        if (allowed.modifiedCount !== 1)
-          throw authError('WORKER_REGISTRATION_NOT_ALLOWED');
-        await this.invitations.create(
-          [
-            {
-              _id: randomUUID(),
-              codeDigest: digest(credential),
-              createdByUid: identity.uid,
-              registeredByUserId: userId,
-              state: 'active',
-              expiresAt,
-            },
-          ],
-          { session },
-        );
-      });
-      return { credential, expiresAt: expiresAt.toISOString() };
-    } finally {
-      await session.endSession();
-    }
-  }
-
-  private async assertRegistrationAllowed(
-    userId: string | null | undefined,
-    session: ClientSession,
-  ) {
-    if (!userId) return;
-    // A write to the account serializes first activation with permission/status changes.
-    // It is deliberately used only before activation, never during machine operations.
-    const allowed = await this.users.updateOne(
-      { _id: userId, status: 'active', workerRegistrationAllowed: true },
-      { $inc: { accessRevision: 1 } },
-      { session },
-    );
-    if (allowed.modifiedCount !== 1) throw workerError('WORKER_FORBIDDEN');
-  }
 
   async createInvitation(actor: AdminActor, dto: CreateWorkerInvitationDto) {
     const code = randomBytes(32).toString('base64url');
@@ -328,19 +241,10 @@ export class WorkerEnrollmentService {
             .session(session)
             .lean();
           if (!existing) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-          if (existing.phase !== 'activated')
-            await this.assertRegistrationAllowed(
-              invitation.registeredByUserId,
-              session,
-            );
           return { installation: existing, replayed: true };
         }
         if (invitation.state !== 'active' || invitation.useCount !== 0)
           throw workerError('WORKER_UNAUTHENTICATED');
-        await this.assertRegistrationAllowed(
-          invitation.registeredByUserId,
-          session,
-        );
         const installationId = randomUUID();
         const credential = deriveCredential(
           principal.credential,
@@ -373,7 +277,6 @@ export class WorkerEnrollmentService {
             {
               _id: installationId,
               invitationId: invitation._id,
-              registeredByUserId: invitation.registeredByUserId ?? null,
               credentialDigest: digest(credential),
               exchangeRequestId: dto.requestId,
               phase: 'restricted',
@@ -481,10 +384,6 @@ export class WorkerEnrollmentService {
           installation.capabilities.length === 0
         )
           throw workerError('WORKER_CONFLICT');
-        await this.assertRegistrationAllowed(
-          installation.registeredByUserId,
-          session,
-        );
         const qualified = isQualified({
           hardware: installation.hardwareReport,
           runtime: installation.runtimeIdentity,
@@ -504,7 +403,6 @@ export class WorkerEnrollmentService {
         const machineId = randomUUID();
         const machine = await new this.machines({
           _id: machineId,
-          registeredByUserId: installation.registeredByUserId ?? null,
           credentialDigest: dto.credentialDigest,
           status: 'active',
           label: installation.label,
@@ -561,116 +459,6 @@ export class WorkerEnrollmentService {
     return this.changeMachine(actor, id, dto, 'revoked');
   }
 
-  async deleteMachine(
-    actor: AdminActor,
-    id: string,
-    dto: WorkerMachineDeletionDto,
-  ) {
-    if (!UUID_V4_PATTERN.test(id)) throw adminError('INVALID_REQUEST');
-    const audit = this.audit;
-    if (!audit) throw adminError('DEPENDENCY_UNAVAILABLE');
-    const result = await this.operations.run(
-      actor,
-      {
-        operationId: dto.operationId,
-        route: 'POST /admin/workers/machines/:id/deletions',
-        request: {
-          id,
-          expectedRevision: dto.expectedRevision,
-          registrationUserId: dto.registrationUserId ?? null,
-          expectedUserRevision: dto.expectedUserRevision ?? null,
-        },
-        action: 'workers.machine.delete',
-        resourceType: 'worker_machine',
-        reason: dto.reason,
-      },
-      async (session) => {
-        const machine = await this.machines
-          .findById(id)
-          .session(session)
-          .lean();
-        if (!machine || machine.deletedAt)
-          throw adminError('RESOURCE_NOT_FOUND');
-        if (machine.revision !== dto.expectedRevision)
-          throw adminError('REVISION_CONFLICT');
-        const registrationUserId =
-          machine.registeredByUserId ?? dto.registrationUserId;
-        if (
-          !registrationUserId ||
-          (machine.registeredByUserId &&
-            dto.registrationUserId &&
-            machine.registeredByUserId !== dto.registrationUserId)
-        )
-          throw adminError('INVALID_REQUEST');
-        const user = await this.users
-          .findById(registrationUserId)
-          .session(session)
-          .lean();
-        if (!user && !machine.registeredByUserId)
-          throw adminError('RESOURCE_NOT_FOUND');
-        if (user) {
-          const previousRevision = user.adminRevision ?? 0;
-          if (dto.expectedUserRevision !== previousRevision)
-            throw adminError('REVISION_CONFLICT');
-          const disabled = await this.users.updateOne(
-            {
-              _id: user._id,
-              ...(user.adminRevision === undefined
-                ? { adminRevision: trusted({ $exists: false }) }
-                : { adminRevision: previousRevision }),
-            },
-            {
-              $set: { workerRegistrationAllowed: false },
-              $inc: { adminRevision: 1 },
-            },
-            { session, runValidators: true },
-          );
-          if (disabled.modifiedCount !== 1)
-            throw adminError('REVISION_CONFLICT');
-          await audit.record(
-            {
-              actorUid: actor.uid,
-              action: 'users.worker_registration.update',
-              resourceType: 'user',
-              resourceId: registrationUserId,
-              operationId: dto.operationId,
-              reason: dto.reason,
-              previousRevision,
-              nextRevision: previousRevision + 1,
-              outcome: 'succeeded',
-            },
-            session,
-          );
-        }
-        const now = new Date();
-        const deleted = await this.machines
-          .findOneAndUpdate(
-            { _id: id, revision: dto.expectedRevision, deletedAt: null },
-            {
-              $set: {
-                status: 'revoked',
-                revokedAt: machine.revokedAt ?? now,
-                deletedAt: now,
-                currentSession: null,
-              },
-              $inc: { revision: 1, credentialRevision: 1 },
-            },
-            { session, returnDocument: 'after', runValidators: true },
-          )
-          .lean();
-        if (!deleted) throw adminError('REVISION_CONFLICT');
-        await this.fenceRevokedMachine(id, now, session);
-        return {
-          resourceId: id,
-          previousRevision: dto.expectedRevision,
-          revision: deleted.revision,
-          value: null,
-        };
-      },
-    );
-    return result.receipt;
-  }
-
   private async changeMachine(
     actor: AdminActor,
     id: string,
@@ -707,7 +495,7 @@ export class WorkerEnrollmentService {
     session: ClientSession,
   ) {
     const machine = await this.machines.findById(id).session(session).lean();
-    if (!machine || machine.deletedAt) throw adminError('RESOURCE_NOT_FOUND');
+    if (!machine) throw adminError('RESOURCE_NOT_FOUND');
     if (machine.revision !== expectedRevision)
       throw adminError('REVISION_CONFLICT');
     const allowed =
@@ -739,7 +527,34 @@ export class WorkerEnrollmentService {
       .lean();
     if (!updated) throw adminError('REVISION_CONFLICT');
     if (target === 'revoked') {
-      await this.fenceRevokedMachine(id, now, session);
+      await this.installations.updateMany(
+        { machineId: id, phase: 'activated' },
+        {
+          $set: { phase: 'revoked', revokedAt: now },
+          $inc: { revision: 1 },
+        },
+        { session, runValidators: true },
+      );
+      await this.jobs.updateMany(
+        { 'currentExecution.machineId': id },
+        {
+          $set: {
+            'currentExecution.leaseExpiresAt': now,
+          },
+        },
+        { session, runValidators: true },
+      );
+      await this.attempts.updateMany(
+        {
+          machineId: id,
+          state: { $in: ['claimed', 'running', 'uploading'] },
+        },
+        {
+          $set: { leaseExpiresAt: now },
+          $inc: { revision: 1 },
+        },
+        { session, runValidators: true },
+      );
     }
     return {
       resourceId: id,
@@ -747,41 +562,6 @@ export class WorkerEnrollmentService {
       revision: updated.revision,
       value: { status: updated.status },
     };
-  }
-
-  private async fenceRevokedMachine(
-    id: string,
-    now: Date,
-    session: ClientSession,
-  ) {
-    await this.installations.updateMany(
-      { machineId: id, phase: 'activated' },
-      {
-        $set: { phase: 'revoked', revokedAt: now },
-        $inc: { revision: 1 },
-      },
-      { session, runValidators: true },
-    );
-    await this.jobs.updateMany(
-      { 'currentExecution.machineId': id },
-      {
-        $set: {
-          'currentExecution.leaseExpiresAt': now,
-        },
-      },
-      { session, runValidators: true },
-    );
-    await this.attempts.updateMany(
-      {
-        machineId: id,
-        state: { $in: ['claimed', 'running', 'uploading'] },
-      },
-      {
-        $set: { leaseExpiresAt: now },
-        $inc: { revision: 1 },
-      },
-      { session, runValidators: true },
-    );
   }
 
   private assertInstallation(principal: WorkerPrincipal, id: string): void {

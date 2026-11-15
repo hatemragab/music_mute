@@ -1,10 +1,10 @@
 import type { Connection } from 'mongoose';
-import type { ClientPlatform } from '../auth/auth.types.js';
+import type { Platform } from '../auth/auth.types.js';
 
 const DAY_MS = 86_400_000;
 
 export interface DeviceStatisticsGroup {
-  platform: ClientPlatform;
+  platform: Platform;
   appVersion: string;
   buildNumber: number;
   installations: number;

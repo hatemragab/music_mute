@@ -1,25 +1,20 @@
 from __future__ import annotations
 
 import sys
-import io
-import subprocess
 import tempfile
 import time
-import threading
 import unittest
 
 import numpy as np
 import soundfile as sf
 from pathlib import Path
-from types import SimpleNamespace
 from subprocess import CompletedProcess
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from musicmute_engine.limits import (
     MAX_INPUT_BYTES,
     MAX_LOSSLESS_SAMPLES,
     MAX_PCM16_BYTES,
-    MAX_OUTPUT_BYTES,
     MAX_TOOL_OUTPUT_BYTES,
 )
 from musicmute_engine.media import (
@@ -55,39 +50,6 @@ class OversizedSoundFile:
 
 
 class MediaLimitTests(unittest.TestCase):
-    def test_console_tool_detach_is_windows_only_and_preserves_capture_and_environment(self) -> None:
-        for system in ("win32", "darwin"):
-            for capture in (True, False):
-                with self.subTest(system=system, capture=capture):
-                    process = SimpleNamespace(stdout=io.BytesIO(b"ok\n"), stderr=io.BytesIO(b""),
-                                              wait=Mock(return_value=0), poll=Mock(return_value=0),
-                                              kill=Mock(), returncode=0)
-                    arguments = ["private-tool", "--fixture"]
-                    with patch("musicmute_engine.media.sys.platform", system), patch("musicmute_engine.media.subprocess.Popen", return_value=process) as spawn:
-                        result = _run(arguments, 5, "failed", capture_output=capture)
-                    self.assertEqual(result.stdout, "ok\n" if capture else "")
-                    options = spawn.call_args.kwargs
-                    self.assertEqual(spawn.call_args.args, (arguments,))
-                    self.assertEqual(options["creationflags"], 0x8 if system == "win32" else 0)
-                    self.assertEqual(options["creationflags"] & 0x01000000, 0)
-                    self.assertFalse(options["shell"])
-                    pipe = subprocess.PIPE if capture else subprocess.DEVNULL
-                    self.assertEqual(options["stdout"], pipe); self.assertEqual(options["stderr"], pipe)
-                    self.assertLessEqual(set(options["env"]), {"PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR"})
-                    process.kill.assert_not_called()
-                    if capture:
-                        self.assertTrue(process.stdout.closed); self.assertTrue(process.stderr.closed)
-
-    def test_detached_console_tool_timeout_keeps_kill_wait_and_sanitized_failure(self) -> None:
-        process = SimpleNamespace(stdout=io.BytesIO(b"partial"), stderr=io.BytesIO(b""),
-                                  wait=Mock(side_effect=[subprocess.TimeoutExpired("fixture", 5), 0]),
-                                  poll=Mock(return_value=None), kill=Mock(), returncode=0)
-        with patch("musicmute_engine.media.sys.platform", "win32"), patch("musicmute_engine.media.subprocess.Popen", return_value=process), self.assertRaisesRegex(MediaProcessingError, "timed out"):
-            _run(["private-tool"], 5, "timed out")
-        process.kill.assert_called_once_with()
-        self.assertEqual(process.wait.call_count, 2)
-        self.assertTrue(process.stdout.closed); self.assertTrue(process.stderr.closed)
-
     def test_noisy_tool_is_killed_before_its_timeout(self) -> None:
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):
@@ -102,7 +64,7 @@ class MediaLimitTests(unittest.TestCase):
 
     def test_tool_timeout_and_normal_output_are_preserved(self) -> None:
         result = _run([sys.executable, "-B", "-c", "print('ok')"], 5, "failed")
-        self.assertEqual(result.stdout.splitlines(), ["ok"])
+        self.assertEqual(result.stdout, "ok\n")
         with self.assertRaisesRegex(MediaProcessingError, "timed out"):
             _run([sys.executable, "-B", "-c", "import time; time.sleep(30)"], 0.1, "timed out")
 
@@ -139,91 +101,6 @@ class MediaLimitTests(unittest.TestCase):
                 _, identity = validate_mp3(source, Path("/ffprobe"))
                 self.assertEqual(identity.sha256, "digest")
                 digest.assert_called_once_with(source)
-
-    def test_final_output_probe_and_hash_run_concurrently(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "output.mp3"
-            source.write_bytes(b"fixture")
-            hash_started = threading.Event()
-            probe_finished = threading.Event()
-            info = AudioInfo(1, 44100, 2)
-
-            def checksum(_path: Path) -> str:
-                hash_started.set()
-                self.assertTrue(probe_finished.wait(2))
-                return "digest"
-
-            def probe(_path: Path, _ffprobe: Path) -> AudioInfo:
-                self.assertTrue(hash_started.wait(2))
-                probe_finished.set()
-                return info
-
-            with patch("musicmute_engine.media.probe_audio", side_effect=probe), patch(
-                "musicmute_engine.media.sha256_base64", side_effect=checksum
-            ):
-                output_info, identity = validate_mp3(source, Path("/ffprobe"))
-            self.assertEqual(output_info, info)
-            self.assertEqual(identity.bytes, len(b"fixture"))
-            self.assertEqual(identity.sha256, "digest")
-
-    def test_failed_output_probe_settles_hash_before_returning(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "output.mp3"
-            source.write_bytes(b"fixture")
-            hash_started = threading.Event()
-            hash_release = threading.Event()
-            hash_finished = threading.Event()
-            probe_failed = threading.Event()
-            validation_finished = threading.Event()
-            failures: list[BaseException] = []
-
-            def checksum(_path: Path) -> str:
-                hash_started.set()
-                self.assertTrue(hash_release.wait(2))
-                hash_finished.set()
-                return "digest"
-
-            def probe(_path: Path, _ffprobe: Path) -> AudioInfo:
-                self.assertTrue(hash_started.wait(2))
-                probe_failed.set()
-                raise MediaProcessingError("invalid output")
-
-            def validate() -> None:
-                try:
-                    validate_mp3(source, Path("/ffprobe"))
-                except BaseException as error:
-                    failures.append(error)
-                finally:
-                    validation_finished.set()
-
-            with patch("musicmute_engine.media.probe_audio", side_effect=probe), patch(
-                "musicmute_engine.media.sha256_base64", side_effect=checksum
-            ):
-                validator = threading.Thread(target=validate)
-                validator.start()
-                try:
-                    self.assertTrue(probe_failed.wait(2))
-                    self.assertFalse(validation_finished.wait(0.05))
-                finally:
-                    hash_release.set()
-                    validator.join(2)
-                self.assertFalse(validator.is_alive())
-            self.assertTrue(hash_finished.is_set())
-            self.assertEqual(len(failures), 1)
-            self.assertIsInstance(failures[0], MediaProcessingError)
-
-    def test_oversized_output_is_rejected_before_probe_or_hash(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "output.mp3"
-            with source.open("wb") as output:
-                output.truncate(MAX_OUTPUT_BYTES + 1)
-            with patch("musicmute_engine.media.probe_audio") as probe, patch(
-                "musicmute_engine.media.sha256_base64"
-            ) as digest:
-                with self.assertRaisesRegex(MediaProcessingError, "Output size"):
-                    validate_mp3(source, Path("/ffprobe"))
-            probe.assert_not_called()
-            digest.assert_not_called()
 
     def test_final_mp3_encoding_uses_the_catalog_bitrate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -27,12 +27,6 @@ test('processing documents commit together and abort without partial job or erro
     userId,
     requestId: randomUUID(),
     requestHash: 'a'.repeat(64),
-    extra_data: {
-      schema_version: 1,
-      provider: 'fixture',
-      audio_codec: 'mp3',
-      raw: 'must-not-persist',
-    },
     inputReservation: {
       key: `users/${userId}/jobs/${jobId}/input/test.mp3`,
       extension: 'mp3',
@@ -83,40 +77,21 @@ test('processing documents commit together and abort without partial job or erro
     );
   });
   assert.equal(await jobs.countDocuments({ _id: jobId }), 1);
-  assert.deepEqual((await jobs.findById(jobId).lean()).extra_data, {
-    schema_version: 1,
-    provider: 'fixture',
-    audio_codec: 'mp3',
-  });
   assert.equal(await errors.countDocuments({ jobId }), 1);
-  for (const name of [
-    'Job',
-    'PurgedJobRequest',
-    'NotificationOutbox',
-    'ProcessingAdmissionFence',
-  ]) {
-    const indexes = await connection.model(name).listIndexes();
+  const boundedUsageModels = new Set([
+    'AccountUsagePeriod',
+    'AccountDailyUsagePeriod',
+    'ProcessingReservation',
+    'UploadGrantReceipt',
+    'DownloadGrantReceipt',
+    'ServiceUsagePeriod',
+  ]);
+  for (const entry of PROCESSING_MODELS) {
+    if (boundedUsageModels.has(entry.name)) continue; // Closed usage, settled reservations and idempotency receipts have bounded retention.
+    const indexes = await connection.model(entry.name).listIndexes();
     assert.ok(
       indexes.every((index) => index.expireAfterSeconds === undefined),
-      `${name} must retain live history, replay protection, and coordination records`,
+      'retained records must not expire',
     );
   }
-  const errorTtlIndexes = (await errors.listIndexes()).filter(
-    (index) => index.expireAfterSeconds !== undefined,
-  );
-  assert.equal(errorTtlIndexes.length, 1);
-  assert.deepEqual(errorTtlIndexes[0].key, { purgeAt: 1 });
-  assert.equal(errorTtlIndexes[0].expireAfterSeconds, 0);
-  const activeError = await errors.findOne({ jobId }).lean();
-  assert.equal(activeError.finalizedAt, null);
-  assert.equal(
-    activeError.purgeAt,
-    null,
-    'unfinished errors have no TTL deadline',
-  );
-  assert.equal((await jobs.findById(jobId).lean()).status, 'awaiting_upload');
-  assert.ok(
-    await errors.exists({ _id: activeError._id, purgeAt: null }),
-    'active errors remain alongside their live job',
-  );
 });

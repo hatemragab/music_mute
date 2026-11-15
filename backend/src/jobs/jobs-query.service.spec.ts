@@ -4,7 +4,6 @@ import {
   JobsQueryService,
 } from './jobs-query.service.js';
 import { Types } from 'mongoose';
-import { authError } from '../auth/auth.errors.js';
 
 describe('history cursor', () => {
   it('round trips stable date and object id', () => {
@@ -28,15 +27,15 @@ describe('history cursor', () => {
   });
 });
 
-describe('owned job snapshots and accounted result grants', () => {
+describe('accounted result grants', () => {
   const requestId = 'de8be0bb-f574-4b90-b9c0-2adcc8f04c29';
 
-  function fixture() {
+  function fixture(available = true) {
     const userId = new Types.ObjectId();
     const jobId = new Types.ObjectId();
     const outputObject = {
       key: `users/${userId}/jobs/${jobId}/attempts/a/vocals.mp3`,
-      etag: '"output-v1"',
+      versionId: 'output-v1',
       bytes: 2_048,
       sha256: 'B'.repeat(43) + '=',
       contentType: 'audio/mpeg',
@@ -48,16 +47,6 @@ describe('owned job snapshots and accounted result grants', () => {
       deletedAt: null,
       outputObject,
       inputObject: null,
-      inputReservation: {
-        extension: 'webm',
-        bytes: 1_024,
-        contentType: 'audio/webm',
-        sha256: 'C'.repeat(43) + '=',
-        durationSeconds: 12,
-      },
-      requestId,
-      createdAt: new Date('2026-09-20T00:00:00.000Z'),
-      updatedAt: new Date('2026-09-20T00:00:00.000Z'),
     };
     const jobs = {
       findOne: vi.fn((filter: { userId?: Types.ObjectId }) => {
@@ -70,11 +59,9 @@ describe('owned job snapshots and accounted result grants', () => {
         };
       }),
     };
-    const access = {
-      assertActive: vi.fn().mockResolvedValue(undefined),
-      assertActiveReadOnly: vi.fn().mockResolvedValue(undefined),
-    };
+    const access = { assertActive: vi.fn().mockResolvedValue(undefined) };
     const storage = {
+      isPinnedObjectAvailable: vi.fn().mockResolvedValue(available),
       createDownloadGrant: vi.fn().mockResolvedValue({
         url: 'https://storage.invalid/result',
         expiresAt: '2026-09-20T00:10:00.000Z',
@@ -99,117 +86,6 @@ describe('owned job snapshots and accounted result grants', () => {
     );
     return { service, job, jobs, access, storage, usage };
   }
-
-  it('reads an owned snapshot without acquiring a command or grant write fence', async () => {
-    const f = fixture();
-
-    await expect(
-      f.service.detail(f.job.userId.toHexString(), f.job._id.toHexString()),
-    ).resolves.toMatchObject({ id: f.job._id.toHexString(), status: 'ready' });
-
-    expect(f.access.assertActiveReadOnly).toHaveBeenCalledTimes(2);
-    expect(f.access.assertActiveReadOnly).toHaveBeenCalledWith(
-      f.job.userId.toHexString(),
-    );
-    expect(f.access.assertActive).not.toHaveBeenCalled();
-    expect(f.usage.reserveDownloadGrant).not.toHaveBeenCalled();
-    expect(f.storage.createDownloadGrant).not.toHaveBeenCalled();
-  });
-
-  it('does not expose another account snapshot', async () => {
-    const f = fixture();
-    const other = new Types.ObjectId();
-
-    await expect(
-      f.service.detail(other.toHexString(), f.job._id.toHexString()),
-    ).rejects.toMatchObject({ response: { code: 'JOB_NOT_FOUND' } });
-
-    expect(f.jobs.findOne).toHaveBeenCalledWith({
-      _id: f.job._id,
-      userId: other,
-    });
-    expect(f.access.assertActive).not.toHaveBeenCalled();
-  });
-
-  it('does not read job data for a disabled account', async () => {
-    const f = fixture();
-    f.access.assertActiveReadOnly.mockRejectedValueOnce(
-      authError('ACCOUNT_DISABLED'),
-    );
-
-    await expect(
-      f.service.detail(f.job.userId.toHexString(), f.job._id.toHexString()),
-    ).rejects.toMatchObject({ response: { code: 'ACCOUNT_DISABLED' } });
-
-    expect(f.jobs.findOne).not.toHaveBeenCalled();
-    expect(f.access.assertActive).not.toHaveBeenCalled();
-  });
-
-  it('withholds a snapshot if the account is disabled during the job lookup', async () => {
-    const f = fixture();
-    let finishLookup!: (job: typeof f.job) => void;
-    const lookup = new Promise<typeof f.job>((resolve) => {
-      finishLookup = resolve;
-    });
-    f.jobs.findOne.mockReturnValueOnce({
-      lean: vi.fn(() => lookup),
-      session: vi.fn(),
-    });
-    const pending = f.service.detail(
-      f.job.userId.toHexString(),
-      f.job._id.toHexString(),
-    );
-    await vi.waitFor(() => expect(f.jobs.findOne).toHaveBeenCalledOnce());
-    f.access.assertActiveReadOnly.mockRejectedValueOnce(
-      authError('ACCOUNT_DISABLED'),
-    );
-    finishLookup(f.job);
-
-    await expect(pending).rejects.toMatchObject({
-      response: { code: 'ACCOUNT_DISABLED' },
-    });
-    expect(f.access.assertActiveReadOnly).toHaveBeenCalledTimes(2);
-    expect(f.access.assertActive).not.toHaveBeenCalled();
-  });
-
-  it('does not expose a deleted job snapshot', async () => {
-    const f = fixture();
-    f.job.deletedAt = new Date();
-
-    await expect(
-      f.service.detail(f.job.userId.toHexString(), f.job._id.toHexString()),
-    ).rejects.toMatchObject({ response: { code: 'JOB_NOT_FOUND' } });
-
-    expect(f.access.assertActive).not.toHaveBeenCalled();
-  });
-
-  it('withholds a grant if account disablement occurs while storage signs it', async () => {
-    const f = fixture();
-    f.storage.createDownloadGrant.mockImplementationOnce(async () => {
-      f.access.assertActiveReadOnly.mockRejectedValueOnce(
-        authError('ACCOUNT_DISABLED'),
-      );
-      return {
-        url: 'https://storage.invalid/result',
-        expiresAt: '2026-09-20T00:10:00.000Z',
-      };
-    });
-
-    await expect(
-      f.service.download(
-        f.job.userId.toHexString(),
-        f.job._id.toHexString(),
-        'output',
-        requestId,
-      ),
-    ).rejects.toMatchObject({ response: { code: 'ACCOUNT_DISABLED' } });
-
-    expect(f.usage.reserveDownloadGrant).toHaveBeenCalledOnce();
-    expect(f.access.assertActive).toHaveBeenCalledExactlyOnceWith(
-      f.job.userId.toHexString(),
-      { transaction: true },
-    );
-  });
 
   it('checks the pinned result and reserves one account/service estimate before signing', async () => {
     const f = fixture();
@@ -237,16 +113,10 @@ describe('owned job snapshots and accounted result grants', () => {
       f.job.outputObject,
       new Date('2026-09-20T00:10:00.000Z'),
     );
-    expect(f.access.assertActive).toHaveBeenCalledExactlyOnceWith(
-      f.job.userId.toHexString(),
-      { transaction: true },
-    );
-    expect(f.access.assertActiveReadOnly).toHaveBeenCalledTimes(4);
   });
 
   it('does not charge or sign a missing pinned result', async () => {
-    const f = fixture();
-    f.job.outputObject = null;
+    const f = fixture(false);
 
     await expect(
       f.service.download(
@@ -262,8 +132,9 @@ describe('owned job snapshots and accounted result grants', () => {
 
   it('does not charge when immutable object metadata changes before accounting', async () => {
     const f = fixture();
-    f.access.assertActive.mockImplementationOnce(async () => {
+    f.storage.isPinnedObjectAvailable.mockImplementation(async () => {
       f.job.outputObject = { ...f.job.outputObject, bytes: 4_096 };
+      return true;
     });
 
     await expect(

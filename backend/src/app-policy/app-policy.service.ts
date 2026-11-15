@@ -2,7 +2,7 @@ import { HttpException, Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { authError } from '../auth/auth.errors.js';
-import type { ClientPlatform } from '../auth/auth.types.js';
+import type { Platform } from '../auth/auth.types.js';
 import { Release } from '../releases/release.schema.js';
 import { AppPolicy } from './app-policy.schema.js';
 import { defaultPolicy, validatePolicy } from './access-policy.js';
@@ -29,11 +29,8 @@ export class AppPolicyService {
 
   async assertProcessingTargetAvailable(
     policy: AppPolicy,
-    platform: ClientPlatform,
+    platform: Platform,
   ): Promise<void> {
-    if (platform === 'web') return;
-    // Desktop build gates are independent of Android/iOS store selection.
-    if (platform === 'macos' || platform === 'windows') return;
     const channel = policy.platforms[platform];
     const selection = channel.releaseSelection;
     const id =
@@ -85,14 +82,7 @@ export class AppPolicyService {
           {
             $set: {
               requireVerifiedEmail: next.requireVerifiedEmail,
-              'platforms.android': next.platforms.android,
-              'platforms.ios': next.platforms.ios,
-              ...(next.platforms.macos
-                ? { 'platforms.macos': next.platforms.macos }
-                : {}),
-              ...(next.platforms.windows
-                ? { 'platforms.windows': next.platforms.windows }
-                : {}),
+              platforms: next.platforms,
               revision: expectedRevision + 1,
               updatedAt: new Date(),
             },

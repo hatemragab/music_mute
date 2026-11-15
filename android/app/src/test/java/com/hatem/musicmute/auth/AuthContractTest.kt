@@ -13,35 +13,6 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AuthContractTest {
-    @Test fun verifiedIdentityDoesNotHideReducedQuotasBeforeProfileSync() {
-        val state = accountState(identityVerified = true, profileVerified = false)
-            .copy(profileSyncPending = true)
-        assertEquals(false, state.accountEmailVerified)
-    }
-
-    @Test fun successfulProfileSyncUnlocksVerifiedAccountStatus() {
-        val state = accountState(identityVerified = true, profileVerified = false)
-        assertEquals(true, state.copy(profile = state.profile!!.copy(emailVerified = true)).accountEmailVerified)
-    }
-
-    @Test fun offlineAccountUsesCachedProfileWithoutIdentity() {
-        assertEquals(false, accountState(null, false, offline = true).accountEmailVerified)
-        assertEquals(true, accountState(null, true, offline = true).accountEmailVerified)
-    }
-
-    @Test fun identityVerificationIsOnlyFallbackWhenProfileIsUnavailable() {
-        assertEquals(false, accountState(false, null).accountEmailVerified)
-        assertEquals(true, accountState(true, null).accountEmailVerified)
-        assertNull(accountState(null, null).accountEmailVerified)
-    }
-
-    private fun accountState(identityVerified: Boolean?, profileVerified: Boolean?, offline: Boolean = false) = AuthUiState(
-        phase = AuthPhase.AUTHENTICATED,
-        identity = identityVerified?.let { IdentitySnapshot("uid", "listener@example.test", it, setOf(PASSWORD_PROVIDER)) },
-        profile = profileVerified?.let { AccountProfile("profile-1", "Listener", "listener@example.test", it, listOf(PASSWORD_PROVIDER)) },
-        offline = offline,
-    )
-
     @Test fun removesDeviceHistoryWithAuthenticatedEmptyDelete() = runTest {
         val id = "0e47b60a-4835-4cc3-a5b9-2d64d48f8c19"
         val api = client(AuthHttpTransport { url, method, headers, body ->
@@ -61,7 +32,7 @@ class AuthContractTest {
     }
 
     private val profile =
-        """{"id":"profile-1","display_name":"Listener","email":null,"email_verified":false,"providers":["apple.com"]}"""
+        """{"id":"profile-1","displayName":"Listener","email":null,"emailVerified":false,"providers":["apple.com"]}"""
 
     private fun client(
         transport: AuthHttpTransport,
@@ -75,7 +46,7 @@ class AuthContractTest {
             assertEquals("DELETE", method)
             assertNull(body)
             assertEquals("Bearer token", headers["Authorization"])
-            AuthHttpResponse(202, """{"request_id":"receipt","status":"accepted","recover_until":"2026-09-26T00:00:00.000Z"}""")
+            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
         })
         assertEquals("receipt", api.deleteAccount().requestId)
     }
@@ -89,9 +60,9 @@ class AuthContractTest {
     }
 
     @Test fun deletionRejectsUnexpectedSuccessAndMalformedReceipt() = runTest {
-        listOf(AuthHttpResponse(200, """{"request_id":"receipt","status":"accepted"}"""),
-            AuthHttpResponse(202, """{"request_id":"","status":"accepted"}"""),
-            AuthHttpResponse(202, """{"request_id":"receipt","status":"completed"}""")).forEach { response ->
+        listOf(AuthHttpResponse(200, """{"requestId":"receipt","status":"accepted"}"""),
+            AuthHttpResponse(202, """{"requestId":"","status":"accepted"}"""),
+            AuthHttpResponse(202, """{"requestId":"receipt","status":"completed"}""")).forEach { response ->
             val api = client(AuthHttpTransport { _, _, _, _ -> response })
             assertEquals(AuthProblem.SERVICE_UNAVAILABLE, (runCatching { api.deleteAccount() }.exceptionOrNull() as AuthFailure).problem)
         }
@@ -101,7 +72,7 @@ class AuthContractTest {
         var uid = "first"
         val api = client(AuthHttpTransport { _, _, _, _ ->
             uid = "second"
-            AuthHttpResponse(202, """{"request_id":"receipt","status":"accepted","recover_until":"2026-09-26T00:00:00.000Z"}""")
+            AuthHttpResponse(202, """{"requestId":"receipt","status":"accepted","recoverUntil":"2026-09-26T00:00:00.000Z"}""")
         }, uid = { uid })
         assertEquals("receipt", api.deleteAccount("first").requestId)
     }
@@ -120,7 +91,7 @@ class AuthContractTest {
                 assertEquals("{}", body)
                 AuthHttpResponse(
                     202,
-                    """{"id":"recovery-1","status":"pending","reason":null,"requested_at":"2026-09-11T00:00:00.000Z","reviewed_at":null,"review_reason":null,"revision":0}""",
+                    """{"id":"recovery-1","status":"pending","reason":null,"requestedAt":"2026-09-11T00:00:00.000Z","reviewedAt":null,"reviewReason":null,"revision":0}""",
                 )
             }
         })
@@ -143,7 +114,7 @@ class AuthContractTest {
                 assertFalse(AuthConfiguration(it, false).isConfigured())
             }
         assertEquals(
-            "https://example.test",
+            "https://example.test/api/v1",
             AuthConfiguration("https://example.test/", false).apiRoot(),
         )
         assertTrue(AuthConfiguration("http://127.0.0.1:3000", true).isConfigured())

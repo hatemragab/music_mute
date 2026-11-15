@@ -3,14 +3,6 @@ import { Controller, Get, Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
-import { BullRegistrar, getQueueToken } from '@nestjs/bullmq';
-import {
-  IMPORT_QUEUE,
-  ImportsService,
-} from '../../src/url-imports/imports.service.js';
-import { ImportProcessor } from '../../src/url-imports/import-processor.js';
-import { ImportRuntime } from '../../src/url-imports/import-runtime.js';
-import { MediaImport } from '../../src/url-imports/media-import.schema.js';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Types } from 'mongoose';
 import { vi } from 'vitest';
@@ -46,10 +38,6 @@ import { AdminOperation } from '../../src/admin/admin-operation.schema.js';
 import { AdminOwnerFence } from '../../src/admin/admin-owner-fence.schema.js';
 import { Release } from '../../src/releases/release.schema.js';
 import { ReleaseUpload } from '../../src/releases/release-upload.schema.js';
-import {
-  MacosUpdate,
-  MacosUpdateConfiguration,
-} from '../../src/macos-updates/macos-update.schema.js';
 import { AdminAlert } from '../../src/admin-observability/admin-alert.schema.js';
 import { AdminAlertObservation } from '../../src/admin-observability/admin-alert-observation.schema.js';
 import { ProcessingAdmissionFence } from '../../src/admin-settings/processing-settings.schema.js';
@@ -64,15 +52,6 @@ import type {
 import { StorageCleanupTask } from '../../src/storage/storage-cleanup-task.schema.js';
 import { AbuseEventsService } from '../../src/abuse-protection/abuse-events.service.js';
 import { AccountRestrictionsService } from '../../src/abuse-protection/account-restrictions.service.js';
-import { YouTubeCommunityService } from '../../src/youtube-community/youtube-community.service.js';
-import { JobRenditionService } from '../../src/worker-fleet/attempts/job-rendition.service.js';
-import {
-  YouTubeGuestSession,
-  YouTubeContribution,
-  YouTubeContributionLease,
-  YouTubeCommunityBudget,
-  YouTubeCommunityCleanup,
-} from '../../src/youtube-community/youtube-community.schema.js';
 
 // AppModule's infrastructure is replaced below. Prevent its eager configuration
 // import from consulting any developer dotenv file before that override applies.
@@ -92,16 +71,6 @@ export const deviceReport = {
   osVersion: '16',
   deviceModel: 'Test device',
 };
-
-export const wireDeviceReport = {
-  installation_id: deviceReport.installationId,
-  platform: deviceReport.platform,
-  app_version: deviceReport.appVersion,
-  build_number: deviceReport.buildNumber,
-  metadata_revision: deviceReport.metadataRevision,
-  os_version: deviceReport.osVersion,
-  device_model: deviceReport.deviceModel,
-};
 @Controller('processing-probe')
 class ProcessingProbeController {
   @Get() @RequireProcessingAccess() run() {
@@ -110,20 +79,6 @@ class ProcessingProbeController {
 }
 
 export async function authFixture() {
-  const urlImports = { create: vi.fn(), get: vi.fn() };
-  const community = {
-    issueSession: vi.fn(),
-    authenticate: vi.fn(),
-    delivery: vi.fn(),
-    create: vi.fn(),
-    get: vi.fn(),
-    sourceDelivery: vi.fn(),
-    renewLease: vi.fn(),
-    grants: vi.fn(),
-    complete: vi.fn(),
-    fail: vi.fn(),
-    snapshot: vi.fn(),
-  };
   const events: string[] = [];
   const ownerId = new Types.ObjectId();
   const otherId = new Types.ObjectId();
@@ -307,7 +262,6 @@ export async function authFixture() {
         load: [
           () => ({
             APP_ENV: 'test',
-            PUBLIC_SITE_ORIGIN: 'https://example.invalid',
             NODE_ENV: 'test',
             FIREBASE_PROJECT_ID: 'demo-musicmute',
             FIREBASE_WEB_API_KEY: 'fixture-key',
@@ -318,13 +272,8 @@ export async function authFixture() {
             CORS_ORIGINS: '',
             TRUST_PROXY: 'false',
             REDIS_URL: 'redis://127.0.0.1:1/0',
-            STORAGE_PROVIDER: 'r2',
-            STORAGE_REGION: 'auto',
-            STORAGE_ENDPOINT:
-              'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com',
-            STORAGE_ACCESS_KEY_ID: 'fixture-access-key',
-            STORAGE_SECRET_ACCESS_KEY: 'fixture-secret-key',
-            STORAGE_BUCKET: 'fixture-bucket',
+            AWS_REGION: 'us-east-1',
+            S3_BUCKET: 'fixture-bucket',
             AUDIO_PROCESSING_ENABLED: false,
             PROCESSING_URL_SECONDS: 600,
             PROCESSING_OUTPUT_MAX_BYTES: 30_000_000,
@@ -383,15 +332,6 @@ export async function authFixture() {
       disconnect: () => undefined,
       quit: async () => undefined,
     });
-  builder
-    .overrideProvider(BullRegistrar)
-    .useValue({ register: () => undefined });
-  builder.overrideProvider(getQueueToken(IMPORT_QUEUE)).useValue({});
-  builder.overrideProvider(ImportProcessor).useValue({});
-  builder.overrideProvider(ImportRuntime).useValue({});
-  builder.overrideProvider(ImportsService).useValue(urlImports);
-  builder.overrideProvider(YouTubeCommunityService).useValue(community);
-  builder.overrideProvider(JobRenditionService).useValue({ wake: vi.fn() });
   for (const name of [
     User.name,
     UserIdentityFence.name,
@@ -405,20 +345,12 @@ export async function authFixture() {
     AdminOwnerFence.name,
     Release.name,
     ReleaseUpload.name,
-    MacosUpdate.name,
-    MacosUpdateConfiguration.name,
     AdminAlert.name,
     AdminAlertObservation.name,
     AccountPolicy.name,
     AccountPolicyOverride.name,
     ProcessingAdmissionFence.name,
     StorageCleanupTask.name,
-    MediaImport.name,
-    YouTubeGuestSession.name,
-    YouTubeContribution.name,
-    YouTubeContributionLease.name,
-    YouTubeCommunityBudget.name,
-    YouTubeCommunityCleanup.name,
     ...PROCESSING_MODELS.map(({ name }) => name),
   ])
     builder.overrideProvider(getModelToken(name)).useValue({
@@ -447,7 +379,5 @@ export async function authFixture() {
     installations,
     ownerId,
     otherId,
-    urlImports,
-    community,
   };
 }

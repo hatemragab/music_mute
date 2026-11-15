@@ -15,9 +15,7 @@ import {
 } from '../../admin/admin.decorators.js';
 import type { AuthRequest } from '../../auth/auth-request.js';
 import {
-  ApproveWorkerCapacityDto,
   AdminWorkerListQueryDto,
-  AdminWorkerPageQueryDto,
   RequestWorkerBenchmarkDto,
   RequestWorkerDoctorDto,
   UpdateWorkerFleetPolicyDto,
@@ -45,7 +43,7 @@ export class AdminWorkerControlController {
     return this.control.machineDetail(request.adminActor!, id);
   }
 
-  @Post('machines/:id/diagnostic-runs')
+  @Post('machines/:id/doctor')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -57,7 +55,7 @@ export class AdminWorkerControlController {
     return this.control.requestDoctor(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/benchmark-runs')
+  @Post('machines/:id/benchmark')
   @RequireAdminPermission('workers.manage')
   @RequireFreshAdminAuth()
   @LimitAdmin('sensitive')
@@ -69,37 +67,18 @@ export class AdminWorkerControlController {
     return this.control.requestBenchmark(request.adminActor!, id, dto);
   }
 
-  @Post('machines/:id/capacity-approvals')
-  @RequireAdminPermission('workers.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  approveCapacity(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() dto: ApproveWorkerCapacityDto,
-  ) {
-    return this.control.approveCapacity(request.adminActor!, id, dto);
-  }
-
   @Get('machines/:id/diagnostics')
   @RequireAdminPermission('workers.logs.read')
   @LimitAdmin('read')
-  diagnostics(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Query() query: AdminWorkerPageQueryDto,
-  ) {
-    return this.control.machineDiagnostics(request.adminActor!, id, query);
+  diagnostics(@Req() request: AuthRequest, @Param('id') id: string) {
+    return this.control.machineDiagnostics(request.adminActor!, id);
   }
 
   @Get('invitations')
   @RequireAdminPermission('workers.enroll')
   @LimitAdmin('read')
-  invitations(
-    @Req() request: AuthRequest,
-    @Query() query: AdminWorkerPageQueryDto,
-  ) {
-    return this.control.listInvitations(request.adminActor!, query);
+  invitations(@Req() request: AuthRequest) {
+    return this.control.listInvitations(request.adminActor!);
   }
 
   @Get('policy')

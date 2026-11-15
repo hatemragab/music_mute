@@ -4,9 +4,6 @@ import {
   type ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Response } from 'express';
-import { ConfigService } from '@nestjs/config';
-import { WORKER_RATE_LIMIT_DEFAULTS } from '../../config/environment.js';
 import { createHash } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
@@ -19,21 +16,10 @@ import {
   WORKER_CREDENTIAL_KIND,
   WORKER_ALLOW_REVOKED_MACHINE,
   WORKER_ROUTE,
-  WORKER_RATE_CLASS,
   type WorkerCredentialKind,
-  type WorkerRateClass,
 } from './worker-auth.decorators.js';
 import type { WorkerRequest } from './worker-auth.types.js';
 import { workerError } from '../worker-errors.js';
-import { RateBudgetService } from '../../rate-limits/rate-budget.service.js';
-import { RateLimitKeys } from '../../rate-limits/rate-limit-keys.js';
-
-const perMinute: Record<WorkerRateClass, number> = {
-  standard: WORKER_RATE_LIMIT_DEFAULTS.WORKER_STANDARD_PER_MINUTE,
-  poll: WORKER_RATE_LIMIT_DEFAULTS.WORKER_POLL_PER_MINUTE,
-  transfer: WORKER_RATE_LIMIT_DEFAULTS.WORKER_TRANSFER_PER_MINUTE,
-  telemetry: WORKER_RATE_LIMIT_DEFAULTS.WORKER_TELEMETRY_PER_MINUTE,
-};
 
 @Injectable()
 export class WorkerAuthGuard implements CanActivate {
@@ -45,9 +31,6 @@ export class WorkerAuthGuard implements CanActivate {
     private readonly installations: Model<WorkerInstallationSession>,
     @InjectModel(WorkerMachine.name)
     private readonly machines: Model<WorkerMachine>,
-    private readonly budgets: RateBudgetService,
-    private readonly keys: RateLimitKeys,
-    private readonly config: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -67,7 +50,6 @@ export class WorkerAuthGuard implements CanActivate {
       ) === true;
     if (!kind) throw workerError('WORKER_UNAUTHENTICATED');
     const request = context.switchToHttp().getRequest<WorkerRequest>();
-    await this.assertPreauthBudget(request.ip ?? 'unknown', context);
     const header = request.headers.authorization;
     const count = (request.rawHeaders ?? []).filter(
       (value, index) =>
@@ -95,7 +77,6 @@ export class WorkerAuthGuard implements CanActivate {
         subjectId: invitation._id,
         credential,
       };
-      await this.assertBudget(kind, invitation._id, context);
       return true;
     }
     if (kind === 'installation') {
@@ -113,15 +94,12 @@ export class WorkerAuthGuard implements CanActivate {
         subjectId: installation._id,
         credential,
       };
-      await this.assertBudget(kind, installation._id, context);
       return true;
     }
     const machine = await this.machines
       .findOne({ credentialDigest: digest })
       .maxTimeMS(2000)
       .lean();
-    if (machine?.deletedAt && !allowRevokedMachine)
-      throw workerError('WORKER_MACHINE_DELETED');
     if (!machine || (machine.status === 'revoked' && !allowRevokedMachine))
       throw workerError('WORKER_UNAUTHENTICATED');
     request.workerPrincipal = {
@@ -130,99 +108,6 @@ export class WorkerAuthGuard implements CanActivate {
       credential,
       machineStatus: machine.status,
     };
-    await this.assertBudget(kind, machine._id, context);
     return true;
-  }
-
-  private async assertPreauthBudget(
-    ip: string,
-    context: ExecutionContext,
-  ): Promise<void> {
-    const decision = await this.budgets.reserve([
-      {
-        key: this.keys.bucket('worker-preauth-ip', ip),
-        limit: this.config.get<number>(
-          'WORKER_PREAUTH_IP_PER_MINUTE',
-          WORKER_RATE_LIMIT_DEFAULTS.WORKER_PREAUTH_IP_PER_MINUTE,
-        ),
-        windowMs: 60_000,
-      },
-      {
-        key: this.keys.bucket('worker-preauth-service', 'global'),
-        limit: this.config.get<number>(
-          'WORKER_PREAUTH_SERVICE_PER_MINUTE',
-          WORKER_RATE_LIMIT_DEFAULTS.WORKER_PREAUTH_SERVICE_PER_MINUTE,
-        ),
-        windowMs: 60_000,
-      },
-    ]);
-    if (!decision.allowed) {
-      context
-        .switchToHttp()
-        .getResponse<Response>()
-        .setHeader('Retry-After', decision.retryAfterSeconds);
-      throw workerError('WORKER_RATE_LIMITED');
-    }
-  }
-
-  private async assertBudget(
-    kind: WorkerCredentialKind,
-    subjectId: string,
-    context: ExecutionContext,
-  ): Promise<void> {
-    const targets = [context.getHandler(), context.getClass()];
-    const rateClass =
-      this.reflector.getAllAndOverride<WorkerRateClass>(
-        WORKER_RATE_CLASS,
-        targets,
-      ) ?? 'standard';
-    const endpoint = `${context.getClass().name}.${context.getHandler().name}`;
-    const decision = await this.budgets.reserve([
-      {
-        key: this.keys.bucket(`worker-${kind}`, subjectId),
-        limit: this.config.get<number>(
-          kind === 'machine'
-            ? 'WORKER_MACHINE_PER_MINUTE'
-            : kind === 'installation'
-              ? 'WORKER_INSTALLATION_PER_MINUTE'
-              : 'WORKER_ENROLLMENT_PER_MINUTE',
-          kind === 'machine'
-            ? WORKER_RATE_LIMIT_DEFAULTS.WORKER_MACHINE_PER_MINUTE
-            : kind === 'installation'
-              ? WORKER_RATE_LIMIT_DEFAULTS.WORKER_INSTALLATION_PER_MINUTE
-              : WORKER_RATE_LIMIT_DEFAULTS.WORKER_ENROLLMENT_PER_MINUTE,
-        ),
-        windowMs: 60_000,
-      },
-      {
-        key: this.keys.bucket(`worker-${rateClass}`, `${kind}:${subjectId}`),
-        limit: this.config.get<number>(
-          `WORKER_${rateClass.toUpperCase()}_PER_MINUTE`,
-          perMinute[rateClass],
-        ),
-        windowMs: 60_000,
-      },
-      {
-        key: this.keys.bucket('worker-endpoint', endpoint),
-        limit: this.config.get<number>(
-          'WORKER_ENDPOINT_PER_MINUTE',
-          WORKER_RATE_LIMIT_DEFAULTS.WORKER_ENDPOINT_PER_MINUTE,
-        ),
-        windowMs: 60_000,
-      },
-      {
-        key: this.keys.bucket('worker-service', 'global'),
-        limit: this.config.get<number>(
-          'WORKER_SERVICE_PER_MINUTE',
-          WORKER_RATE_LIMIT_DEFAULTS.WORKER_SERVICE_PER_MINUTE,
-        ),
-        windowMs: 60_000,
-      },
-    ]);
-    if (!decision.allowed) {
-      const response = context.switchToHttp().getResponse<Response>();
-      response.setHeader('Retry-After', decision.retryAfterSeconds);
-      throw workerError('WORKER_RATE_LIMITED');
-    }
   }
 }

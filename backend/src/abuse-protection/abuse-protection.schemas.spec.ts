@@ -14,6 +14,8 @@ describe('bounded abuse protection persistence', () => {
       'abuse_event_bucket_unique',
       'abuse_event_account_page',
       'abuse_event_recent_page',
+      'abuse_event_admin_filter',
+      'abuse_event_severity_filter',
       'abuse_event_expiry',
     ]);
     expect(names(AbuseMonthlySummarySchema)).toEqual([
@@ -30,6 +32,7 @@ describe('bounded abuse protection persistence', () => {
   it('uses one account restriction record with bounded admin indexes', () => {
     expect(names(AccountRestrictionSchema)).toEqual([
       'account_restriction_lookup',
+      'account_restriction_admin_page',
     ]);
     expect(
       AccountRestrictionSchema.indexes().find(

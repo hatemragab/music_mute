@@ -15,8 +15,6 @@ import { AuthService } from './auth.service.js';
 import { AuthMailService } from './auth-mail.service.js';
 import { FirebaseMailService } from './firebase-mail.service.js';
 import { LogoutService } from './logout.service.js';
-import { DesktopGoogleTokenExchangesController } from './desktop-google-token-exchanges.controller.js';
-import { DesktopGoogleTokenExchangeService } from './desktop-google-token-exchange.service.js';
 
 @Module({
   imports: [
@@ -27,14 +25,12 @@ import { DesktopGoogleTokenExchangeService } from './desktop-google-token-exchan
     RateLimitsModule,
   ],
   controllers: [
-    DesktopGoogleTokenExchangesController,
     AuthController,
     UsersController,
     DevicesController,
     AppPolicyController,
   ],
   providers: [
-    DesktopGoogleTokenExchangeService,
     AuthService,
     AuthMailService,
     FirebaseMailService,

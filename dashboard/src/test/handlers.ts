@@ -1,5 +1,4 @@
 import { http, HttpResponse } from "msw";
-import { fromWireCase, fromWireUrl, toWireCase } from "../api/wire-case";
 
 import {
   createDashboardFixture,
@@ -9,7 +8,7 @@ import {
 export const createDashboardHandlers = (
   fixture: DashboardFixture = createDashboardFixture(),
 ) => [
-  http.all(/\/admin\//, async ({ request }) => {
+  http.all(/\/api\/v1\//, async ({ request }) => {
     const authorization = request.headers.get("authorization");
     const token = authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
@@ -22,21 +21,18 @@ export const createDashboardHandlers = (
           .catch(() => undefined);
     const response = await fixture.handle({
       method: request.method,
-      url: fromWireUrl(request.url),
+      url: request.url,
       token,
-      body: fromWireCase(body),
+      body,
     });
     return typeof response.body === "string"
       ? new HttpResponse(response.body, {
           status: response.status,
           headers: response.headers,
         })
-      : HttpResponse.json(
-          toWireCase(response.body) as Record<string, unknown>,
-          {
-            status: response.status,
-            headers: response.headers,
-          },
-        );
+      : HttpResponse.json(response.body as Record<string, unknown>, {
+          status: response.status,
+          headers: response.headers,
+        });
   }),
 ];

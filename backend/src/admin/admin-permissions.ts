@@ -2,8 +2,6 @@ import type { AdminPermission, AdminRole } from './admin.types.js';
 
 const permissions: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
   owner: [
-    'notifications.read',
-    'notifications.send',
     'overview.read',
     'jobs.read',
     'jobs.manage',
@@ -11,7 +9,6 @@ const permissions: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
     'users.processing.manage',
     'users.restrictions.manage',
     'users.account-recovery.manage',
-    'users.worker-registration.manage',
     'abuse.read',
     'media.read',
     'releases.read',
@@ -37,7 +34,6 @@ const permissions: Readonly<Record<AdminRole, readonly AdminPermission[]>> = {
     'users.processing.manage',
     'users.restrictions.manage',
     'users.account-recovery.manage',
-    'users.worker-registration.manage',
     'abuse.read',
     'media.read',
     'settings.read',

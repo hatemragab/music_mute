@@ -1,5 +1,5 @@
 import type { Platform } from '../auth/auth.types.js';
-export type Distribution = 'play' | 'app_store';
+export type Distribution = 'direct' | 'play' | 'app_store';
 export type UpdateSource = 'direct_apk' | 'google_play' | 'app_store';
 export type ArtifactState =
   'awaiting_upload' | 'verifying' | 'verified' | 'rejected';
@@ -25,6 +25,14 @@ export interface UpdatePolicySnapshot {
   minimumBuild: number | null;
   target: ReleaseTarget | null;
   checkedAt: string;
+}
+export interface ReleaseDownloadGrant {
+  releaseId: string;
+  url: string;
+  expiresAt: string;
+  bytes: number;
+  sha256Hex: string;
+  signerSha256Hex: string;
 }
 export type UpdateDecision = 'none' | 'optional' | 'required';
 export interface ReleaseDraft {

@@ -17,7 +17,7 @@ class AuthConfiguration(private val origin: String, private val debug: Boolean) 
                 (url.scheme != "https" && !(debug && local && url.scheme == "http"))
         )
             throw AuthFailure(AuthProblem.CONFIGURATION)
-        return value
+        return "$value/api/v1"
     }
 
     fun isConfigured(): Boolean = runCatching { apiRoot() }.isSuccess

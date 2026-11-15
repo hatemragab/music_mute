@@ -2,7 +2,6 @@ package com.hatem.musicmute.ui.auth
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.*
 import com.hatem.musicmute.ui.design.*
 import android.content.Intent
@@ -23,6 +22,7 @@ import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -42,14 +42,22 @@ internal fun AccountScreen(
     LaunchedEffect(state.failure?.problem) {
         if (state.failure?.problem == AuthProblem.REAUTH_REQUIRED && deletionStep == 2) deletionStep = 1
     }
-    var confirmSignOut by remember(state.identity?.uid) { mutableStateOf(false) }
     var confirmGlobalLogout by remember { mutableStateOf(false) }
     var verify by remember { mutableStateOf(false) }
-    LaunchedEffect(state.accountEmailVerified) {
-        if (state.accountEmailVerified == true) verify = false
+    LaunchedEffect(state.identity?.emailVerified) {
+        if (state.identity?.emailVerified == true) verify = false
     }
     fun cancelDeletion() { if (!state.busy) { deletionStep = 0; deletionPassword = "" } }
     BackHandler(deletionStep > 0) { cancelDeletion() }
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(state.verificationCooldownUntil) {
+        now = android.os.SystemClock.elapsedRealtime()
+        while (now < state.verificationCooldownUntil) {
+            delay(1000)
+            now = android.os.SystemClock.elapsedRealtime()
+        }
+    }
+    val cooldown = ((state.verificationCooldownUntil - now + 999) / 1000).coerceAtLeast(0)
     val context = LocalContext.current
     if (deletionStep > 0) {
         AccountDeletionReviewScreen(state, deletionPassword, { deletionPassword = it }, ::cancelDeletion, {
@@ -70,7 +78,7 @@ internal fun AccountScreen(
                 Text(stringResource(R.string.retry))
             }
         }
-        CreativeCard(contentPadding = 16.dp, contentGap = 10.dp) {
+        CreativeCard(contentPadding = 16.dp, contentGap = 8.dp, shape = RoundedCornerShape(14.dp)) {
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 AccountSymbol(Icons.Outlined.Person, Modifier.size(48.dp))
@@ -78,26 +86,14 @@ internal fun AccountScreen(
                     val name = state.identity?.displayName?.takeIf { it.isNotBlank() } ?: state.profile?.displayName?.takeIf { it.isNotBlank() }
                     name?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
                     SelectionContainer { Text(state.identity?.email ?: state.profile?.email ?: stringResource(R.string.auth_no_email), style = MaterialTheme.typography.bodySmall) }
-                    Text(stringResource(if (state.accountEmailVerified == true) R.string.auth_verified else R.string.auth_unverified),
+                    Text(stringResource(if (state.identity?.emailVerified == true) R.string.auth_verified else R.string.auth_unverified),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("auth-verification-status"))
+                    if (state.identity?.emailVerified != true) TextButton(onClick = { verify = true }, enabled = !state.busy) {
+                        Text(stringResource(R.string.creative_account_verify))
+                    }
                 }
             }
             CreativeWave(Modifier.fillMaxWidth().height(28.dp))
-        }
-        if (state.accountEmailVerified == false) {
-            CreativeCard(Modifier.testTag("auth-verification-quota-notice"), contentPadding = 16.dp, contentGap = 8.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Outlined.Email, null, tint = MaterialTheme.colorScheme.primary)
-                    Text(stringResource(R.string.auth_verification_quota_title), style = MaterialTheme.typography.titleMedium)
-                }
-                Text(stringResource(R.string.auth_verification_quota_description),
-                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { verify = true }, enabled = !state.busy,
-                    modifier = Modifier.testTag("auth-open-verification")) {
-                    Text(stringResource(R.string.creative_account_verify))
-                }
-            }
         }
         val accessMessage =
             when {
@@ -109,7 +105,7 @@ internal fun AccountScreen(
                 state.access.reason == "DEVICE_SYNC_REQUIRED" -> R.string.auth_processing_device
                 else -> R.string.auth_processing_unavailable
             }
-        CreativeCard(contentPadding = 16.dp, contentGap = 8.dp) {
+        CreativeCard(contentPadding = 12.dp, contentGap = 8.dp, shape = RoundedCornerShape(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -135,34 +131,16 @@ internal fun AccountScreen(
                 Modifier.weight(1f).widthIn(min = 140.dp).testTag("auth-devices"), !state.busy, onDevices)
         }
         Text(stringResource(R.string.creative_account_session), style = MaterialTheme.typography.labelMedium)
-        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                AccountActionRow(stringResource(R.string.auth_sign_out), Icons.AutoMirrored.Outlined.Logout, Modifier.testTag("auth-sign-out"), !state.busy, onClick = { confirmSignOut = true })
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                AccountActionRow(stringResource(R.string.auth_logout_all), Icons.Outlined.People, Modifier.testTag("auth-logout-all"), !state.busy, onClick = { confirmGlobalLogout = true })
-            }
-        }
-        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f))) {
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                AccountActionRow(stringResource(R.string.account_delete), Icons.Outlined.DeleteOutline, enabled = !state.busy, destructive = true,
-                    onClick = { deletionStep = 1; auth.dismissMessage() })
-            }
-        }
+        AccountActionRow(stringResource(R.string.auth_sign_out), Icons.Outlined.Logout, Modifier.testTag("auth-sign-out"), !state.busy, onClick = auth::signOut)
+        AccountActionRow(stringResource(R.string.auth_logout_all), Icons.Outlined.People, Modifier.testTag("auth-logout-all"), !state.busy, onClick = { confirmGlobalLogout = true })
+        HorizontalDivider()
+        AccountActionRow(stringResource(R.string.account_delete), Icons.Outlined.DeleteOutline, enabled = !state.busy, destructive = true,
+            onClick = { deletionStep = 1; auth.dismissMessage() })
         AccountPublicLinks()
     }
-    if (verify) EmailVerificationSheet(state, state.identity?.email ?: state.profile?.email.orEmpty(), state.verificationCooldownUntil,
+    if (verify) EmailVerificationSheet(state, state.identity?.email ?: state.profile?.email.orEmpty(), cooldown,
         { if (!state.busy) verify = false }, { scope.launch { auth.requestVerification() } },
         { scope.launch { auth.refreshAccount() } }, auth::dismissMessage)
-    if (confirmSignOut) SignOutDialog(
-        state = state,
-        onDismiss = { if (!state.busy) confirmSignOut = false },
-        onConfirm = {
-            confirmSignOut = false
-            auth.signOut()
-        },
-    )
     if (confirmGlobalLogout) SignOutAllSheet(state, { if (!state.busy) confirmGlobalLogout = false },
         { scope.launch { auth.logoutAll() } }, auth::dismissMessage)
 
@@ -171,11 +149,7 @@ internal fun AccountScreen(
 @Composable
 internal fun AccountPublicLinks() {
     val context = LocalContext.current
-    listOf(
-        BuildConfig.PRIVACY_URL to R.string.account_privacy,
-        BuildConfig.DELETION_URL to R.string.account_deletion_help,
-        BuildConfig.SUPPORT_URL to R.string.account_support,
-    ).forEach { (url, label) ->
+    listOf(BuildConfig.PRIVACY_URL to R.string.account_privacy, BuildConfig.DELETION_URL to R.string.account_deletion_help).forEach { (url, label) ->
         if (url.isNotBlank()) TextButton(onClick = {
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }) { Text(stringResource(label)) }
@@ -187,8 +161,7 @@ private fun ProfileActionTile(
     title: String, icon: ImageVector, modifier: Modifier, enabled: Boolean, onClick: () -> Unit,
 ) {
     Surface(onClick = onClick, enabled = enabled, modifier = modifier,
-        shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
+        shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.heightIn(min = 80.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(icon, null, Modifier.size(24.dp))
             Text(title, style = MaterialTheme.typography.labelMedium)

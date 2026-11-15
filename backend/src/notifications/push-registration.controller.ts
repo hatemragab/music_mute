@@ -45,7 +45,7 @@ export class PushRegistrationController {
     );
   }
 
-  @Post(':installationId/push-deactivations')
+  @Post(':installationId/push/deactivate')
   @HttpCode(204)
   @LimitOperation('device')
   async deactivate(

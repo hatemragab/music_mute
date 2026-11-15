@@ -7,7 +7,6 @@ import { AdminReleasesController } from '../src/releases/admin-releases.controll
 import { AdminUpdatePolicyController } from '../src/releases/admin-update-policy.controller.js';
 import { ReleaseDraftsService } from '../src/releases/release-drafts.service.js';
 import { ReleasePublicationService } from '../src/releases/release-publication.service.js';
-import { DesktopUpdatePolicyService } from '../src/releases/desktop-policy.service.js';
 describe('publication HTTP authorization', () => {
   let harness: AdminHarness;
   afterEach(async () => harness?.close());
@@ -22,10 +21,9 @@ describe('publication HTTP authorization', () => {
       providers: [
         { provide: ReleaseDraftsService, useValue: {} },
         { provide: ReleasePublicationService, useValue: publication },
-        { provide: DesktopUpdatePolicyService, useValue: {} },
       ],
     });
-    const path = `/admin/releases/${'a'.repeat(24)}/publications`;
+    const path = `/admin/releases/${'a'.repeat(24)}/publish`;
     await harness.request('post', path, {}).expect(401);
     await harness
       .request('post', path, {}, harness.signInAs('viewer'))
@@ -37,7 +35,7 @@ describe('publication HTTP authorization', () => {
     expect(stale.body.code).toBe('ADMIN_REAUTH_REQUIRED');
     expect(publication.mutate).not.toHaveBeenCalled();
     await harness
-      .request('post', '/admin/update-policy/previews', {}, token)
+      .request('post', '/admin/update-policy/preview', {}, token)
       .expect(201);
     harness.identities.get(token)!.authTimeSec = Math.floor(Date.now() / 1000);
     await harness.request('post', path, {}, token).expect(201);

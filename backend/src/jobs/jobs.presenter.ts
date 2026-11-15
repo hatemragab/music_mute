@@ -1,10 +1,7 @@
-import { presentServerStageTimings } from './job-stage-timing.js';
 import type { Job } from './job.schema.js';
-import { YOUTUBE_SOURCE_URL_PATTERN } from './job-metadata.js';
 import { presentJobTiming } from './job-timing.js';
-import { normalizeThumbnailUrl } from './job-extra-data.js';
 
-export function presentJob(job: Job, includeAttemptTimings = true) {
+export function presentJob(job: Job) {
   const now = new Date();
   const progress = job.workerProgress;
   const processingProgress =
@@ -20,38 +17,12 @@ export function presentJob(job: Job, includeAttemptTimings = true) {
       : null;
   return {
     id: job._id.toHexString(),
-    ...(job.processingOrigin ? { processingOrigin: job.processingOrigin } : {}),
     requestId: job.requestId,
-    sourceUrl:
-      job.sourceUrl && YOUTUBE_SOURCE_URL_PATTERN.test(job.sourceUrl)
-        ? job.sourceUrl
-        : null,
-    recipeDigest:
-      (job.outputRecipeSnapshot ?? job.recipeSnapshot)?.recipeDigest ?? null,
-    localProfileId:
-      job.processingOrigin === 'local_device'
-        ? 'kim-vocal-2-full-timeline-v1'
-        : null,
-    output: job.outputObject
-      ? {
-          extension: 'mp3' as const,
-          contentType: job.outputObject.contentType,
-          bytes: job.outputObject.bytes,
-          sha256: job.outputObject.sha256,
-          durationSeconds: job.measuredOutputDurationSeconds ?? null,
-        }
-      : null,
     sourceTitle: job.sourceTitle ?? null,
     displayName: job.displayName ?? job.sourceTitle ?? null,
-    thumbnailUrl: normalizeThumbnailUrl(job.extra_data?.thumbnail_url),
     sourceKind: job.sourceKind ?? null,
     status: job.status,
     serverTime: now.toISOString(),
-    serverStageTimings: presentServerStageTimings(
-      job,
-      now,
-      includeAttemptTimings,
-    ),
     timing: presentJobTiming(job, now),
     processingProgress,
     stages: {
@@ -68,8 +39,6 @@ export function presentJob(job: Job, includeAttemptTimings = true) {
     input: {
       extension: job.inputReservation.extension,
       bytes: job.inputReservation.bytes,
-      contentType: job.inputReservation.contentType,
-      sha256: job.inputReservation.sha256,
       durationSeconds: job.inputReservation.durationSeconds,
     },
     error: job.lastError
@@ -79,14 +48,7 @@ export function presentJob(job: Job, includeAttemptTimings = true) {
           at: job.lastError.at.toISOString(),
         }
       : null,
-    canDownloadInput:
-      job.inputObject != null && !job.reservationCleanupScheduledAt,
-    comparisonRanges: job.comparisonRanges ?? null,
-    trimEnabled:
-      job.outputRecipeSnapshot?.trimEnabled ??
-      job.requestedTrimEnabled ??
-      job.recipeSnapshot?.trimEnabled ??
-      true,
+    canDownloadInput: job.inputObject !== null,
     canDownloadOutput: job.status === 'ready' && job.outputObject !== null,
   };
 }

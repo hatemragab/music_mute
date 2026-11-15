@@ -5,7 +5,6 @@ import { AdminAccessService } from '../src/admin/admin-access.service.js';
 import {
   createAdminHarness,
   type AdminHarness,
-  wireJson,
 } from './helpers/admin-harness.js';
 
 describe('admin access HTTP boundary', () => {
@@ -70,26 +69,24 @@ describe('admin access HTTP boundary', () => {
       .request(
         'post',
         '/admin/access',
-        wireJson({
+        {
           verifiedEmail: 'target@example.test',
           role: 'viewer',
           operationId: 'e183f234-ac55-4d06-9d08-b92d5d829ed8',
           reason: 'Grant access',
-        }),
+        },
         token,
       )
       .expect(201);
     await request(harness.app.getHttpServer())
-      .patch('/admin/access/target')
+      .patch('/api/v1/admin/access/target')
       .set('Authorization', `Bearer ${token}`)
-      .send(
-        wireJson({
-          role: 'support',
-          expectedRevision: 0,
-          operationId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
-          reason: 'Change duties',
-        }),
-      )
+      .send({
+        role: 'support',
+        expectedRevision: 0,
+        operationId: '14b2d476-e40e-4aeb-a8dd-24db12337695',
+        reason: 'Change duties',
+      })
       .expect(200);
     expect(access.create).toHaveBeenCalledOnce();
     expect(access.update).toHaveBeenCalledOnce();

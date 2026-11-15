@@ -12,8 +12,6 @@
     <string name="creative_library_search">ابحث في ملفاتك الصوتية</string>
     <string name="creative_library_all">الكل</string>
     <string name="creative_library_starred">المفضلة</string>
-    <string name="creative_library_show_starred">عرض المفضلة</string>
-    <string name="creative_library_most_played">الأكثر تشغيلاً</string>
     <string name="creative_library_downloaded">تم تنزيلها</string>
     <string name="creative_library_not_downloaded">غير منزلة</string>
     <string name="creative_library_removed">المخفية</string>
@@ -22,10 +20,6 @@
     <string name="creative_library_sort">ترتيب</string>
     <string name="creative_library_voice">الصوت المعالج</string>
     <string name="creative_library_offline">متاح دون اتصال</string>
-    <string name="creative_library_offline_badge">دون اتصال</string>
-    <string name="creative_library_online_badge">عبر الإنترنت</string>
-    <string name="creative_library_downloading_badge">جارٍ التنزيل</string>
-    <string name="creative_library_unavailable_badge">غير متاح</string>
     <string name="creative_library_remote">نزّل للاستماع دون اتصال</string>
     <string name="creative_library_downloading">جارٍ تنزيل الصوت كاملاً…</string>
     <string name="creative_library_failed">الصوت غير متاح. تحقق من الاتصال أو مساحة التخزين وحاول مجدداً.</string>
@@ -35,7 +29,6 @@
     <string name="creative_library_home">الانتقال للرئيسية</string>
     <string name="creative_library_refresh">تحديث</string>
     <string name="creative_library_play">تشغيل</string>
-    <string name="creative_library_play_now">تشغيل الآن</string>
     <string name="creative_library_pause">إيقاف مؤقت</string>
     <string name="creative_library_next">المقطع التالي</string>
     <string name="creative_library_previous">المقطع السابق</string>
@@ -45,7 +38,6 @@
     <string name="creative_library_download">الاحتفاظ دون اتصال</string>
     <string name="creative_library_restore">استعادة إلى المكتبة</string>
     <string name="creative_library_hide">إزالة من المكتبة</string>
-    <string name="creative_library_hide_title">إزالة من المكتبة؟</string>
     <string name="creative_library_hide_body">يُخفى العنصر من المكتبة فقط. يبقى الملف المنزّل وصوت حسابك. يمكنك العثور عليه ضمن المخفية.</string>
     <string name="creative_library_more">إجراءات الصوت</string>
     <string name="creative_library_now_playing">قيد التشغيل</string>
@@ -70,6 +62,7 @@
     <string name="creative_library_view_job">عرض المهمة</string>
     <string name="creative_library_save_copy">حفظ نسخة</string>
     <string name="creative_library_share">مشاركة</string>
+    <string name="creative_library_job_unavailable">معلومات المهمة غير متاحة. يبقى الصوت المنزّل قابلاً للاستخدام.</string>
     <string name="creative_library_cached_job">معلومات المهمة محفوظة. حدّث عند الاتصال لعرض أحدث حالة.</string>
     <string name="creative_library_availability">التوفر دون اتصال</string>
     <string name="creative_library_remove_queue">إزالة من قائمة التشغيل</string>

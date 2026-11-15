@@ -39,7 +39,7 @@ class ProcessingRepository(
     private val api: JobsApi,
     private val session: () -> ProcessingSession?,
     private val scheduler: ProcessingScheduler,
-    private val uploader: FormUploader = ObjectStorageUploader(),
+    private val uploader: FormUploader = S3FormUploader(),
     private val now: () -> Long = System::currentTimeMillis,
     private val availableSpace: () -> Long = { stagingRoot.usableSpace },
     private val updateBlocked: () -> Boolean = { false },
@@ -54,14 +54,15 @@ class ProcessingRepository(
         operationId: String,
         sourceKind: SourceKind,
         sourceTitle: String,
+        sourceUrl: String? = null,
     ): ProcessingOperation = submitLock.withLock {
         requireUpdateAllowed()
         val owner = requireSession()
         require(UUID.fromString(operationId).toString() == operationId)
         val normalizedTitle = boundedSourceTitle(sourceTitle)
-        require(sourceKind == SourceKind.FILE)
+        require((sourceKind == SourceKind.URL) == (sourceUrl != null))
         store.get(owner.uid, operationId)?.let { existing ->
-            require(existing.sourceKind == sourceKind)
+            require(existing.sourceKind == sourceKind && existing.sourceUrl == sourceUrl)
             return@withLock existing
         }
         val acceptedAt = now()
@@ -72,14 +73,16 @@ class ProcessingRepository(
             displayName = normalizedTitle,
             sourceKind = sourceKind,
             sourceTitle = normalizedTitle,
+            sourceUrl = sourceUrl,
             clientStartedAtMillis = acceptedAt,
             acceptedAtMillis = acceptedAt,
-            phase = ProcessingPhase.PREPARING_INPUT,
+            phase = if (sourceKind == SourceKind.URL) ProcessingPhase.DOWNLOADING_SOURCE else ProcessingPhase.PREPARING_INPUT,
         ).also { store.put(owner.uid, it) }
     }
 
     suspend fun submit(
         prepared: PreparedInput,
+        expectedSourceWorkRequestId: String? = null,
         requireCloudConsent: Boolean = false,
     ): ProcessingOperation = submitLock.withLock {
         requireUpdateAllowed()
@@ -97,6 +100,8 @@ class ProcessingRepository(
         checkSession(owner)
         if (existing?.input != null) {
             require(existing.input == prepared.declaration && existing.stagedRelativePath == relative)
+            if (expectedSourceWorkRequestId != null &&
+                existing.sourceWorkRequestId != expectedSourceWorkRequestId) changedSession()
             return@withLock existing
         }
         val candidate = if (existing == null) ProcessingOperation(
@@ -128,6 +133,8 @@ class ProcessingRepository(
         } else {
             store.update(owner.uid, prepared.operationId) { latest ->
                 checkSession(owner)
+                if (expectedSourceWorkRequestId != null &&
+                    latest.sourceWorkRequestId != expectedSourceWorkRequestId) changedSession()
                 if (latest.cancellationRequested || latest.pendingDelete) latest
                 else latest.copy(
                     input = prepared.declaration,
@@ -376,7 +383,6 @@ class ProcessingRepository(
     private suspend fun process(owner: ProcessingSession, operationId: String, runId: String): ProcessingRunResult {
         var operation = current(owner, operationId, runId)
         var grant: UploadGrant? = null
-        var freshReservation = false
         if (operation.jobId == null) {
             if (operation.cancellationRequested && !operation.reservationAttempted) {
                 change(owner, operationId, runId) {
@@ -386,7 +392,6 @@ class ProcessingRepository(
                 return ProcessingRunResult.COMPLETE
             }
             if (operation.retryOfJobId == null && !operation.cancellationRequested) verifyInput(operation)
-            val firstReservationAttempt = !operation.reservationAttempted
             change(owner, operationId, runId) {
                 it.copy(phase = ProcessingPhase.RESERVING, reservationAttempted = true)
             }
@@ -410,7 +415,6 @@ class ProcessingRepository(
                         2,
                         operation.mediaPolicy.profileId,
                         operation.mediaSource,
-                        trimEnabled = operation.trimEnabled,
                     ),
                 )
                 if (result.requestId != null && result.requestId != operation.requestId)
@@ -423,7 +427,6 @@ class ProcessingRepository(
                     )
                 }
                 grant = result.upload
-                freshReservation = firstReservationAttempt && grant != null
                 if (operation.displayName.isNotBlank() && operation.displayName != operation.sourceTitle) {
                     val renamed = api.rename(result.id, operation.displayName)
                     operation = change(owner, operationId, runId) { it.copy(serverStatus = renamed.status) }
@@ -447,32 +450,27 @@ class ProcessingRepository(
         }
         if (operation.serverStatus != "awaiting_upload") return finishKnown(owner, operationId, runId, operation.serverStatus)
 
-        // No transfer can precede the first acknowledged reservation. Recovered or
-        // replayed intent still confirms before renewing or repeating a PUT.
-        if (!freshReservation) {
-            change(owner, operationId, runId) { it.copy(phase = ProcessingPhase.CONFIRMING) }
-            try {
-                val confirmed = api.confirmUpload(jobId)
-                change(owner, operationId, runId) { it.copy(serverStatus = confirmed.status) }
-                return finishKnown(owner, operationId, runId, confirmed.status)
-            } catch (error: JobsFailure) {
-                checkSession(owner)
-                if (error.problem == JobsProblem.JOB_STATE_CONFLICT) {
-                    val detail = api.detail(jobId)
-                    change(owner, operationId, runId) { it.copy(serverStatus = detail.status) }
-                    if (detail.status != "awaiting_upload") return finishKnown(owner, operationId, runId, detail.status)
-                    throw error
-                }
-                if (error.problem != JobsProblem.UPLOAD_NOT_READY) throw error
-                if (operation.hasUploadedInput) {
-                    change(owner, operationId, runId) { it.copy(uploadGrantRequestId = null) }
-                }
+        // Confirmation always precedes any renewed grant or repeat of a whole-file transfer.
+        change(owner, operationId, runId) { it.copy(phase = ProcessingPhase.CONFIRMING) }
+        try {
+            val confirmed = api.confirmUpload(jobId)
+            change(owner, operationId, runId) { it.copy(serverStatus = confirmed.status) }
+            return finishKnown(owner, operationId, runId, confirmed.status)
+        } catch (error: JobsFailure) {
+            checkSession(owner)
+            if (error.problem == JobsProblem.JOB_STATE_CONFLICT) {
+                val detail = api.detail(jobId)
+                change(owner, operationId, runId) { it.copy(serverStatus = detail.status) }
+                if (detail.status != "awaiting_upload") return finishKnown(owner, operationId, runId, detail.status)
+                throw error
+            }
+            if (error.problem != JobsProblem.UPLOAD_NOT_READY) throw error
+            if (operation.hasUploadedInput) {
+                change(owner, operationId, runId) { it.copy(uploadGrantRequestId = null) }
             }
         }
         operation = current(owner, operationId, runId)
-        // The PUT hashes the actual streamed bytes and R2 checks the signed checksum.
-        // Recheck confinement, size and policy here without a separate full-file read.
-        val file = verifyInput(operation, checkHash = false)
+        val file = verifyInput(operation)
         current(owner, operationId, runId)
         if (grant == null) {
             operation = current(owner, operationId, runId)
@@ -626,6 +624,18 @@ class ProcessingRepository(
             checkSession(owner)
             if (it.cancellationRequested || it.pendingDelete) it
             else it.copy(phase = ProcessingPhase.PAUSED, localProblem = problem)
+        }
+    }
+
+    suspend fun updateSourceTitle(operationId: String, sourceTitle: String): ProcessingOperation? {
+        val owner = requireSession()
+        val safe = boundedSourceTitle(sourceTitle)
+        return store.update(owner.uid, operationId) {
+            checkSession(owner)
+            it.copy(
+                sourceTitle = safe,
+                displayName = if (it.displayName.isBlank() || it.displayName == "Audio") safe else it.displayName,
+            )
         }
     }
 

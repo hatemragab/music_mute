@@ -7,12 +7,6 @@ import { LoadingState } from "@/components/page";
 import { PermissionBoundary } from "@/components/permission-boundary";
 import { AppShell, NAV_ITEMS } from "./app-shell";
 
-const NotificationsPage = lazy(() =>
-  import("@/features/notifications/notifications-page").then((module) => ({
-    default: module.NotificationsPage,
-  })),
-);
-
 const AdministratorsPage = lazy(() =>
   import("@/features/administrators/administrators-page").then((module) => ({
     default: module.AdministratorsPage,
@@ -63,11 +57,6 @@ const ReleaseDetailPage = lazy(() =>
 const ReleasesPage = lazy(() =>
   import("@/features/releases/releases-page").then((module) => ({
     default: module.ReleasesPage,
-  })),
-);
-const MacosUpdatesPage = lazy(() =>
-  import("@/features/macos-updates/macos-updates-page").then((module) => ({
-    default: module.MacosUpdatesPage,
   })),
 );
 const UpdatePolicyPage = lazy(() =>
@@ -135,14 +124,6 @@ export function AppRouter() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<HomeRedirect />} />
-        <Route
-          path="notifications"
-          element={
-            <Guard permission="notifications.read">
-              <NotificationsPage />
-            </Guard>
-          }
-        />
         <Route
           path="overview"
           element={
@@ -220,14 +201,6 @@ export function AppRouter() {
           element={
             <Guard permission="releases.read">
               <UpdatePolicyPage />
-            </Guard>
-          }
-        />
-        <Route
-          path="macos-updates"
-          element={
-            <Guard permission="releases.read">
-              <MacosUpdatesPage />
             </Guard>
           }
         />

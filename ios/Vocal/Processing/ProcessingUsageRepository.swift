@@ -82,20 +82,20 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
       ["global", "account_override"].contains(effectivePolicySource),
       amounts.allSatisfy({ $0.isFinite && $0 >= 0 }),
       processing.remainingSeconds <= processing.limitSeconds,
-      uploads.dailyGrantLimit >= 0, uploads.monthlyGrantLimit >= 0,
+      uploads.dailyGrantLimit > 0, uploads.monthlyGrantLimit > 0,
       uploads.dailyGrants >= 0, uploads.dailyRemainingGrants >= 0,
       uploads.monthlyGrants >= 0, uploads.monthlyRemainingGrants >= 0,
       uploads.dailyRemainingGrants <= uploads.dailyGrantLimit,
       uploads.monthlyRemainingGrants <= uploads.monthlyGrantLimit,
-      uploads.monthlyByteLimit >= 0, uploads.confirmedBytes >= 0,
+      uploads.monthlyByteLimit > 0, uploads.confirmedBytes >= 0,
       uploads.monthlyRemainingBytes >= 0,
       uploads.monthlyRemainingBytes <= uploads.monthlyByteLimit,
-      storage.limitBytes >= 0, storage.retainedBytes >= 0,
+      storage.limitBytes > 0, storage.retainedBytes >= 0,
       storage.remainingBytes >= 0, storage.remainingBytes <= storage.limitBytes,
-      downloads.monthlyGrantLimit >= 0, downloads.monthlyGrants >= 0,
+      downloads.monthlyGrantLimit > 0, downloads.monthlyGrants >= 0,
       downloads.monthlyRemainingGrants >= 0,
       downloads.monthlyRemainingGrants <= downloads.monthlyGrantLimit,
-      downloads.monthlyByteLimit >= 0, downloads.estimatedBytes >= 0,
+      downloads.monthlyByteLimit > 0, downloads.estimatedBytes >= 0,
       downloads.monthlyRemainingBytes >= 0,
       downloads.monthlyRemainingBytes <= downloads.monthlyByteLimit,
       effectiveLimits.maxDurationSeconds > 0, effectiveLimits.maxPreparedAudioBytes > 0,
@@ -118,36 +118,14 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
   private let api: JobsAPI
   private var owner: String?
   private var receivedAt: Date?
-  private var live: Task<Void, Never>?
   init(api: JobsAPI) { self.api = api }
   func bind(_ owner: String?) {
-    live?.cancel()
-    live = nil
     self.owner = owner
     usage = nil
     receivedAt = nil
   }
   func refresh() async {
     guard let captured = owner else { return }
-    if let realtime = api.realtime {
-      guard live == nil else { return }
-      live = Task { [weak self] in
-        do {
-          for try await data in realtime.watch("usage") {
-            let value = try JSONDecoder.authDecoder().decode(ProcessingUsage.self, from: data)
-            try value.validate()
-            guard let self, !Task.isCancelled, self.owner == captured else { return }
-            self.usage = value
-            self.receivedAt = Date()
-          }
-        } catch {
-          guard let self, !Task.isCancelled, self.owner == captured else { return }
-          self.usage = nil
-          self.live = nil
-        }
-      }
-      return
-    }
     do {
       let value = try await api.processingUsage()
       try value.validate()
@@ -156,7 +134,6 @@ struct ProcessingUsage: Decodable, Equatable, Sendable {
       receivedAt = Date()
     } catch { if owner == captured { usage = nil } }
   }
-  deinit { live?.cancel() }
   func checkAvailability() throws {
     guard let usage, let receivedAt, abs(receivedAt.timeIntervalSinceNow) < 120 else { return }
     if usage.waitingJobs >= usage.maxWaitingJobs {
@@ -203,6 +180,9 @@ enum ProcessingMediaMessage {
     case .invalidSize: return "media_media_too_large"
     case .unsupportedFormat: return "media_media_unsupported"
     case .policyUnavailable: return "media_processing_policy_incompatible"
+    case .youtubeLive: return "media_youtube_live_unsupported"
+    case .youtubePlaylist: return "media_youtube_playlist_unsupported"
+    case .youtubeMetadataUnavailable: return "media_youtube_metadata_unavailable"
     case .interrupted: return "media_interrupted"
     default: return nil
     }

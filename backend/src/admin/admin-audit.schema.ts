@@ -43,6 +43,10 @@ export const AdminAuditEventSchema =
   SchemaFactory.createForClass(AdminAuditEvent);
 AdminAuditEventSchema.index({ at: -1, _id: -1 }, { name: 'admin_audit_time' });
 AdminAuditEventSchema.index(
-  { at: 1 },
-  { expireAfterSeconds: 365 * 24 * 60 * 60, name: 'admin_audit_expiry' },
+  { actorUid: 1, at: -1, _id: -1 },
+  { name: 'admin_audit_actor' },
+);
+AdminAuditEventSchema.index(
+  { resourceType: 1, resourceId: 1, at: -1, _id: -1 },
+  { name: 'admin_audit_resource' },
 );

@@ -7,17 +7,11 @@ enum UploadPhase: String, Codable, Sendable {
 
 enum AudioPipelinePhase: String, Codable, Sendable {
   case inspectingSource
-  case preparingInput, reservingJob, uploadingInput
+  case resolvingSource, downloadingSource, preparingInput, reservingJob, uploadingInput
   case confirmingUpload, waitingProcessing, ready, awaitingAppResume, cancelling
   case failed, cancelled, deleted, awaitingConfirmation
 
   var isTerminal: Bool { [.ready, .failed, .cancelled, .deleted].contains(self) }
-
-  init(from decoder: Decoder) throws {
-    let value = try decoder.singleValueContainer().decode(String.self)
-    self = Self(rawValue: value) ?? .failed
-  }
-
 }
 
 struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
@@ -25,6 +19,7 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
   var id: UUID { operationId }
   let ownerUid: String
   let sourceKind: JobSourceKind
+  let sourceVideoID: String?
   var sourceTitle: String?
   var displayName: String?
   let clientStartedAt: Date
@@ -40,18 +35,17 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
   var activeRunToken: UUID?
   var reviewInput: PreparedInput?
   var cloudConsent: Bool?
-  var trimEnabled: Bool? = nil
 
   enum CodingKeys: String, CodingKey {
-    case operationId, ownerUid, sourceKind, sourceTitle, displayName
+    case operationId, ownerUid, sourceKind, sourceVideoID, sourceTitle, displayName
     case clientStartedAt, updatedAt, completedAt, phase, jobId, jobStatus, retryAttempt
     case nextRetryAt, lastFailureCode, cancellationRequested, activeRunToken, reviewInput,
-      cloudConsent, trimEnabled
+      cloudConsent
   }
 
   init(
     operationId: UUID, ownerUid: String, sourceKind: JobSourceKind,
-    sourceTitle: String? = nil, displayName: String? = nil,
+    sourceVideoID: String? = nil, sourceTitle: String? = nil, displayName: String? = nil,
     clientStartedAt: Date, updatedAt: Date, completedAt: Date? = nil,
     phase: AudioPipelinePhase, jobId: String? = nil, jobStatus: String? = nil,
     retryAttempt: Int = 0, nextRetryAt: Date? = nil, lastFailureCode: String? = nil,
@@ -60,6 +54,7 @@ struct AudioPipelineIntent: Codable, Equatable, Identifiable, Sendable {
     self.operationId = operationId
     self.ownerUid = ownerUid
     self.sourceKind = sourceKind
+    self.sourceVideoID = sourceVideoID
     self.sourceTitle = sourceTitle
     self.displayName = displayName
     self.clientStartedAt = clientStartedAt
@@ -103,14 +98,13 @@ struct UploadOperation: Codable, Equatable, Identifiable, Sendable {
   var policyVersion: Int? = nil
   var preparationProfileId: String? = nil
   var mediaSource: String? = nil
-  var trimEnabled: Bool? = nil
 
   enum CodingKeys: String, CodingKey {
     case operationId, ownerUid, requestId, input, stagedRelativePath, createdAt, updatedAt
     case jobId, jobStatus, phase, transferId, transferTaskId, uploadAttempts,
       uploadGrantRequestId, lastFailureCode
     case cancellationRequested, sourceTitle, sourceKind, sourceURL, clientStartedAt, displayName,
-      activeRunToken, policyVersion, preparationProfileId, mediaSource, trimEnabled
+      activeRunToken, policyVersion, preparationProfileId, mediaSource
   }
 }
 
@@ -143,8 +137,7 @@ extension UploadOperation {
       activeRunToken: try values.decodeIfPresent(UUID.self, forKey: .activeRunToken),
       policyVersion: try values.decodeIfPresent(Int.self, forKey: .policyVersion),
       preparationProfileId: try values.decodeIfPresent(String.self, forKey: .preparationProfileId),
-      mediaSource: try values.decodeIfPresent(String.self, forKey: .mediaSource),
-      trimEnabled: try values.decodeIfPresent(Bool.self, forKey: .trimEnabled))
+      mediaSource: try values.decodeIfPresent(String.self, forKey: .mediaSource))
   }
 }
 
@@ -175,8 +168,6 @@ actor ProcessingStore {
     var jobs: [Job]
     var retryIntents: [JobRetryIntent]? = nil
     var pipelines: [AudioPipelineIntent]? = nil
-    var urlImport: URLImportRecord? = nil
-    var urlImports: [URLImportRecord]? = nil
   }
   private let root: URL
   private let stagingRoot: URL
@@ -189,59 +180,6 @@ actor ProcessingStore {
 
   nonisolated static func ownerDirectoryName(_ uid: String) -> String {
     SHA256.hash(data: Data(uid.utf8)).map { String(format: "%02x", $0) }.joined()
-  }
-
-  func urlImports(ownerUid: String, now: Date = Date()) throws -> [URLImportRecord] {
-    var snapshot = try load(ownerUid)
-    var records = snapshot.urlImports ?? snapshot.urlImport.map { [$0] } ?? []
-    records = records.compactMap { value in
-      var record = value
-      guard record.status == "failed", record.jobId == nil else { return record }
-      if let failedAt = record.failedAt, now.timeIntervalSince(failedAt) >= 7 * 86_400 {
-        return nil
-      }
-      record.failedAt = record.failedAt ?? now
-      return record
-    }
-    if snapshot.urlImports != records || snapshot.urlImport != nil {
-      snapshot.urlImports = records
-      snapshot.urlImport = nil
-      try persist(snapshot)
-    }
-    return records
-  }
-
-  func urlImport(ownerUid: String, now: Date = Date()) throws -> URLImportRecord? {
-    try urlImports(ownerUid: ownerUid, now: now).last
-  }
-
-  func saveURLImport(_ record: URLImportRecord, ownerUid: String) throws {
-    var snapshot = try load(ownerUid)
-    var records = snapshot.urlImports ?? snapshot.urlImport.map { [$0] } ?? []
-    var saved = record
-    let previous = records.first { $0.requestId == record.requestId }
-    saved.failedAt =
-      record.status == "failed" ? record.failedAt ?? previous?.failedAt ?? Date() : nil
-    if let index = records.firstIndex(where: { $0.requestId == record.requestId }) {
-      records[index] = saved
-    } else {
-      records.append(saved)
-    }
-    // Keep active recovery intents and failed records; bound completed import receipts.
-    let completed = Set(records.filter { $0.status == "submitted" }.suffix(20).map(\.requestId))
-    records.removeAll { $0.status == "submitted" && !completed.contains($0.requestId) }
-    snapshot.urlImports = records
-    snapshot.urlImport = nil
-    try persist(snapshot)
-  }
-
-  func removeFailedURLImport(requestId: UUID, ownerUid: String) throws {
-    var snapshot = try load(ownerUid)
-    var records = snapshot.urlImports ?? snapshot.urlImport.map { [$0] } ?? []
-    records.removeAll { $0.requestId == requestId && $0.status == "failed" && $0.jobId == nil }
-    snapshot.urlImports = records
-    snapshot.urlImport = nil
-    try persist(snapshot)
   }
 
   func operations(ownerUid: String) throws -> [UploadOperation] {
@@ -258,23 +196,23 @@ actor ProcessingStore {
 
   func createPipeline(
     operationId: UUID, ownerUid: String, sourceKind: JobSourceKind,
-    sourceTitle: String? = nil, clientStartedAt: Date = Date()
+    sourceVideoID: String? = nil, sourceTitle: String? = nil, clientStartedAt: Date = Date()
   ) throws -> AudioPipelineIntent {
-    guard !ownerUid.isEmpty, sourceKind == .file else {
+    guard !ownerUid.isEmpty, sourceKind == .file || sourceVideoID != nil else {
       throw ProcessingStoreFailure.invalidPath
     }
     var snapshot = try load(ownerUid)
     if let existing = snapshot.pipelines?.first(where: { $0.operationId == operationId }) {
-      guard existing.sourceKind == sourceKind,
+      guard existing.sourceKind == sourceKind, existing.sourceVideoID == sourceVideoID,
         existing.sourceTitle == sourceTitle, existing.clientStartedAt == clientStartedAt
       else { throw ProcessingStoreFailure.conflictingIntent }
       return existing
     }
     let intent = AudioPipelineIntent(
       operationId: operationId, ownerUid: ownerUid, sourceKind: sourceKind,
-      sourceTitle: sourceTitle, displayName: sourceTitle,
+      sourceVideoID: sourceVideoID, sourceTitle: sourceTitle, displayName: sourceTitle,
       clientStartedAt: clientStartedAt, updatedAt: clientStartedAt,
-      phase: .preparingInput)
+      phase: sourceKind == .url ? .resolvingSource : .preparingInput)
     if snapshot.pipelines == nil { snapshot.pipelines = [] }
     snapshot.pipelines?.append(intent)
     snapshot.version = 2
@@ -332,24 +270,11 @@ actor ProcessingStore {
     try load(ownerUid).operations.first { $0.operationId == id }
   }
 
-  func libraryJobs(ownerUid: String) throws -> [Job] { try load(ownerUid).jobs }
+  func cachedJobs(ownerUid: String) throws -> [Job] { try load(ownerUid).jobs }
 
-  func saveLibraryJobs(_ jobs: [Job], ownerUid: String) throws {
+  func saveJobs(_ jobs: [Job], ownerUid: String) throws {
     var snapshot = try load(ownerUid)
-    snapshot.jobs = jobs.filter { $0.status == "ready" }
-    try persist(snapshot)
-  }
-
-  /// Live history pages advance the library without replacing older completed tracks.
-  func updateLibraryJobs(_ jobs: [Job], ownerUid: String) throws {
-    var snapshot = try load(ownerUid)
-    for job in jobs where job.status == "ready" {
-      if let index = snapshot.jobs.firstIndex(where: { $0.id == job.id }) {
-        if job.updatedAt >= snapshot.jobs[index].updatedAt { snapshot.jobs[index] = job }
-      } else {
-        snapshot.jobs.append(job)
-      }
-    }
+    snapshot.jobs = jobs
     try persist(snapshot)
   }
 
@@ -494,25 +419,9 @@ actor ProcessingStore {
         Set(snapshot.operations.map(\.operationId)).count == snapshot.operations.count
       else { throw ProcessingStoreFailure.corruptStore }
       snapshot.version = 2
-      // Discard legacy Home history while preserving completed library tracks and all other data.
-      if snapshot.jobs.contains(where: { $0.status != "ready" }) {
-        snapshot.jobs.removeAll { $0.status != "ready" }
-        try persist(snapshot)
-      }
       snapshots[owner] = snapshot
-      LocalDiagnostics.emit(
-        "storage.read", category: "storage",
-        data: [
-          "store": "processing", "result": "completed", "operations": snapshot.operations.count,
-        ], userID: owner)
       return snapshot
-    } catch {
-      LocalDiagnostics.emit(
-        "storage.failed", category: "storage", level: "warn",
-        data: ["store": "processing", "operation": "read", "error": LocalDiagnostics.error(error)],
-        userID: owner)
-      throw ProcessingStoreFailure.corruptStore
-    }
+    } catch { throw ProcessingStoreFailure.corruptStore }
   }
 
   private func persist(_ snapshot: Snapshot) throws {
@@ -526,19 +435,7 @@ actor ProcessingStore {
       }
       try JSONEncoder().encode(snapshot).write(to: fileURL(snapshot.ownerUid), options: .atomic)
       snapshots[snapshot.ownerUid] = snapshot
-      LocalDiagnostics.emit(
-        "storage.write", category: "storage",
-        data: [
-          "store": "processing", "result": "completed", "operations": snapshot.operations.count,
-        ], userID: snapshot.ownerUid)
-    } catch {
-      LocalDiagnostics.emit(
-        "storage.failed", category: "storage", level: "warn",
-        data: [
-          "store": "processing", "operation": "write", "error": LocalDiagnostics.error(error),
-        ], userID: snapshot.ownerUid)
-      throw ProcessingStoreFailure.storage
-    }
+    } catch { throw ProcessingStoreFailure.storage }
   }
 
   private func fileURL(_ owner: String) -> URL {

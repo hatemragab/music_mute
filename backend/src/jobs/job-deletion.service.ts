@@ -5,17 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { trusted, type ClientSession, type Model } from 'mongoose';
 import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
-import { StorageCleanupService } from '../storage/storage-cleanup.service.js';
 import { StorageTransfersService } from '../storage/storage-transfers.service.js';
 import { NotificationOutbox } from '../notifications/notification-outbox.schema.js';
-import { NotificationDelivery } from '../notifications/notification-delivery.schema.js';
 import { Job } from './job.schema.js';
 import { objectId } from './job-request.js';
 import { jobError } from './job-errors.js';
 import type { WorkerExecutionOwnership } from './job.types.js';
 import { WorkerAttempt } from '../worker-fleet/jobs/worker-attempt.schema.js';
 import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
-import { isSharedMediaKey } from '../shared-media/shared-media-key.js';
 
 const CLEANUP_LEASE_MS = 60_000;
 
@@ -44,13 +41,13 @@ export class JobDeletionService {
         throw jobError('JOB_ACTIVE');
       const now = new Date();
       const execution = job.currentExecution;
-      // Let upload grants expire and in-flight PUTs settle before exact deletion.
+      // Allow existing upload grants to expire before sweeping unconfirmed versions.
       const graceMs =
         (Math.min(
           600,
           this.config.getOrThrow<number>('PROCESSING_URL_SECONDS'),
         ) +
-          3_900) *
+          300) *
         1_000;
       const changed = await this.jobs.updateOne(
         { _id: id, userId: owner, revision: job.revision, deletedAt: null },
@@ -61,7 +58,6 @@ export class JobDeletionService {
             displayName: null,
             sourceUrl: null,
             cleanupNextAt: new Date(now.getTime() + graceMs),
-            cleanupFirstDeletedAt: null,
             cleanupLeaseUntil: null,
             cleanupToken: null,
             cleanupAttempts: 0,
@@ -94,28 +90,6 @@ export class JobDeletionService {
         },
         { session },
       );
-      const events = await this.outbox
-        .find({ jobId: id, userId: owner })
-        .session(session)
-        .lean();
-      if (events.length) {
-        await this.jobs.db
-          .model<NotificationDelivery>(NotificationDelivery.name)
-          .updateMany(
-            {
-              outboxId: trusted({ $in: events.map((event) => event._id) }),
-              status: 'pending',
-            },
-            {
-              $set: {
-                status: 'ineligible',
-                lastFailureKind: 'ineligible',
-                failedAt: now,
-              },
-            },
-            { session, runValidators: true },
-          );
-      }
     });
   }
 
@@ -183,37 +157,14 @@ export class JobDeletionService {
       .lean();
     if (!job) return false;
     try {
-      if (
-        job.cleanupFirstDeletedAt &&
-        now.getTime() <
-          job.cleanupFirstDeletedAt.getTime() +
-            StorageCleanupService.LATE_UPLOAD_RECHECK_MS
-      ) {
-        await this.jobs.updateOne(
-          { _id: job._id, cleanupToken: token },
-          {
-            $set: {
-              cleanupNextAt: new Date(
-                job.cleanupFirstDeletedAt.getTime() +
-                  StorageCleanupService.LATE_UPLOAD_RECHECK_MS,
-              ),
-              cleanupToken: null,
-              cleanupLeaseUntil: null,
-            },
-          },
-        );
-        return true;
-      }
       const keys = new Set(
         [
           job.inputReservation.key,
           job.inputObject?.key,
           job.outputObject?.key,
-        ].filter(
-          (key): key is string =>
-            typeof key === 'string' && key.length > 0 && !isSharedMediaKey(key),
-        ),
+        ].filter((key): key is string => Boolean(key)),
       );
+      let complete = true;
       for (const key of keys) {
         if (!key.startsWith(`users/${job.userId.toHexString()}/jobs/`))
           throw new Error('Invalid artifact ownership');
@@ -239,24 +190,27 @@ export class JobDeletionService {
           ],
         });
         if (reference) continue;
-        await this.storage.deleteObject(key);
+        if (!(await this.storage.deleteVersionsForKey(key))) {
+          complete = false;
+          break;
+        }
       }
-      if (keys.size > 0 && !job.cleanupFirstDeletedAt) {
+      if (complete) {
+        await this.completeCleanup(job._id, token, now);
+      } else {
         await this.jobs.updateOne(
           { _id: job._id, cleanupToken: token },
           {
             $set: {
-              cleanupFirstDeletedAt: now,
-              cleanupNextAt: new Date(
-                now.getTime() + StorageCleanupService.LATE_UPLOAD_RECHECK_MS,
-              ),
               cleanupToken: null,
               cleanupLeaseUntil: null,
               cleanupAttempts: 0,
+              cleanupNextAt: new Date(now.getTime() + 1_000),
+              cleanupCompletedAt: null,
             },
           },
         );
-      } else await this.completeCleanup(job._id, token, now);
+      }
     } catch {
       const failures = Math.min((job.cleanupAttempts ?? 0) + 1, 20);
       await this.jobs.updateOne(

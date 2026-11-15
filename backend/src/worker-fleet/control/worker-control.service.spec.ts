@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
 import type { AdminActor } from '../../admin/admin.types.js';
 import { WorkerControlService } from './worker-control.service.js';
 
@@ -130,47 +129,6 @@ function policy(revision = 3) {
 }
 
 describe('worker control plane', () => {
-  it.each([undefined, 'windows-user'] as const)(
-    'preserves optional Windows profile %s in authorized projections without machine credential fields',
-    async (installationProfile) => {
-      const f = fixture();
-      const runtimeIdentity = {
-        workerVersion: '0.1.3',
-        protocolVersion: 1,
-        manifestDigest: 'a'.repeat(64),
-        modelDigest: 'b'.repeat(64),
-        providerRuntimeVersion: 'onnxruntime-directml 1.24.4',
-        ...(installationProfile ? { installationProfile } : {}),
-      };
-      f.machines.find.mockReturnValue(
-        query([
-          currentMachine({
-            approvedCapabilities: [
-              {
-                platform: 'windows-amd64',
-                provider: 'directml',
-                gpuId: 'dxgi-fixture',
-                recipeIds: ['kim-vocals-v2'],
-                maxSlots: 1,
-              },
-            ],
-            runtimeIdentity,
-            credentialSha256: 'private-credential-hash',
-            registeredByUserId: 'registered-owner',
-          }),
-        ]),
-      );
-      f.attempts.find.mockReturnValue(query([]));
-      const page = await f.service.listMachines(actor, {
-        platform: 'windows-amd64',
-        limit: 10,
-      });
-      expect(page.items[0].runtime).toEqual(runtimeIdentity);
-      expect(JSON.stringify(page)).not.toContain('private-credential-hash');
-      expect(page.items[0]).not.toHaveProperty('credentialSha256');
-      expect(page.items[0].capabilities[0].maxSlots).toBe(1);
-    },
-  );
   it('pages the filtered fleet and includes bounded work and error summaries', async () => {
     const f = fixture();
     const secondMachineId = '136601c1-acb9-4768-91e5-059b1ec89a8e';
@@ -347,73 +305,6 @@ describe('worker control plane', () => {
     expect(result.asOf).toBeInstanceOf(Date);
   });
 
-  it('pages invitation history past the first 100 without losing older rows', async () => {
-    const f = fixture();
-    const invitations = Array.from({ length: 101 }, (_, index) => ({
-      _id: randomUUID(),
-      state: 'active',
-      createdAt: new Date(Date.UTC(2026, 8, 25, 0, 0, 101 - index)),
-      createdByUid: actor.uid,
-      initialPolicyId: null,
-      expiresAt: new Date('2027-09-25T00:00:00.000Z'),
-      consumedAt: null,
-      revokedAt: null,
-      installationSessionId: null,
-      revision: 0,
-    }));
-    f.invitations.find
-      .mockReturnValueOnce(query(invitations))
-      .mockReturnValueOnce(query(invitations.slice(100)));
-
-    const first = await f.service.listInvitations(actor, { limit: 100 });
-    expect(first.items).toHaveLength(100);
-    expect(first.nextCursor).toEqual(expect.any(String));
-    const second = await f.service.listInvitations(actor, {
-      limit: 100,
-      cursor: first.nextCursor!,
-    });
-    expect(second.items).toHaveLength(1);
-    expect(second.items[0].invitationId).toBe(invitations[100]._id);
-    expect(second.nextCursor).toBeNull();
-    expect(f.invitations.find.mock.calls[1][0]).toHaveProperty('$or');
-  });
-
-  it('pages machine diagnostics with a machine-scoped cursor', async () => {
-    const f = fixture();
-    f.machines.exists.mockResolvedValue(true);
-    const diagnostics = Array.from({ length: 101 }, (_, index) => ({
-      _id: randomUUID(),
-      kind: 'runtime',
-      sequenceStart: index,
-      sequenceEnd: index,
-      lines: [],
-      metrics: [],
-      createdAt: new Date(Date.UTC(2026, 8, 25, 0, 0, 101 - index)),
-    }));
-    f.diagnostics.find
-      .mockReturnValueOnce(query(diagnostics))
-      .mockReturnValueOnce(query(diagnostics.slice(100)));
-
-    const first = await f.service.machineDiagnostics(actor, machineId, {
-      limit: 100,
-    });
-    expect(first.items).toHaveLength(100);
-    expect(first.nextCursor).toEqual(expect.any(String));
-    const second = await f.service.machineDiagnostics(actor, machineId, {
-      limit: 100,
-      cursor: first.nextCursor!,
-    });
-    expect(second.items[0].id).toBe(diagnostics[100]._id);
-    expect(second.nextCursor).toBeNull();
-    expect(f.diagnostics.find.mock.calls[1][0]).toHaveProperty('$and');
-    await expect(
-      f.service.machineDiagnostics(actor, randomUUID(), {
-        limit: 100,
-        cursor: first.nextCursor!,
-      }),
-    ).rejects.toThrow('Invalid cursor');
-  });
-
   it('returns a safe not-found error for an unknown machine', async () => {
     const f = fixture();
     f.machines.findById.mockReturnValue(query(null));
@@ -451,7 +342,6 @@ describe('worker control plane', () => {
 
     const result = await f.service.machineDetail(actor, machineId);
 
-    expect(result.asOf).toBeInstanceOf(Date);
     expect(result.commands).toEqual([
       expect.objectContaining({ state: 'expired' }),
     ]);
@@ -514,90 +404,6 @@ describe('worker control plane', () => {
       { runValidators: true },
     );
   });
-
-  it('offers the current policy to a newly enrolled machine without acknowledging it', async () => {
-    const f = fixture();
-    f.machines.findById.mockReturnValue(
-      query(
-        currentMachine({
-          policyRevision: 0,
-          desiredRevision: 0,
-          appliedRevision: 0,
-        }),
-      ),
-    );
-    f.policies.findById.mockReturnValue(query(policy()));
-    f.machines.updateOne.mockResolvedValue({ modifiedCount: 1 });
-    f.commands.find.mockReturnValue(query([]));
-
-    const result = await f.service.config(
-      { kind: 'machine', subjectId: machineId, credential: 'x'.repeat(43) },
-      { sessionId, incarnation },
-    );
-
-    expect(result).toMatchObject({
-      desiredRevision: 3,
-      appliedRevision: 0,
-      claimAllowed: false,
-      policy: { revision: 3 },
-    });
-    expect(f.machines.updateOne).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        _id: machineId,
-        revision: 4,
-        policyRevision: 0,
-        desiredRevision: 0,
-        'currentSession.sessionId': sessionId,
-        'currentSession.incarnation': incarnation,
-      }),
-      {
-        $set: { policyRevision: 3, desiredRevision: 3 },
-        $inc: { revision: 1 },
-      },
-      { runValidators: true },
-    );
-  });
-
-  it('rejects reconciliation after a concurrent machine or session change', async () => {
-    const f = fixture();
-    f.machines.findById.mockReturnValue(
-      query(
-        currentMachine({
-          policyRevision: 0,
-          desiredRevision: 0,
-          appliedRevision: 0,
-        }),
-      ),
-    );
-    f.policies.findById.mockReturnValue(query(policy()));
-    f.machines.updateOne.mockResolvedValue({ modifiedCount: 0 });
-    await expect(
-      f.service.config(
-        { kind: 'machine', subjectId: machineId, credential: 'x'.repeat(43) },
-        { sessionId, incarnation },
-      ),
-    ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
-    expect(f.commands.find).not.toHaveBeenCalled();
-  });
-
-  it.each(['policyRevision', 'desiredRevision', 'appliedRevision'])(
-    'does not downgrade a newer %s using a stale policy read',
-    async (field) => {
-      const f = fixture();
-      f.machines.findById.mockReturnValue(
-        query(currentMachine({ [field]: 4 })),
-      );
-      f.policies.findById.mockReturnValue(query(policy()));
-      await expect(
-        f.service.config(
-          { kind: 'machine', subjectId: machineId, credential: 'x'.repeat(43) },
-          { sessionId, incarnation },
-        ),
-      ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
-      expect(f.machines.updateOne).toHaveBeenCalledTimes(1);
-      expect(f.commands.find).not.toHaveBeenCalled();
-    },
-  );
 
   it('acknowledges a policy revision with revision-fenced session identity', async () => {
     const f = fixture();
@@ -733,95 +539,5 @@ describe('worker control plane', () => {
       f.service.completeCommand(principal, commandId, dto),
     ).resolves.toEqual({ commandId, state: 'succeeded', replayed: true });
     expect(f.commands.updateOne).toHaveBeenCalledOnce();
-  });
-  const capacityDto = {
-    operationId: '1d1fe535-cd14-4687-be68-c4ab87f410fe',
-    expectedRevision: 4,
-    gpuId: 'gpu0',
-    qualificationConfirmed: true as const,
-    reason: 'Reviewed passing installed two-worker qualification',
-  };
-  const capability = {
-    platform: 'windows-amd64',
-    provider: 'directml',
-    gpuId: 'gpu0',
-    recipeIds: ['kim-vocals-v2'],
-    maxSlots: 1,
-  };
-  it('audits a fenced capacity increase without changing recipes or another GPU', async () => {
-    const f = fixture();
-    const other = { ...capability, gpuId: 'gpu1' };
-    f.machines.findById.mockReturnValue(
-      query(currentMachine({ approvedCapabilities: [capability, other] })),
-    );
-    f.machines.updateOne.mockResolvedValue({ modifiedCount: 1 });
-    await expect(
-      f.service.approveCapacity(actor, machineId, capacityDto),
-    ).resolves.toEqual({
-      machineId,
-      revision: 5,
-      maxSlots: 2,
-      replayed: false,
-    });
-    expect(f.machines.updateOne).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: machineId, revision: 4 }),
-      {
-        $set: { approvedCapabilities: [{ ...capability, maxSlots: 2 }, other] },
-        $inc: { revision: 1 },
-      },
-      expect.objectContaining({
-        runValidators: true,
-        session: expect.anything(),
-      }),
-    );
-    expect(f.operations.run).toHaveBeenCalledWith(
-      actor,
-      expect.objectContaining({
-        action: 'workers.machine.capacity.approve',
-        reason: capacityDto.reason,
-      }),
-      expect.any(Function),
-    );
-  });
-  it.each([
-    { status: 'revoked' },
-    { revision: 5 },
-    { approvedCapabilities: [] },
-    { approvedCapabilities: [capability, capability] },
-  ])('rejects ineligible or stale capacity approval %j', async (overrides) => {
-    const f = fixture();
-    f.machines.findById.mockReturnValue(
-      query(
-        currentMachine({ approvedCapabilities: [capability], ...overrides }),
-      ),
-    );
-    await expect(
-      f.service.approveCapacity(actor, machineId, capacityDto),
-    ).rejects.toThrow();
-    expect(f.machines.updateOne).not.toHaveBeenCalled();
-  });
-  it('rejects a concurrent change during capacity approval', async () => {
-    const f = fixture();
-    f.machines.findById.mockReturnValue(
-      query(currentMachine({ approvedCapabilities: [capability] })),
-    );
-    f.machines.updateOne.mockResolvedValue({ modifiedCount: 0 });
-    await expect(
-      f.service.approveCapacity(actor, machineId, capacityDto),
-    ).rejects.toThrow('Revision conflict');
-  });
-  it('leaves an already approved GPU unchanged', async () => {
-    const f = fixture();
-    f.machines.findById.mockReturnValue(
-      query(
-        currentMachine({
-          approvedCapabilities: [{ ...capability, maxSlots: 2 }],
-        }),
-      ),
-    );
-    await expect(
-      f.service.approveCapacity(actor, machineId, capacityDto),
-    ).resolves.toMatchObject({ revision: 4, maxSlots: 2 });
-    expect(f.machines.updateOne).not.toHaveBeenCalled();
   });
 });

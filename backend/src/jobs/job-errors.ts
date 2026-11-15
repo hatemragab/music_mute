@@ -1,7 +1,7 @@
 import { HttpException } from '@nestjs/common';
 
 const errors = {
-  MEDIA_TOO_LONG: [400, 'Audio exceeds the allowed duration'],
+  MEDIA_TOO_LONG: [400, 'Audio must be at most 20 minutes'],
   MEDIA_TOO_LARGE: [400, 'Prepared audio exceeds the size limit'],
   MEDIA_UNSUPPORTED: [400, 'This audio format is unsupported'],
   MEDIA_DURATION_UNKNOWN: [400, 'Audio duration could not be verified'],
@@ -25,7 +25,7 @@ const errors = {
   UPLOAD_NOT_READY: [409, 'The uploaded file is not ready or does not match'],
   UPLOAD_RESERVATION_EXPIRED: [409, 'The upload reservation expired'],
   UPLOAD_GRANT_LIMIT_REACHED: [
-    409,
+    429,
     'The account upload grant limit was reached',
   ],
   UPLOAD_BYTE_LIMIT_REACHED: [
@@ -42,7 +42,7 @@ const errors = {
   ],
   DOWNLOAD_RESERVATION_EXPIRED: [409, 'The download grant request expired'],
   DOWNLOAD_GRANT_LIMIT_REACHED: [
-    409,
+    429,
     'The monthly result access limit was reached',
   ],
   DOWNLOAD_BYTE_LIMIT_REACHED: [

@@ -3,51 +3,111 @@
 Native Swift/SwiftUI app with bundle identifier `com.hatem.musicmute`, targeting iOS 17
 and newer. Select one owned or permitted audio/video file, review its prepared audio size and duration,
 confirm permission, and explicitly start cloud processing for vocals-only MP3 output.
-Local Files/Photos preparation, cloud upload, job history and result playback remain.
-Home supports server-side link imports with a bundled site list,
-local URL checks, rights confirmation, durable retry identities and independent
-WebSocket progress for multiple imports. The form accepts another link after
-persisting its intent, while earlier imports continue. Existing single-import
-recovery records are preserved when upgrading.
-See [the shared site policy](../docs/url-imports/supported-sites.md).
-Source metadata on existing server jobs remains readable.
+YouTube remains a labelled secondary download option **on the iPhone**. The app keeps persistent history,
+plays saved audio, and exports original files through Save to Files. English,
+Arabic RTL, system/light/dark appearance, and Dynamic Type are supported.
 
-The dashboard's link-import visibility policy controls only the new link form.
-File and Photos imports, existing link progress/retries, downloads, and queued or
-running work remain available. Missing `link_import_visible` defaults to hidden.
-Every open/foreground checks `/processing-policy?schema_version=2`, using the
-account token while signed in and a public guest read before sign-in. Global,
-country and selected-user hiding resolve through the same visible boolean;
-the shared owner WebSocket applies later `policy` snapshots without a refresh control.
-Guest and per-owner payloads are stored separately under
-Application Support/Vocal/ProcessingPolicy, excluded from backups, and used
-only for the matching identity during offline reopen. A fresh offline installation
-or uncached owner has file controls only. Session, request, and revision fences
-prevent stale checkout responses from replacing a newer snapshot.
+Open `MusicMute.xcodeproj` in Xcode 26.0.1 or newer. The project and shared scheme are
+checked in; XcodeGen is only needed when changing `project.yml` or adding files.
 
-URL audio is acquired by a private SaaS adapter, returned to NestJS for validation
-and R2 upload, then processed by the existing worker. iOS never receives SaaS
-credentials or provider delivery URLs. The shared catalog enables multiple sites;
-an eligible separate audio stream must be available on each link. Existing native
-installations require a rebuild to receive new catalog entries. See
-[provider architecture](../video_providers/README.md).
+## Why this package
 
-Open `MusicMute.xcodeproj` in Xcode 26.0.1 or newer. Regenerate with XcodeGen after
-changing `project.yml`. Only Firebase and Sentry remain as Swift package roots.
+Android's youtubedl-android contains Android-specific native/Python packaging and
+cannot be imported into a Swift iOS target. This app uses the native Swift package
+[YouTubeKit 0.4.9](https://github.com/alexeichhorn/YouTubeKit/releases/tag/0.4.9),
+pinned exactly in `project.yml` and `Package.resolved`. It has no transitive Swift
+package dependencies. Its extraction runs in process using Apple's JavaScriptCore.
 
-The current R2 release candidate is **0.1.3 (4)**. Local simulator tests and an
-unsigned Release archive are separate from distribution. A MusicMute Apple team,
-matching provisioning profile with the app's capabilities, and an explicit
-distribution channel are required before exporting or publishing an IPA. See
-the [native R2 rollout evidence](../android/tasks/r2-rollout/VALIDATION.md).
+The alternative [YoutubeDL-iOS](https://github.com/kewlbear/YoutubeDL-iOS) embeds
+Python and also declares FFmpeg dependencies. That is unnecessary for this app's
+direct, original-audio use case, so it is not included. No Python, yt-dlp executable,
+FFmpeg, remote extraction service, or separation backend is included in this iOS app.
+
+YouTubeKit has an optional remote fallback. MusicMute explicitly constructs
+`YouTube(videoID: id, methods: [.local])`, so failure never falls back to a server.
+No account, cookies, proxy, or client secret is configured.
+
+## Audio quality
+
+Vocal filters for audio-only, natively playable **M4A/AAC** streams, then selects
+the highest available bitrate. It downloads the selected HTTPS Googlevideo stream
+with URLSession. The YouTube download flow never downloads a combined video stream or re-encodes a
+file for saving. Local Files/Photos video preparation is a separate path described below.
+
+This differs from Android's best-audio selection, which may choose WebM/Opus.
+iOS deliberately selects the best compatible original AAC stream for reliable
+native playback. It does not claim to choose a higher-bitrate Opus stream that its
+native player cannot play. YouTube already compresses audio; MusicMute adds no further
+compression. Availability and bitrate depend on the video and the streams YouTube
+makes available to this client.
+
+Downloaded files are checked with AVFoundation: they must be nonempty, playable,
+contain audio, and contain no video tracks. Duration comes from audio frame count;
+AVAsset can overestimate the duration of some fragmented YouTube M4A files.
+Playback uses AVAudioPlayer, which reads these original files correctly without
+modifying them. Exports are independent filesystem copies with unchanged bytes.
+
+## Features and boundaries
+
+- **Home:** Import audio is primary. A secondary YouTube section has an explicit Paste
+  button, local validation, canonical video ID extraction, retained URL input, and Download audio.
+  Pasting, keyboard submission and focus changes never initiate a download. Video, Shorts, embed, live-video URLs,
+  and youtu.be links are accepted; a live URL still needs an available direct file.
+  Playlist-only links and untrusted/lookalike hosts are rejected.
+- **History:** durable title, date, original format, bitrate, size, duration,
+  progress, cancellation, errors, retry, and playback controls. Concurrent starts
+  for the same video reuse active work. An explicit later download creates another
+  saved copy; retry always gets a fresh attempt ID and directory.
+  Active transfers show a progress bar, percentage, and received/total bytes.
+  Unknown totals show received bytes with an indeterminate indicator. Progress
+  uses URLSession download delegate callbacks and includes resumed bytes.
+- **Playback:** play/pause, seeking, background audio, Now Playing and lock-screen
+  controls, audio focus/interruption handling, and pause when headphones disconnect.
+- **Save to Files:** copies a completed original file, then opens the system export
+  picker. Its initial location is MusicMute's Documents folder; users can choose another
+  Files location. Cancelling keeps the original. Temporary export copies are cleaned
+  after the picker closes. MusicMute's Documents folder is visible in Files.
+- **Preferences:** local UserDefaults persistence with safe defaults for unknown
+  stored values. All interface strings are in matching English/Arabic resources.
+- **Processing:** import audio or explicitly select Remove music on a saved original.
+  The app validates and stages immutable input, uploads directly to signed S3 storage,
+  and shows authenticated cloud history, job detail, worker interruption, cancel,
+  and failed-job retry. Ready voice-only MP3 files are downloaded only when Play,
+  Download, or Save to Files is selected and cached privately per account.
+
+Downloads are asynchronous and receive iOS's finite background-task grace period.
+Keep MusicMute open for long downloads. When that time expires, work is cancelled and
+shown as interrupted with retry. On process restart, incomplete history entries
+become retryable failures. This version does not promise indefinite background
+downloads or automatic retry/resume after force-quit. During an active download,
+connection loss and request timeouts receive up to three retries with short delays.
+URLSession resume data is used when supplied; otherwise the transfer restarts.
+Cancellation and permanent errors are not automatically retried.
+
+Direct media requests have a 30-second request timeout and 10-minute resource
+timeout. Extraction has a 60-second cancellation deadline. Cancellation stops the
+request; late callbacks cannot overwrite terminal history states. The extractor's
+own cancellation responsiveness remains an upstream dependency.
 
 ## Architecture
 
-- `Auth/`: Firebase identity and authenticated transport.
-- `Processing/`: local file preparation, signed uploads, durable jobs and results.
-- `State/`: account-scoped state, history, preferences and recovery.
-- `Playback/`: AVAudioPlayer, audio session and system playback controls.
-- `UI/`: local file import, cloud history, playback and sharing.
+- `Auth/`: Firebase email/password and Apple identity adapters, validated backend transport,
+  installation identity/revision persistence, and the mandatory session coordinator. Firebase
+  owns credentials and tokens; passwords, Apple authorization data, and bearer tokens remain in
+  memory. The successful-bootstrap marker and installation report live under Application Support,
+  are excluded from backup, and never contain audio ownership.
+- `Core/`: Codable records, validated YouTube IDs, original-audio selection, safe
+  export names, and error categories.
+- `Data/YouTubeAudioService.swift`: `AudioDownloading` replacement boundary,
+  local extraction, URLSession progress, and cancellation.
+- `Data/HistoryStore.swift`: actor-isolated JSON persistence with atomic writes and
+  revision ordering to reject stale snapshots. Corruption is reported, never silently
+  replaced by empty history.
+- `Data/AudioFiles.swift`: app-private file validation, path confinement, audio
+  duration, byte-preserving export, and attempt-owned cleanup.
+- `State/`: observable state, lifecycle/cancellation/retry, and preferences.
+- `Playback/AudioPlayer.swift`: AVAudioPlayer, AVAudioSession, and MediaPlayer controls.
+- `UI/`: SwiftUI screens, reusable cards/waveform, and UIKit's native document picker.
 
 ## Authentication configuration
 
@@ -58,18 +118,12 @@ in the application at build time, so restrict the key to the registered iOS bund
 ID instead of treating the plist as an Admin SDK secret.
 
 The app requires a backend bootstrap after Firebase sign-in. Supply the public API **origin** as
-the `MUSICMUTE_API_BASE_URL` Xcode build setting; the client uses root-mounted resource paths. The value must not
+the `MUSICMUTE_API_BASE_URL` Xcode build setting; the client appends `/api/v1`. The value must not
 contain a path, query, credentials, or fragment. Release builds accept HTTPS only. Debug builds
 default to `http://127.0.0.1:3000` for local development and also accept explicit HTTP loopback
-origins for isolated fixtures. Release defaults to `https://api.music-mute.com`, with
-privacy and deletion links on the same production host. An invalid or empty override
-still shows a setup error and never bypasses the auth gate. Validate the final archive
-and provider configuration before distributing it.
-
-The app uses root-mounted routes such as `POST /auth/sessions` and `GET /jobs`.
-The Swift transport converts between idiomatic model names and snake_case API
-JSON/query names. See the [API client contract](../docs/api/client-contract.md)
-for authentication, pagination, errors, and the breaking deployment cutover.
+origins for isolated fixtures. The checked-in Release setting is empty because this repository
+does not establish an authorized deployed origin; an unconfigured Release build shows a setup
+error and does not bypass the auth gate.
 
 `FirebaseAuth` uses the existing exact Firebase SPM pin (`12.18.0`). Sign in with Apple uses the
 checked-in entitlement plus `AuthenticationServices` and a fresh SHA-256 nonce for every prompt.
@@ -82,7 +136,7 @@ to accounts. A matching Firebase user with a previous successful bootstrap may r
 when validation fails specifically because the device is offline. A new or changed identity must
 bootstrap online. Account deletion is available in Account, including when processing is restricted. The coordinator
 reauthenticates the current identity; Apple accounts obtain a fresh authorization code and revoke
-the Apple token using Firebase before requesting backend deletion. `DELETE /users/me`
+the Apple token using Firebase before requesting backend deletion. `DELETE /api/v1/users/me`
 uses a fresh bearer token and an empty body. Only a validated HTTP 202 acceptance receipt is
 shown as accepted. The receipt and backup-excluded journal preserve the exact backend-provided
 15-day recovery deadline; acceptance does not claim cloud cleanup has completed.
@@ -127,8 +181,20 @@ xcodebuild -project MusicMute.xcodeproj -scheme MusicMute \
   -derivedDataPath DerivedData -parallel-testing-enabled NO \
   test CODE_SIGNING_ALLOWED=NO
 
+# Opt-in real YouTube download, playback, background, export, and relaunch check.
+xcodebuild -project MusicMute.xcodeproj -scheme MusicMute \
+  -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_UDID" \
+  -derivedDataPath DerivedData -parallel-testing-enabled NO \
+  -only-testing:VocalUITests/VocalUITests/testLiveDownloadPlaybackAndExport \
+  test CODE_SIGNING_ALLOWED=NO VOCAL_LIVE_TEST=1
+
 xcrun swift-format lint --recursive Vocal VocalTests VocalUITests scripts
 ```
+
+The opt-in `testRadioLinkDownloadAndPlayback` UI test covers video `EiRpINIoHbU`
+with its playlist/radio query parameters. Select it with
+`-only-testing:VocalUITests/VocalUITests/testRadioLinkDownloadAndPlayback` and
+`VOCAL_LIVE_TEST=1`. It waits for completion or failure and verifies native playback.
 
 For simulator launch after building:
 
@@ -138,7 +204,47 @@ xcrun simctl install "$IOS_SIMULATOR_UDID" \
 xcrun simctl launch "$IOS_SIMULATOR_UDID" com.hatem.musicmute
 ```
 
-UI fixtures use isolated synthetic audio and account stores. Real backend, upload and worker validation is separate from simulator checks.
+Xcode test result bundles include screenshot attachments. UI tests use app-specific
+launch overrides for language, appearance, and input; they do not clear existing
+downloads or change another app's settings. The live test creates a small public
+YouTube sample and an exported copy. Unit tests use temporary, isolated stores.
+
+## Integration evidence and remaining limits
+
+The complete simulator suite passed: **17 unit tests and 3 UI tests**, with zero
+failures or skips when `VOCAL_LIVE_TEST=1`. Coverage includes Arabic dark/large-text
+screens, invalid input/settings, a real download, native play/pause/seeking,
+background playback, Save to Files, and persistent history after relaunch. The
+exported file's SHA-256 exactly matched the original downloaded file. The unsigned
+Release build for `generic/platform=iOS` also passed; no physical device was run.
+Formatting and `git diff --check` were checked separately.
+
+On 2026-09-08, local extraction and direct downloading of `jNQXAC9IVRw` succeeded
+inside the authorized iOS simulator. Independent ffprobe inspection found one AAC
+audio stream, 44.1 kHz stereo, approximately 130 kbps, 309,288 bytes, and no video.
+The container reports 19.064 seconds including encoder priming; native playable
+audio duration is approximately 19.016 seconds. These are source properties,
+not a fixed bitrate limit. No server downloaded this file.
+
+This is simulator evidence, not a physical-iPhone or App Store release claim.
+The longer radio-link sample `EiRpINIoHbU` exposed a connection reset after
+5,603,296 of 6,087,448 bytes (`NSURLError -1005`). After adding bounded resume,
+the same reset was reproduced and recovered with HTTP 206; the download and
+playback UI test passed. Independent inspection found one AAC audio stream,
+44.1 kHz stereo, 6,087,448 bytes, and approximately 6:16 duration. No video or
+transcoding was involved. The extractor also logged a recoverable parsing message;
+stream extraction continued successfully, so that message alone is not proof of
+a failed download.
+
+Other iOS versions, real hardware background restrictions, Bluetooth routes,
+very long downloads, low-storage conditions, and restricted/private videos still
+need their own runtime coverage. SwiftUI previews include English, Arabic RTL,
+dark, progress, cancellation, failure, and narrow enlarged-text layouts; compiling
+them does not mean every preview has been visually rendered.
+
+YouTube changes can break extraction. Update the pinned package and rerun the live
+test when that happens; do not silently add server fallback. Client-side downloads
+change the originating IP and do not guarantee availability.
 
 Processing uses `Processing/`, `State/ProcessingModel.swift`, and the Processing UI
 views. Prepared input must be nonempty and stays within the single inclusive
@@ -152,19 +258,19 @@ hides private history, and stops private playback.
 
 Optional FCM/APNs registration waits for permission and an APNs token; taps re-fetch
 authenticated job detail. Simulator fixtures disable live push transport. Real
-Firebase/APNs provisioning and deployed backend/R2/Z440 behavior require separate
-operational validation. See the [current client contract](../docs/api/client-contract.md).
+Firebase/APNs provisioning and deployed backend/S3/Z440 behavior require separate
+operational validation. See the [processing task record](../docs/tasks/mobile-audio-processing.md).
 
 The Android project, reserved backend directory, and existing tracked deletions are
 preserved. No signing credentials, commit, push, publishing, or deployment were used.
 
 ## Owned-audio consent and recovery
 
-All new file intake pause in a persisted
+All new file intake and secondary YouTube download completion pause in a persisted
 `awaitingConfirmation` pipeline state. The review shows source attribution, size, duration,
 cloud upload disclosure and permission confirmation; Remove music is disabled until confirmed.
 Restart and Resume do not create a cloud job for that state. Cancelling removes only the private
-review staging copy.
+review staging copy. A deliberately downloaded source remains available until account deletion.
 Existing uploads that had already started before this update retain their recovery behavior.
 
 iOS native validation accepts playable audio-only M4A/MP4, MP3 and AAC. Although declarations
@@ -173,6 +279,15 @@ OGG/Opus/WebM support. Prepared audio must be nonempty and no larger than 50,000
 bytes or 1,200 seconds. These checks run before review and again through the upload contract.
 Rights confirmation records user intent; it does not verify copyright ownership.
 
+On 2026-09-10 the account-deletion/owned-audio changes passed **136 unit tests** and
+Home validation/settings UI on the designated simulator. Targeted native UI checks
+also passed final account-deletion confirmation/cancellation and secondary YouTube
+plus actual Files selection through rights confirmation and explicit cloud processing,
+using synthetic fixture audio. Scoped Swift lint and both localization resources
+passed. These fixture checks do not prove real Firebase/Apple revocation or deployed
+backend/S3/worker account erasure. Public privacy/deletion URLs remain unconfigured.
+
+
 ## Versioned media preparation and account allowance (2026-09-13)
 
 Files offers individual audio/video selection; Photos uses PHPicker's one-video grant,
@@ -180,7 +295,7 @@ without full-library authorization. Provider materialization has a 60-second can
 deadline and a bounded streaming copy. Photos copies are private and discarded after use;
 original Files/Photos assets are never deleted. Lost provider access requires reselection.
 
-`ProcessingMediaPolicy` reads `/processing-policy?schema_version=2`. A validated,
+`ProcessingMediaPolicy` reads `/processing-policy?schemaVersion=2`. A validated,
 accepting response may lower the local ceiling but never raise the single inclusive
 1,200-second/50,000,000-byte prepared-audio policy. The same safe ceiling is retained
 when policy refresh is unavailable. Policy version, profile ID, and source category
@@ -214,113 +329,16 @@ and cleaned-audio results are still fetched only for Play/Download/Save. Valid p
 caches bypass the grant endpoint. Uncertain result retries reuse their request identity;
 a known-expired entitlement rotates to a new identity.
 
+YouTube intake first reads the public watch page locally with a 5-MB response ceiling,
+30-second resource deadline, and no cookies/credentials/redirect fallback. A bounded JSON
+parser requires an available player response, matching video ID, explicit non-live metadata,
+and finite lengthSeconds at or below 1,200. Live/upcoming, consent/login pages, unknown
+metadata, and playlist context fail before audio transfer. YouTubeKit 0.4.9 then resolves
+audio-only streams locally. Source delegates enforce actual downloaded bytes (50 MB) and
+600 seconds independently of response length; background retry preserves the original
+persisted deadline. Final native frame duration and prepared policy are revalidated.
+Public YouTube response markup can change; deterministic parser tests are not live service proof.
+
 See `../docs/tasks/media-input-and-queue/evidence/ios.md` for current simulator validation and
 remaining readiness, provider, device, and network limitations. Earlier evidence in this README
 records historical versions and does not establish current production readiness.
-
-## Realtime processing
-
-Processing updates use authenticated raw WebSocket snapshots with automatic
-reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
-and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
-HTTP remains responsible for authentication, commands and file transfers.
-
-### Home job history storage
-
-Home job history is held in memory and loaded from WebSocket snapshots; it is
-not restored from disk. Existing persisted history is reduced to completed
-library tracks when the account store opens. Library media/metadata, preferences,
-and pending import/upload recovery records remain on device. Switching tabs
-continues using the shared live session rather than restarting the connection.
-
-## Current jobs and Library (2026-09-28)
-
-Failed link imports offer **Delete** on the import card. Removal clears the
-account-scoped local recovery record and survives restart without submitting
-another acquisition. Failed imports without a job expire locally after seven
-days when the account opens. Older records start that window on their first open
-after upgrading. Active imports and submitted jobs are preserved. Server import
-records already have a seven-day TTL; administrator job history remains.
-
-Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
-`cancelled`); unfinished local reviews and recoverable local imports stay
-accessible. Creation date and time are shown on Home job cards. Filtering is
-presentation only: no deletion request, database mutation or media cleanup is
-performed, and the administrator dashboard retains job history.
-
-Library has explicit cursor-based Load more with loading/error feedback. Native
-Library storage preserves previously discovered completed audio; browser Library
-requests `status=ready`, retains loaded pages, and bounds live subscriptions to
-the newest page plus nine tail pages. See
-[release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
-and distribution status.
-
-Library uses the job's nullable `thumbnail_url` when it contains an original public
-YouTube HTTPS thumbnail. The same optional field survives HTTP, realtime snapshots
-and saved Library history. Older jobs, local files, missing or rejected URLs and
-image download failures keep the existing waveform placeholder. The client never
-constructs a thumbnail URL or requests additional video metadata.
-
-Library's **Show starred** checkbox combines with search and every Library tab.
-The **Most played** tab shows played tracks ranked by local play count; the sort
-menu also offers Most played for the other tabs. Stars, removed-track preferences,
-and play counts stay in account-scoped device preferences and never reach the API
-or database. A successful playback start counts once, and each actual repeat counts
-again. Pause/resume, seeking, source comparison and failed starts do not add plays.
-Playback queues use the displayed track order when a track is selected. Historical
-plays before this update are unknown and start at zero.
-
-## Private local diagnostics
-
-The shared API transport, raw WebSocket, file transfers, installation/processing
-stores and app lifecycle emit structured diagnostics to the repository's
-[Vector/Logdy collector](../tools/local-logging/README.md). They require a Debug
-build plus explicit opt-in. Release builds compile out the collector, its key
-loading, payload snapshots and exception observer.
-
-Build a simulator Debug app using the existing exact simulator target, start the
-root collector, then from the repository root run:
-
-```sh
-xcodebuild -quiet -project ios/MusicMute.xcodeproj -scheme MusicMute -configuration Debug \
-  -destination 'platform=iOS Simulator,id=3CC14436-EC3C-4419-A079-C84951E5FA07' \
-  -derivedDataPath .runtime/local-logging/ios-build build CODE_SIGNING_ALLOWED=NO
-python3 ios/scripts/run-local-logging.py \
-  --app .runtime/local-logging/ios-build/Build/Products/Debug-iphonesimulator/MusicMute.app \
-  --fixture
-```
-
-The helper reads the private `keys.ios` value from
-`.runtime/local-logging/keys.json` without printing it, boots/installs/launches only
-`3CC14436-EC3C-4419-A079-C84951E5FA07` (iPhone 17 Pro, iOS 26.0), and never closes
-an existing process. Close an already running app manually before relaunch so it
-inherits settings. `--fixture` uses the isolated processing UI and a safe
-credential-redaction canary, success/error/abort requests through a dedicated in-memory URLProtocol session (no external API), and a fresh event after three seconds of native inactivity; omit it for ordinary local development.
-
-For Xcode launches configure `MUSICMUTE_LOG_ENABLED=1`,
-`MUSICMUTE_LOG_KEY=<private keys.ios>`, and optionally
-`MUSICMUTE_LOG_PAYLOADS=1`, `MUSICMUTE_LOG_CONSOLE=1`. The only accepted destination
-is `http://127.0.0.1:19740/ingest/ios` (optional
-`MUSICMUTE_LOG_ENDPOINT`). Disable collection by removing `MUSICMUTE_LOG_ENABLED`;
-payload and console controls are independent opt-ins. Helper launches default to
-payloads on, console off and respect explicit payload/console environment values.
-
-One random process identity scopes local task/subscription identifiers. HTTP
-requests carry debug-only UUID request IDs; returned valid server IDs are retained.
-UIDs are captured before awaits and job retries retain their operation trace ID.
-Realtime records distinguish client reception, application processing and client
-transport send completion; these are separate observations, never delivery claims.
-Binary transfers record metadata without reading/buffering their contents or signed
-URLs. Storage events report existing accesses only; no diagnostic reads are added.
-
-The bounded sender keeps at most 128 pending events plus one active request,
-limits records to 32 KiB and JSON snapshots to 16 KiB, and prefers warnings/errors
-under pressure. Failed sends are counted and discarded; there is no unbounded
-retry/offline spool. `LocalDiagnostics.status()` and each event's `collector`
-field expose pending/sent/failed/dropped counters. Redaction precedes network,
-queue and console output. Unsupported data, non-JSON/binary snapshots, large
-strings/arrays/depth, arbitrary error messages and stacks have explicit omissions.
-Objective-C exceptions are observed best-effort and forwarded to the prior handler;
-Swift fatal errors/OS termination cannot guarantee collector delivery. Use native
-crash diagnostics for those cases. Root Logdy/MCP retention and privacy apply;
-MCP responses are supplied to the selected AI host/model.

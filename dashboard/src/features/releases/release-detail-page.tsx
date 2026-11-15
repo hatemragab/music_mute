@@ -15,6 +15,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatBytes, formatDateTime, titleCase } from "@/lib/format";
+import { ApkUploadPanel } from "./apk-upload-panel";
 import { ReleaseDraftForm } from "./release-draft-form";
 import {
   getRelease,
@@ -53,11 +54,7 @@ export function ReleaseDetailPage() {
       <ErrorState error={release.error} retry={() => void release.refetch()} />
     );
   const data = release.data;
-  const retired = data.source === "direct_apk";
-  const distributionLabel = retired
-    ? "Retired direct APK"
-    : titleCase(data.source);
-  const editable = can("releases.manage") && data.state === "draft" && !retired;
+  const editable = can("releases.manage") && data.state === "draft";
   return (
     <div className="space-y-6">
       <Link
@@ -68,7 +65,7 @@ export function ReleaseDetailPage() {
       </Link>
       <PageHeader
         title={`${data.versionName} (${data.buildNumber})`}
-        description={`${distributionLabel} · ${data.id}`}
+        description={`${titleCase(data.source)} · ${data.id}`}
         actions={
           <div className="flex gap-2">
             {editable ? (
@@ -76,7 +73,7 @@ export function ReleaseDetailPage() {
                 <Pencil aria-hidden="true" /> Edit draft
               </Button>
             ) : null}
-            {can("releases.read") && !retired ? (
+            {can("releases.read") ? (
               <Button asChild>
                 <Link to={`/update-policy?releaseId=${data.id}`}>
                   <ShieldCheck aria-hidden="true" /> Review policy
@@ -102,7 +99,7 @@ export function ReleaseDetailPage() {
                     Platform / distribution
                   </dt>
                   <dd className="capitalize">
-                    {data.platform} · {distributionLabel}
+                    {data.platform} · {titleCase(data.source)}
                   </dd>
                 </div>
                 <div>
@@ -182,21 +179,25 @@ export function ReleaseDetailPage() {
           </PageSection>
         </CardContent>
       </Card>
-      {!retired ? (
-        <ReleaseDraftForm
-          open={editing}
-          onOpenChange={setEditing}
-          initial={{
-            platform: data.platform,
-            source: data.platform === "android" ? "google_play" : "app_store",
-            versionName: data.versionName,
-            buildNumber: data.buildNumber,
-            changelogEn: data.changelogEn,
-            storeUrl: data.storeUrl,
-          }}
-          onSubmit={(input) => update.mutateAsync(input).then(() => undefined)}
+      {editable ? (
+        <ApkUploadPanel
+          release={data}
+          onComplete={() => void release.refetch()}
         />
       ) : null}
+      <ReleaseDraftForm
+        open={editing}
+        onOpenChange={setEditing}
+        initial={{
+          platform: data.platform,
+          source: data.source,
+          versionName: data.versionName,
+          buildNumber: data.buildNumber,
+          changelogEn: data.changelogEn,
+          storeUrl: data.storeUrl,
+        }}
+        onSubmit={(input) => update.mutateAsync(input).then(() => undefined)}
+      />
     </div>
   );
 }

@@ -1,8 +1,5 @@
 import { Transform, Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
-  ArrayUnique,
-  IsArray,
   IsBoolean,
   IsInt,
   IsISO8601,
@@ -17,7 +14,6 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { visitorCountry } from '../../devices/cloudflare-location.js';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -43,44 +39,6 @@ export class AccountPolicyValuesDto {
 
 export class UpdateAccountPolicyDto extends AccountPolicyValuesDto {
   @IsBoolean() acceptNewJobs!: boolean;
-
-  // Older dashboard writes preserve the current values when these are absent.
-  @ValidateIf((_object, value) => value !== undefined)
-  @IsBoolean()
-  linkImportEnabled?: boolean;
-
-  @ValidateIf((_object, value) => value !== undefined)
-  @IsArray()
-  @ArrayMaxSize(250)
-  @ArrayUnique()
-  @ValidateBy({
-    name: 'assignedCountryCodes',
-    validator: {
-      validate: (value: unknown) =>
-        Array.isArray(value) &&
-        value.every((code) => visitorCountry(code) !== null),
-    },
-  })
-  linkImportDisabledCountries?: string[];
-
-  @ValidateIf((_object, value) => value !== undefined)
-  @IsArray()
-  @ArrayMaxSize(1000)
-  @ArrayUnique()
-  @ValidateBy({
-    name: 'canonicalAccountIds',
-    validator: {
-      validate: (value: unknown) =>
-        Array.isArray(value) &&
-        value.every(
-          (id) =>
-            typeof id === 'string' &&
-            id.length === 24 &&
-            /^[a-f0-9]{24}$/.test(id),
-        ),
-    },
-  })
-  linkImportDisabledUserIds?: string[];
 
   @Transform(trim)
   @ValidateBy({

@@ -18,9 +18,6 @@ struct ProcessingDetailView: View {
   var onDelete: () -> Void
   var onCancel: () -> Void
   var onRetry: () -> Void
-  var original: Bool = false
-  var onOriginal: (Bool) -> Void = { _ in }
-  var onSaveOriginal: () -> Void = {}
   @State private var renaming = false
   @State private var deleting = false
   @State private var proposedName = ""
@@ -31,7 +28,6 @@ struct ProcessingDetailView: View {
       VStack(alignment: .leading, spacing: 20) {
         Text(task?.title ?? String(localized: "processing_details"))
           .font(.system(.largeTitle, design: .rounded, weight: .bold))
-        ProcessingConnectionStatus(connection: history.connection)
         if let key = messageKey { Text(LocalizedStringKey(key)).foregroundStyle(.red) }
         if let key = history.messageKey { Text(LocalizedStringKey(key)).foregroundStyle(.red) }
         if let task {
@@ -41,7 +37,7 @@ struct ProcessingDetailView: View {
               .contentTransition(.opacity)
               .animation(.easeInOut(duration: reduceMotion ? 0 : 0.2), value: task.statusKey)
           }
-          AudioStepTimeline(steps: task.timeline, timings: task.serverStageTimings)
+          AudioStepTimeline(steps: task.timeline)
           identifierRow(
             title: task.jobID == nil ? "processing_reference" : "processing_job_id",
             value: task.jobID ?? task.reference)
@@ -50,12 +46,6 @@ struct ProcessingDetailView: View {
           }
           timing(task)
           if let job = history.detail {
-            ProcessingQueueStatus(job: job, connection: history.connection)
-            if history.connection == .live, let progress = job.processingProgress, !progress.stale,
-              let percent = progress.phasePercent, percent.isFinite
-            {
-              ProgressView(value: min(1, max(0, percent / 100)))
-            }
             if job.workerAvailable == false && shouldPollProcessingJob(job.status) {
               Text("processing_worker_offline").foregroundStyle(.secondary)
             }
@@ -74,6 +64,7 @@ struct ProcessingDetailView: View {
         } else if history.messageKey == nil {
           ProgressView()
         }
+        Button("processing_refresh") { Task { await history.refresh() } }.disabled(history.loading)
       }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
     }
     .accessibilityIdentifier("processingDetail")
@@ -126,17 +117,9 @@ struct ProcessingDetailView: View {
       }
       .buttonStyle(PrimaryButtonStyle()).disabled(busy).accessibilityIdentifier("processingPlay")
       if duration > 0 {
-        Picker("comparison_track", selection: Binding(get: { original }, set: onOriginal)) {
-          Text("voice_track").tag(false)
-          Text("original_track").tag(true)
-        }.pickerStyle(.segmented).disabled(busy)
-          .accessibilityIdentifier("comparisonSource")
-
         Slider(value: Binding(get: { min(position, duration) }, set: onSeek), in: 0...duration)
           .accessibilityLabel(Text("playback_position"))
       }
-      Button("save_original", action: onSaveOriginal).disabled(
-        busy || history.detail?.canDownloadInput != true)
       Button("processing_download", action: onDownload).disabled(busy)
         .accessibilityIdentifier("processingDownload")
       Button("processing_share", action: onShare).disabled(busy)

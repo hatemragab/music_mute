@@ -7,7 +7,6 @@ struct AudioStepPresentation: Equatable, Identifiable, Sendable {
   let titleKey: String
   let state: AudioStepState
   let occurredAt: Date?
-  var measurement: ServerStageMeasurement?
 }
 
 struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
@@ -29,12 +28,7 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
   let processingSeconds: Double?
   let processingApproximate: Bool
   let timeline: [AudioStepPresentation]
-  var serverStageTimings: ServerStageTimings?
   var outputMessageKey: String?
-
-  var visibleOnHome: Bool {
-    isActive || statusKey == "import_review_title" || (jobID == nil && canRetry)
-  }
 
   static func merge(
     pipelines: [AudioPipelineIntent], uploads: [UploadOperation], jobs: [Job]
@@ -67,12 +61,10 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
       [job?.displayName, intent?.displayName, job?.sourceTitle, intent?.sourceTitle]
       .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
       .first { !$0.isEmpty } ?? String(localized: "processing_untitled")
-    let serverTiming = job?.serverStageTimings
-    let separation = serverTiming?.stages.first(where: { $0.stage == "separation" })
-    let processingSeconds =
-      serverTiming != nil
-      ? separation.map { Double($0.durationMs) / 1_000 }
-      : job?.timing?.processingElapsedMs.map { Double($0) / 1_000 }
+    let localTotal: Double? = {
+      guard let intent, let end = intent.completedAt else { return nil }
+      return max(0, end.timeIntervalSince(intent.clientStartedAt))
+    }()
     return AudioTaskPresentation(
       id: job.map { "job:" + $0.id } ?? "operation:"
         + (intent?.operationId.uuidString ?? UUID().uuidString),
@@ -84,15 +76,13 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
       isActive: stage.isActive, isReady: stage == .ready,
       canCancel: stage.isActive && stage != .cancelling,
       canRetry: stage == .failed, canDelete: [.ready, .failed, .cancelled].contains(stage),
-      createdAt: job?.createdAt ?? intent?.clientStartedAt ?? upload?.createdAt ?? Date(),
-      totalSeconds: job?.serverStageTimings?.totalMs.map { Double($0) / 1_000 },
-      totalApproximate: job?.serverStageTimings.map { !$0.totalComplete } ?? true,
-      processingSeconds: processingSeconds,
-      processingApproximate: serverTiming != nil
-        ? separation.map { !$0.complete } ?? false
-        : job?.timing?.processingElapsedApproximate ?? false,
+      createdAt: intent?.clientStartedAt ?? job?.createdAt ?? upload?.createdAt ?? Date(),
+      totalSeconds: job?.timing?.totalElapsedMs.map { Double($0) / 1_000 } ?? localTotal,
+      totalApproximate: job?.timing?.totalElapsedApproximate ?? (intent != nil),
+      processingSeconds: job?.timing?.processingElapsedMs.map { Double($0) / 1_000 },
+      processingApproximate: job?.timing?.processingElapsedApproximate ?? false,
       timeline: timeline(stage: stage, intent: intent, upload: upload, job: job),
-      serverStageTimings: job?.serverStageTimings, outputMessageKey: nil)
+      outputMessageKey: nil)
   }
 
   // One resolved stage drives labels, actions and timeline, so a stale local
@@ -164,19 +154,9 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
       } else {
         state = .pending
       }
-      let timingStage: String? =
-        switch step {
-        case .download: "source-download"
-        case .queued: "queue"
-        case .validating: "input-validation"
-        case .processing: "separation"
-        case .uploadingResult: "output-upload"
-        default: nil
-        }
       return AudioStepPresentation(
         id: step.timelineKey, titleKey: step.timelineKey, state: state,
-        occurredAt: stageDate(step, job: job),
-        measurement: job?.serverStageTimings?.stages.first(where: { $0.stage == timingStage }))
+        occurredAt: stageDate(step, job: job))
     }
     if current == nil {
       // A failure/cancellation need not retain its previous local phase. Show
@@ -246,6 +226,8 @@ struct AudioTaskPresentation: Equatable, Identifiable, Sendable {
 
   private static func localStage(_ phase: AudioPipelinePhase) -> Stage {
     switch phase {
+    case .resolvingSource: return .source
+    case .downloadingSource: return .download
     case .inspectingSource: return .inspect
     case .preparingInput: return .prepare
     case .reservingJob: return .reserve

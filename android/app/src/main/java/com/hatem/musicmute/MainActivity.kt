@@ -7,7 +7,6 @@ import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.LaunchedEffect
@@ -17,7 +16,6 @@ import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -37,45 +35,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
-    private val updateOwner = Any()
-    private val updateLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        (application as VocalApplication).updateInstaller.onActivityResult(updateOwner, result.resultCode)
-    }
     private val openHistory = MutableStateFlow(false)
-    private val entryAction = MutableStateFlow<String?>(null)
-    private val playbackSearch = MutableStateFlow<String?>(null)
-    private val sharedAudio = MutableStateFlow<android.net.Uri?>(null)
-    private val openPlayer = MutableStateFlow(false)
     private val openProcessing = MutableStateFlow(false)
     private val processingJob = MutableStateFlow<String?>(null)
     private val processingOperation = MutableStateFlow<String?>(null)
     private val audioTaskIntent = MutableStateFlow<Intent?>(null)
-    private val sharedUrlText = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        (application as VocalApplication).updateInstaller.bindLauncher(updateOwner, updateLauncher)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
-        openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
-        entryAction.value = intent.action?.removePrefix("com.hatem.musicmute.")?.takeIf { it in setOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY") }
-        sharedAudio.value = incomingAudio(intent)
-        playbackSearch.value = if (intent.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
-            intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty().take(200) else null
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
-        if (savedInstanceState == null) sharedUrlText.value = sharedText(intent)
         (application as VocalApplication).processingPush.rememberTap(processingNotificationData(intent))
         enableEdgeToEdge()
         setContent {
             val app = application as VocalApplication
             val updateState by app.updateCoordinator.state.collectAsStateWithLifecycle()
             val updateInstallState by app.updateInstaller.state.collectAsStateWithLifecycle()
-            LaunchedEffect(updateState.snapshot, updateState.decision) {
-                app.updateInstaller.synchronizePolicy(updateState.snapshot?.target, updateState.decision, updateState.snapshot?.minimumBuild)
-                if (this@MainActivity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                    app.updateInstaller.onForeground(updateState.snapshot?.target, updateState.decision, updateState.snapshot?.minimumBuild)
-                }
-            }
             val updateBlocked =
                 updateState.restoring ||
                     updateState.decision == UpdateDecision.REQUIRED
@@ -86,7 +62,9 @@ class MainActivity : AppCompatActivity() {
                         viewModelFactory {
                             initializer {
                                 VocalViewModel(
+                                    app.workflowRepository,
                                     app.preferencesRepository,
+                                    createSavedStateHandle(),
                                 )
                             }
                         }
@@ -97,6 +75,7 @@ class MainActivity : AppCompatActivity() {
             val pushTap by app.processingPush.pendingTap.collectAsStateWithLifecycle()
             val requestedProcessing by openProcessing.collectAsStateWithLifecycle()
             val requestedJob by processingJob.collectAsStateWithLifecycle()
+            val artifacts by app.processingArtifacts.progress.collectAsStateWithLifecycle()
             val processing: ProcessingViewModel = viewModel(factory = viewModelFactory {
                 initializer {
                     ProcessingViewModel(app.jobsApi, app.processingRepository, app.audioPipelineCoordinator,
@@ -128,12 +107,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             val requestedHistory by openHistory.collectAsStateWithLifecycle()
-            val requestedPlayer by openPlayer.collectAsStateWithLifecycle()
-            val requestedEntry by entryAction.collectAsStateWithLifecycle()
-            val requestedAudio by sharedAudio.collectAsStateWithLifecycle()
-            val requestedSearch by playbackSearch.collectAsStateWithLifecycle()
             val requestedOperation by processingOperation.collectAsStateWithLifecycle()
-            val sharedText by sharedUrlText.collectAsStateWithLifecycle()
             LaunchedEffect(Unit) {
                 val style = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
@@ -159,26 +133,16 @@ class MainActivity : AppCompatActivity() {
                     currentBuild = BuildConfig.VERSION_CODE,
                     installer = app.updateInstaller,
                     onUpdate = {
+                        val target = updateState.snapshot?.target ?: return@UpdateGate
                         updateScope.launch {
-                            val current = app.updateCoordinator.state.value
-                            val target = current.snapshot?.target ?: return@launch
-                            app.updateInstaller.start(target, current.decision, current.snapshot?.minimumBuild)
+                            if (updateInstallState == UpdateInstallState.PermissionNeeded)
+                                app.updateInstaller.onForeground()
+                            else app.updateInstaller.start(target)
                         }
                     },
                     onLater = { updateScope.launch { app.updateCoordinator.deferOptional() } },
                     onRetryPolicy = { app.updateCoordinator.requestCheck(UpdateTrigger.RETRY) },
-                    onRestart = {
-                        updateScope.launch {
-                            val current = app.updateCoordinator.state.value
-                            app.updateInstaller.synchronizePolicy(current.snapshot?.target, current.decision, current.snapshot?.minimumBuild)
-                            app.updateInstaller.completeUpdate()
-                        }
-                    },
-                    onOpenStore = {
-                        val current = app.updateCoordinator.state.value
-                        app.updateInstaller.synchronizePolicy(current.snapshot?.target, current.decision, current.snapshot?.minimumBuild)
-                        current.snapshot?.target?.let(app.updateInstaller::openStore)
-                    },
+                    onCancelInstall = app.updateInstaller::cancel,
                 ) {
                     AuthGate(
                         app.authSession,
@@ -190,18 +154,8 @@ class MainActivity : AppCompatActivity() {
                             )
                         },
                     ) { onAccount ->
-                        VocalApp(state, model, processing, processingSession, app.processingArtifacts.progress,
+                        VocalApp(state, model, processing, processingSession, artifacts,
                             requestedHistory,
-                            playbackSearch = requestedSearch,
-                            onPlaybackSearchConsumed = { consumed -> if (playbackSearch.value == consumed) { playbackSearch.value = null; intent.action = Intent.ACTION_MAIN; intent.removeExtra(android.app.SearchManager.QUERY) } },
-                            entryAction = requestedEntry,
-                            sharedAudio = requestedAudio,
-                            onEntryConsumed = { entryAction.value = null; intent.action = Intent.ACTION_MAIN },
-                            onSharedAudioConsumed = { consumed -> if (sharedAudio.value == consumed) { sharedAudio.value = null; intent.removeExtra(Intent.EXTRA_STREAM); intent.clipData = null; intent.action = Intent.ACTION_MAIN } },
-                            openPlayer = requestedPlayer,
-                            onPlayerOpened = { openPlayer.value = false; intent.removeExtra(OPEN_PLAYER) },
-                            sharedUrlText = sharedText,
-                            onSharedUrlConsumed = { sharedUrlText.value = null },
                             openProcessing = requestedProcessing, openProcessingJob = requestedJob,
                             openProcessingOperation = requestedOperation,
                             onProcessingOpened = { openProcessing.value = false; processingJob.value = null; processingOperation.value = null; intent.removeExtra(OPEN_PROCESSING) },
@@ -220,14 +174,8 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openHistory.value = intent.getBooleanExtra(OPEN_HISTORY, false)
-        openPlayer.value = intent.getBooleanExtra(OPEN_PLAYER, false)
-        entryAction.value = intent.action?.removePrefix("com.hatem.musicmute.")?.takeIf { it in setOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY") }
-        sharedAudio.value = incomingAudio(intent)
-        playbackSearch.value = if (intent.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
-            intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty().take(200) else null
         openProcessing.value = intent.getBooleanExtra(OPEN_PROCESSING, false)
         audioTaskIntent.value = intent
-        sharedUrlText.value = sharedText(intent)
         (application as VocalApplication).processingPush.rememberTap(processingNotificationData(intent))
     }
 
@@ -235,64 +183,25 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         val app = application as VocalApplication
         app.processingPush.onForeground()
-        app.realtime.setForeground(true)
-        app.processingPolicy.setForeground(true)
         app.updateCoordinator.setForeground(true)
     }
 
     override fun onResume() {
         super.onResume()
-        val app = application as VocalApplication
-        lifecycleScope.launch {
-            val state = app.updateCoordinator.state.value
-            app.updateInstaller.onForeground(state.snapshot?.target, state.decision, state.snapshot?.minimumBuild)
-        }
-    }
-
-    override fun onDestroy() {
-        (application as VocalApplication).updateInstaller.unbindLauncher(updateOwner)
-        super.onDestroy()
+        lifecycleScope.launch { (application as VocalApplication).updateInstaller.onForeground() }
     }
 
     override fun onStop() {
-        (application as VocalApplication).updateInstaller.onBackground(updateOwner)
-        (application as VocalApplication).realtime.setForeground(false)
-        (application as VocalApplication).processingPolicy.setForeground(false)
         (application as VocalApplication).updateCoordinator.setForeground(false)
         super.onStop()
     }
 
     companion object {
-        private const val OPEN_PLAYER = "open_player"
         private const val OPEN_HISTORY = "open_download_history"
         private const val OPEN_PROCESSING = "open_processing"
 
-        @Suppress("DEPRECATION")
-        internal fun incomingAudio(intent: Intent?): android.net.Uri? =
-            if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("audio/") == true)
-                (intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
-                    ?: intent.clipData?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.uri)?.takeIf { it.scheme == "content" }
-            else null
-
-        fun entryPendingIntent(context: Context, action: String): PendingIntent = PendingIntent.getActivity(
-            context, 40 + listOf("IMPORT_AUDIO", "IMPORT_LINK", "LIBRARY").indexOf(action),
-            Intent(context, MainActivity::class.java).setAction("com.hatem.musicmute.$action")
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-
-        internal fun sharedText(intent: Intent?): String? =
-            if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
-                intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() else null
-
         fun processingPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
             context, 1, Intent(context, MainActivity::class.java).putExtra(OPEN_PROCESSING, true)
-                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-
-        fun playerPendingIntent(context: Context): PendingIntent = PendingIntent.getActivity(
-            context, 2, Intent(context, MainActivity::class.java).putExtra(OPEN_PLAYER, true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

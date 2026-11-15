@@ -1,8 +1,3 @@
-import {
-  localDiagnostics,
-  withLocalLogContext,
-} from "../observability/local-debug.js";
-import type { ExecutionStageTiming } from "./stage-clock.js";
 import { randomUUID } from "node:crypto";
 import {
   parseClaimResponse,
@@ -22,26 +17,22 @@ import {
   type WorkerRecipeId,
 } from "./contracts.js";
 import {
-  parseUpdateCandidate,
-  type UpdateCandidate,
-  type UpdatePlatform,
-} from "../platform/shared/update-metadata.js";
+  parseMacUpdateCandidate,
+  type MacUpdateCandidate,
+} from "../platform/macos/update-metadata.js";
 import type { WorkerProgressPhase } from "../../protocol/v1/protocol.js";
-import { MAX_RETRY_DELAY_MS, retryAfterMilliseconds } from "./retry-after.js";
-import { fromWireCase, toWireCase } from "./wire-case.js";
 
 const RESPONSE_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 const WORKER_ERROR_CODES = new Set([
   "WORKER_INVALID_REQUEST",
   "WORKER_UNAUTHENTICATED",
-  "WORKER_MACHINE_DELETED",
   "WORKER_FORBIDDEN",
   "WORKER_NOT_FOUND",
   "WORKER_CONFLICT",
   "WORKER_EXPIRED",
-  "WORKER_RATE_LIMITED",
   "WORKER_DEPENDENCY_UNAVAILABLE",
 ]);
 
@@ -76,7 +67,6 @@ export class ControlPlaneError extends Error {
     readonly code: string,
     readonly status: number,
     readonly retryable: boolean,
-    readonly retryAfterMs?: number,
   ) {
     super(`Worker control-plane request failed (${code})`);
     this.name = "ControlPlaneError";
@@ -118,7 +108,7 @@ export class WorkerControlPlaneClient {
   ): Promise<SessionResponse> {
     return parseSessionResponse(
       await this.request(
-        "worker/sessions",
+        "worker/v1/session",
         "POST",
         {
           sessionId,
@@ -134,10 +124,10 @@ export class WorkerControlPlaneClient {
     incarnation: string,
     signal?: AbortSignal,
   ): Promise<ConfigResponse> {
-    const query = new URLSearchParams({ session_id: sessionId, incarnation });
+    const query = new URLSearchParams({ sessionId, incarnation });
     return parseConfigResponse(
       await this.request(
-        `worker/config?${query.toString()}`,
+        `worker/v1/config?${query.toString()}`,
         "GET",
         null,
         signal,
@@ -147,17 +137,14 @@ export class WorkerControlPlaneClient {
 
   async hintTicket(
     signal?: AbortSignal,
-  ): Promise<{ socketUrl: string; ticket: string; expiresAt: string }> {
+  ): Promise<{ socketUrl: string; expiresAt: string }> {
     const ticket = parseWorkerHintTicket(
-      await this.request("worker/hints/tickets", "POST", {}, signal),
+      await this.request("worker/v1/hints/ticket", "POST", {}, signal),
     );
     const socketUrl = new URL(ticket.path, this.baseUrl);
     socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
-    return {
-      socketUrl: socketUrl.toString(),
-      ticket: ticket.ticket,
-      expiresAt: ticket.expiresAt,
-    };
+    socketUrl.searchParams.set("ticket", ticket.ticket);
+    return { socketUrl: socketUrl.toString(), expiresAt: ticket.expiresAt };
   }
 
   async applyConfig(
@@ -168,7 +155,7 @@ export class WorkerControlPlaneClient {
   ): Promise<void> {
     const requestId = randomUUID();
     const response = await this.request(
-      "worker/config/applications",
+      "worker/v1/config/applied",
       "POST",
       { requestId, sessionId, incarnation, revision },
       signal,
@@ -185,7 +172,7 @@ export class WorkerControlPlaneClient {
   ): Promise<void> {
     const response = asRecord(
       await this.request(
-        "worker/slots",
+        "worker/v1/slots",
         "POST",
         { ...identity, gpuId, slotIndex, recipeIds },
         signal,
@@ -204,7 +191,7 @@ export class WorkerControlPlaneClient {
     signal?: AbortSignal,
   ): Promise<ClaimResponse> {
     return this.request(
-      "worker/claims",
+      "worker/v1/claims",
       "POST",
       {
         requestId,
@@ -226,7 +213,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = parseLeaseResponse(
       await this.request(
-        "worker/leases/renewals",
+        "worker/v1/leases/renew",
         "POST",
         { requestId, sessionId, incarnation, leases },
         signal,
@@ -245,7 +232,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = parseInputGrantResponse(
       await this.request(
-        `worker/attempts/${attemptId}/input-grants`,
+        `worker/v1/attempts/${attemptId}/input-grant`,
         "POST",
         { requestId, ...identity },
         signal,
@@ -269,7 +256,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = parseOutputGrantResponse(
       await this.request(
-        `worker/attempts/${attemptId}/output-grants`,
+        `worker/v1/attempts/${attemptId}/output-grant`,
         "POST",
         { requestId, ...identity, ...output },
         signal,
@@ -283,7 +270,6 @@ export class WorkerControlPlaneClient {
     attemptId: string,
     identity: WorkerIdentity,
     progress: {
-      executionTimings?: ExecutionStageTiming[];
       sequence: number;
       phase: WorkerProgressPhase;
       phasePercent: number | null;
@@ -293,7 +279,7 @@ export class WorkerControlPlaneClient {
     const requestId = randomUUID();
     const response = asRecord(
       await this.request(
-        `worker/attempts/${attemptId}/progress-events`,
+        `worker/v1/attempts/${attemptId}/progress`,
         "POST",
         { requestId, ...identity, ...progress },
         signal,
@@ -312,7 +298,7 @@ export class WorkerControlPlaneClient {
     attemptId: string,
     identity: WorkerIdentity,
     completion: {
-      etag: string;
+      versionId: string;
       recipeId: WorkerRecipeId;
       recipeRevision: number;
       recipeDigest: string;
@@ -322,14 +308,12 @@ export class WorkerControlPlaneClient {
       outputFormat: "mp3";
       outputBitrateKbps: number;
       stageTimings: Array<{ stage: string; durationMs: number }>;
-      executionTimings?: ExecutionStageTiming[];
-      comparisonRanges?: number[][] | undefined;
     },
     signal?: AbortSignal,
   ): Promise<void> {
     const response = asRecord(
       await this.request(
-        `worker/attempts/${attemptId}/completions`,
+        `worker/v1/attempts/${attemptId}/complete`,
         "POST",
         { requestId: randomUUID(), ...identity, ...completion },
         signal,
@@ -342,16 +326,12 @@ export class WorkerControlPlaneClient {
   async fail(
     attemptId: string,
     identity: WorkerIdentity,
-    failure: {
-      code: WorkerFailureCode;
-      summary: string;
-      executionTimings?: ExecutionStageTiming[];
-    },
+    failure: { code: WorkerFailureCode; summary: string },
     signal?: AbortSignal,
   ): Promise<void> {
     const response = asRecord(
       await this.request(
-        `worker/attempts/${attemptId}/failures`,
+        `worker/v1/attempts/${attemptId}/fail`,
         "POST",
         { requestId: randomUUID(), ...identity, ...failure },
         signal,
@@ -373,7 +353,7 @@ export class WorkerControlPlaneClient {
       throw new TypeError("Worker command identity is invalid");
     const response = asRecord(
       await this.request(
-        `worker/commands/${commandId}/results`,
+        `worker/v1/commands/${commandId}/result`,
         "POST",
         { requestId, sessionId, incarnation, ...result },
         signal,
@@ -395,17 +375,15 @@ export class WorkerControlPlaneClient {
     status: "revoked";
     confirmed: true;
     revision: number;
-    deleted?: true;
   }> {
     const response = asRecord(
-      await this.request("worker/unpairings", "POST", { force }, signal),
+      await this.request("worker/v1/unpair", "POST", { force }, signal),
     );
     if (
       typeof response.machineId !== "string" ||
       !UUID_V4.test(response.machineId) ||
       response.status !== "revoked" ||
       response.confirmed !== true ||
-      (response.deleted !== undefined && response.deleted !== true) ||
       !Number.isSafeInteger(response.revision) ||
       (response.revision as number) < 1
     )
@@ -415,15 +393,25 @@ export class WorkerControlPlaneClient {
       status: "revoked",
       confirmed: true,
       revision: response.revision as number,
-      ...(response.deleted === true ? { deleted: true as const } : {}),
     };
   }
 
   async machineStatus(signal?: AbortSignal): Promise<WorkerMachineStatus> {
     const response = asRecord(
-      await this.request("worker/status", "GET", null, signal),
+      await this.request("worker/v1/status", "GET", null, signal),
     );
+    const allowed = new Set([
+      "machineId",
+      "status",
+      "groupId",
+      "policyRevision",
+      "revision",
+      "lastSeenAt",
+      "activeAttempts",
+      "claimsAllowed",
+    ]);
     if (
+      Object.keys(response).some((key) => !allowed.has(key)) ||
       typeof response.machineId !== "string" ||
       !UUID_V4.test(response.machineId) ||
       !["pending", "active", "paused", "draining"].includes(
@@ -442,115 +430,21 @@ export class WorkerControlPlaneClient {
     return response as unknown as WorkerMachineStatus;
   }
 
-  async updateCandidate(
-    platform: UpdatePlatform,
+  async macUpdateCandidate(
     download = false,
     signal?: AbortSignal,
-  ): Promise<UpdateCandidate> {
-    return parseUpdateCandidate(
+  ): Promise<MacUpdateCandidate> {
+    return parseMacUpdateCandidate(
       await this.request(
-        "worker/updates",
+        "worker/v1/update",
         "POST",
-        { platform, download },
+        { platform: "darwin-arm64", download },
         signal,
       ),
-      platform,
     );
-  }
-
-  async diagnosticLogCursor(
-    sessionId: string,
-    incarnation: string,
-    signal?: AbortSignal,
-  ): Promise<number> {
-    if (!UUID_V4.test(sessionId) || !UUID_V4.test(incarnation))
-      throw new TypeError("Diagnostic session is invalid");
-    const query = new URLSearchParams({ session_id: sessionId, incarnation });
-    const response = await this.request(
-      `worker/logs/cursor?${query}`,
-      "GET",
-      null,
-      signal,
-    );
-    const cursor = (response as { acknowledgedSequence?: unknown } | null)
-      ?.acknowledgedSequence;
-    if (
-      !Number.isSafeInteger(cursor) ||
-      (cursor as number) < 0 ||
-      (cursor as number) >= Number.MAX_SAFE_INTEGER
-    )
-      throw new TypeError("Diagnostic cursor is invalid");
-    return cursor as number;
-  }
-
-  async appendDiagnosticLogs(
-    batch: {
-      sessionId: string;
-      incarnation: string;
-      sequenceStart: number;
-      sequenceEnd: number;
-      lines: string[];
-    },
-    signal?: AbortSignal,
-  ): Promise<{ acknowledgedSequence: number; replayed: boolean }> {
-    if (
-      !UUID_V4.test(batch.sessionId) ||
-      !UUID_V4.test(batch.incarnation) ||
-      !Number.isSafeInteger(batch.sequenceStart) ||
-      batch.sequenceStart < 0 ||
-      !Number.isSafeInteger(batch.sequenceEnd) ||
-      batch.sequenceEnd >= Number.MAX_SAFE_INTEGER ||
-      batch.sequenceEnd - batch.sequenceStart + 1 !== batch.lines.length ||
-      batch.lines.length < 1 ||
-      batch.lines.length > 100 ||
-      batch.lines.some((line) => typeof line !== "string" || line.length > 1000)
-    )
-      throw new TypeError("Diagnostic batch is invalid");
-    const response = await this.request("worker/logs", "POST", batch, signal);
-    if (!response || typeof response !== "object" || Array.isArray(response))
-      throw new TypeError("Diagnostic acknowledgement is invalid");
-    const result = response as Record<string, unknown>;
-    if (
-      result.acknowledgedSequence !== batch.sequenceEnd ||
-      typeof result.replayed !== "boolean"
-    )
-      throw new TypeError("Diagnostic acknowledgement does not match batch");
-    return {
-      acknowledgedSequence: batch.sequenceEnd,
-      replayed: result.replayed,
-    };
   }
 
   private async request(
-    path: string,
-    method: "GET" | "POST",
-    body: Record<string, unknown> | null,
-    signal?: AbortSignal,
-  ): Promise<unknown> {
-    const identities: Record<string, unknown> = {};
-    for (const key of [
-      "sessionId",
-      "workerId",
-      "attemptId",
-      "jobId",
-      "requestId",
-      "claimRequestId",
-    ])
-      if (typeof body?.[key] === "string") identities[key] = body[key];
-    for (const [wire, key] of [
-      ["session_id", "sessionId"],
-      ["incarnation", "incarnation"],
-    ] as const) {
-      const value = new URL(path, this.baseUrl).searchParams.get(wire);
-      if (value && UUID_V4.test(value)) identities[key] = value;
-    }
-    return withLocalLogContext(
-      { operationId: randomUUID(), ...identities },
-      () => this.performRequest(path, method, body, signal),
-    );
-  }
-
-  private async performRequest(
     path: string,
     method: "GET" | "POST",
     body: Record<string, unknown> | null,
@@ -561,8 +455,7 @@ export class WorkerControlPlaneClient {
       throw new TypeError(
         "Control-plane request escaped the configured origin",
       );
-    const serialized =
-      body === null ? undefined : JSON.stringify(toWireCase(body));
+    const serialized = body === null ? undefined : JSON.stringify(body);
     let lastError: unknown;
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       if (signal?.aborted) throw signal.reason;
@@ -584,7 +477,7 @@ export class WorkerControlPlaneClient {
           },
           ...(serialized === undefined ? {} : { body: serialized }),
         });
-        if (response.ok) return fromWireCase(await readJson(response));
+        if (response.ok) return await readJson(response);
         const error = await responseError(response);
         if (!error.retryable || attempt === this.maxAttempts) throw error;
         lastError = error;
@@ -594,17 +487,7 @@ export class WorkerControlPlaneClient {
         lastError = error;
         if (attempt === this.maxAttempts) break;
       }
-      if (lastError instanceof ControlPlaneError && lastError.status === 429) {
-        if (lastError.retryAfterMs !== undefined) {
-          if (lastError.retryAfterMs > MAX_RETRY_DELAY_MS) throw lastError;
-          await abortableDelay(lastError.retryAfterMs, signal);
-          continue;
-        }
-      }
-      await abortableDelay(
-        Math.min(MAX_RETRY_DELAY_MS, 200 * 2 ** (attempt - 1)),
-        signal,
-      );
+      await abortableDelay(Math.min(2_000, 200 * 2 ** (attempt - 1)), signal);
     }
     if (lastError instanceof ControlPlaneError) throw lastError;
     throw new ControlPlaneError("NETWORK_UNAVAILABLE", 0, true);
@@ -624,24 +507,16 @@ function validatedBaseUrl(value: string, allowInsecureLoopback: boolean): URL {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash)
     throw new TypeError("Control-plane URL contains forbidden components");
-  if (url.pathname !== "/")
-    throw new TypeError("Control-plane URL must be an API origin");
   const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
   if (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
     throw new TypeError("Control-plane URL must use HTTPS");
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return url;
 }
 
-async function readJson(
-  response: Response,
-  mediaType = "application/json",
-): Promise<unknown> {
-  const contentType = response.headers
-    .get("content-type")
-    ?.split(";", 1)[0]
-    ?.trim()
-    .toLowerCase();
-  if (contentType !== mediaType)
+async function readJson(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json"))
     throw new ControlPlaneError("RESPONSE_INVALID", response.status, false);
   const contentLength = Number(response.headers.get("content-length") ?? "0");
   if (contentLength > RESPONSE_LIMIT_BYTES)
@@ -662,13 +537,7 @@ async function readJson(
     chunks.push(value);
   }
   try {
-    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    localDiagnostics.emit("http.payload", { response: value }, "debug", {
-      requestId: response.headers.get("x-request-id") ?? undefined,
-      status: response.status,
-      phase: "body_consumed",
-    });
-    return value;
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
   } catch {
     throw new ControlPlaneError("RESPONSE_INVALID", response.status, false);
   }
@@ -681,13 +550,8 @@ function boundedStatusInteger(value: unknown): value is number {
 async function responseError(response: Response): Promise<ControlPlaneError> {
   let code = `HTTP_${response.status}`;
   try {
-    const body = asRecord(await readJson(response, "application/problem+json"));
-    if (
-      body.type === "about:blank" &&
-      body.status === response.status &&
-      typeof body.code === "string" &&
-      WORKER_ERROR_CODES.has(body.code)
-    )
+    const body = asRecord(await readJson(response));
+    if (typeof body.code === "string" && WORKER_ERROR_CODES.has(body.code))
       code = body.code;
   } catch {
     // The bounded status code is sufficient when an upstream omitted JSON.
@@ -695,11 +559,7 @@ async function responseError(response: Response): Promise<ControlPlaneError> {
   return new ControlPlaneError(
     code,
     response.status,
-    response.status === 429 ||
-      (response.status >= 500 && response.status <= 599),
-    response.status === 429
-      ? retryAfterMilliseconds(response.headers.get("retry-after"))
-      : undefined,
+    RETRYABLE_STATUS.has(response.status),
   );
 }
 
@@ -741,14 +601,14 @@ async function abortableDelay(
 ): Promise<void> {
   if (signal?.aborted) throw signal.reason;
   await new Promise<void>((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timeout);
-      reject(signal?.reason);
-    };
-    const timeout = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-    signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(resolve, milliseconds);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
   });
 }

@@ -1,6 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
-import { Readable } from "node:stream";
 import { lstat, open, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import type {
@@ -13,7 +12,7 @@ const UPLOAD_HEADER_NAMES = new Set([
   "content-type",
   "if-none-match",
   "x-amz-checksum-sha256",
-  "x-amz-meta-sha256",
+  "x-amz-storage-class",
 ]);
 const DEFAULT_TRANSFER_TIMEOUT_MS = 2 * 60 * 60_000;
 const DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
@@ -33,20 +32,11 @@ export class TransferError extends Error {
   }
 }
 
-/** File-handle ownership is uncertain; the caller must preserve its workspace. */
-export class TransferOwnershipError extends TransferError {
-  constructor(code: "DOWNLOAD_FAILED" | "OUTPUT_UPLOAD_FAILED") {
-    super(code, false, "file-close-failed");
-    this.name = "TransferOwnershipError";
-  }
-}
-
 export interface TransferClientOptions {
   fetch?: typeof fetch;
   allowInsecureLoopback?: boolean;
   timeoutMs?: number;
   downloadIdleTimeoutMs?: number;
-  uploadIdleTimeoutMs?: number;
 }
 
 export class WorkerTransferClient {
@@ -54,16 +44,12 @@ export class WorkerTransferClient {
   private readonly allowInsecureLoopback: boolean;
   private readonly timeoutMs: number;
   private readonly downloadIdleTimeoutMs: number;
-  private readonly uploadIdleTimeoutMs: number;
 
   constructor(options: TransferClientOptions = {}) {
     this.fetchImplementation = options.fetch ?? fetch;
     this.allowInsecureLoopback = options.allowInsecureLoopback === true;
     this.timeoutMs = boundedTimeout(
       options.timeoutMs ?? DEFAULT_TRANSFER_TIMEOUT_MS,
-    );
-    this.uploadIdleTimeoutMs = boundedTimeout(
-      options.uploadIdleTimeoutMs ?? 30_000,
     );
     this.downloadIdleTimeoutMs = boundedTimeout(
       options.downloadIdleTimeoutMs ?? DEFAULT_DOWNLOAD_IDLE_TIMEOUT_MS,
@@ -78,22 +64,14 @@ export class WorkerTransferClient {
   ): Promise<void> {
     validateGrantUrl(grant, this.allowInsecureLoopback, "DOWNLOAD_FAILED");
     if (Date.parse(grant.expiresAt) <= Date.now())
-      throw new TransferError(
-        "DOWNLOAD_FAILED",
-        true,
-        "download-grant-expired",
-      );
+      throw new TransferError("DOWNLOAD_FAILED", true);
     const target = resolve(destination);
     if (
       !isAbsolute(destination) ||
       basename(target) !== basename(destination) ||
       dirname(target) === target
     )
-      throw new TransferError(
-        "DOWNLOAD_FAILED",
-        false,
-        "download-path-invalid",
-      );
+      throw new TransferError("DOWNLOAD_FAILED", false);
     const timeout = AbortSignal.timeout(this.timeoutMs);
     const idle = new AbortController();
     let idleTimer: ReturnType<typeof setTimeout>;
@@ -111,7 +89,6 @@ export class WorkerTransferClient {
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let created = false;
     try {
-      requestSignal.throwIfAborted();
       const response = await this.fetchImplementation(grant.url, {
         method: "GET",
         redirect: "error",
@@ -128,89 +105,53 @@ export class WorkerTransferClient {
         );
       const encoding = response.headers.get("content-encoding");
       if (encoding && encoding.toLowerCase() !== "identity")
-        throw new TransferError(
-          "DOWNLOAD_FAILED",
-          false,
-          "download-content-encoding",
-        );
+        throw new TransferError("DOWNLOAD_FAILED", false);
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.split(";", 1)[0] !== expected.contentType)
-        throw new TransferError(
-          "DOWNLOAD_FAILED",
-          false,
-          "download-content-type",
-        );
+        throw new TransferError("DOWNLOAD_FAILED", false);
       const declared = response.headers.get("content-length");
       if (declared && Number(declared) !== expected.bytes)
-        throw new TransferError(
-          "DOWNLOAD_FAILED",
-          false,
-          "download-size-mismatch",
-        );
+        throw new TransferError("DOWNLOAD_FAILED", false);
       handle = await open(target, "wx", 0o600);
       created = true;
-      requestSignal.throwIfAborted();
       const digest = createHash("sha256");
       const reader = response.body.getReader();
       let bytes = 0;
       while (true) {
-        requestSignal.throwIfAborted();
         const { done, value } = await reader.read();
-        requestSignal.throwIfAborted();
         if (done) break;
         if (value.byteLength > 0) resetIdleTimer();
         bytes += value.byteLength;
         if (bytes > expected.bytes) {
           await reader.cancel();
-          throw new TransferError(
-            "DOWNLOAD_FAILED",
-            false,
-            "download-size-mismatch",
-          );
+          throw new TransferError("DOWNLOAD_FAILED", false);
         }
         digest.update(value);
         let offset = 0;
         while (offset < value.byteLength) {
-          requestSignal.throwIfAborted();
           const { bytesWritten } = await handle.write(
             value,
             offset,
             value.byteLength - offset,
           );
           if (bytesWritten < 1)
-            throw new TransferError(
-              "DOWNLOAD_FAILED",
-              true,
-              "download-write-stalled",
-            );
+            throw new TransferError("DOWNLOAD_FAILED", true);
           offset += bytesWritten;
         }
       }
-      requestSignal.throwIfAborted();
       await handle.sync();
-      requestSignal.throwIfAborted();
       await handle.close();
       handle = undefined;
-      requestSignal.throwIfAborted();
       const actualDigest = digest.digest();
       const expectedDigest = Buffer.from(expected.sha256, "base64");
-      if (bytes !== expected.bytes)
-        throw new TransferError(
-          "DOWNLOAD_FAILED",
-          false,
-          "download-size-mismatch",
-        );
       if (
+        bytes !== expected.bytes ||
         expectedDigest.length !== actualDigest.length ||
         !timingSafeEqual(actualDigest, expectedDigest)
       )
-        throw new TransferError(
-          "DOWNLOAD_FAILED",
-          false,
-          "download-checksum-mismatch",
-        );
+        throw new TransferError("DOWNLOAD_FAILED", false);
     } catch (error) {
-      await closeTransferHandle(handle, "DOWNLOAD_FAILED");
+      await handle?.close().catch(() => undefined);
       if (created) await unlink(target).catch(() => undefined);
       if (signal?.aborted) throw signal.reason;
       if (error instanceof TransferError) throw error;
@@ -250,28 +191,7 @@ export class WorkerTransferClient {
       | undefined;
     let validationError: TransferError | undefined;
     let verified = false;
-    const timeout = AbortSignal.timeout(this.timeoutMs);
-    const idle = new AbortController();
-    let idleTimer: ReturnType<typeof setTimeout>;
-    const resetIdleTimer = () => {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => idle.abort(), this.uploadIdleTimeoutMs);
-      idleTimer.unref();
-    };
-    const requestSignal = AbortSignal.any([
-      timeout,
-      idle.signal,
-      ...(signal ? [signal] : []),
-    ]);
-    // Fetch exposes body consumption, not remote acknowledgement of each byte.
-    // This also bounds waiting for response headers after the body is consumed.
-    resetIdleTimer();
-    const abortBody = () => {
-      body?.destroy();
-    };
-    requestSignal.addEventListener("abort", abortBody, { once: true });
     try {
-      requestSignal.throwIfAborted();
       const pathStat = await lstat(source);
       if (!pathStat.isFile() || pathStat.isSymbolicLink())
         throw new TransferError(
@@ -299,7 +219,6 @@ export class WorkerTransferClient {
         autoClose: false,
         highWaterMark: 64 * 1024,
       });
-      requestSignal.throwIfAborted();
       const sourceStream = body;
       async function* verifiedBody() {
         const digest = createHash("sha256");
@@ -308,9 +227,7 @@ export class WorkerTransferClient {
         // finish a PUT. Earlier chunks upload while subsequent chunks are read.
         let pending: Buffer | undefined;
         for await (const chunk of sourceStream) {
-          requestSignal.throwIfAborted();
           const data = chunk as Buffer;
-          if (data.length > 0) resetIdleTimer();
           bytes += data.length;
           if (bytes > expected.bytes) {
             validationError = new TransferError(
@@ -339,25 +256,21 @@ export class WorkerTransferClient {
           throw validationError;
         }
         verified = true;
-        if (pending) {
-          requestSignal.throwIfAborted();
-          resetIdleTimer();
-          yield pending;
-        }
+        if (pending) yield pending;
       }
+      const timeout = AbortSignal.timeout(this.timeoutMs);
+      const requestSignal = signal
+        ? AbortSignal.any([signal, timeout])
+        : timeout;
       const request: RequestInit & { duplex: "half" } = {
         method: "PUT",
         redirect: "error",
         signal: requestSignal,
         headers: { ...grant.headers, "Content-Length": String(expected.bytes) },
-        body: Readable.toWeb(
-          Readable.from(verifiedBody()),
-        ) as ReadableStream<Uint8Array>,
+        body: verifiedBody(),
         duplex: "half",
       };
       const response = await this.fetchImplementation(grant.url, request);
-      // PUT responses carry no useful body; release the connection immediately.
-      void response.body?.cancel().catch(() => undefined);
       if (!response.ok)
         throw new TransferError(
           "OUTPUT_UPLOAD_FAILED",
@@ -374,14 +287,14 @@ export class WorkerTransferClient {
           false,
           "output-not-consumed",
         );
-      const etag = response.headers.get("ETag");
-      if (!etag || !/^"[\x21\x23-\x7e]{1,1022}"$/u.test(etag))
+      const versionId = response.headers.get("x-amz-version-id");
+      if (!versionId || versionId === "null" || versionId.length > 1024)
         throw new TransferError(
           "OUTPUT_UPLOAD_FAILED",
           true,
-          "upload-etag-missing",
+          "upload-version-id-missing",
         );
-      return etag;
+      return versionId;
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
       if (validationError) throw validationError;
@@ -389,18 +302,11 @@ export class WorkerTransferClient {
       throw new TransferError(
         "OUTPUT_UPLOAD_FAILED",
         true,
-        idle.signal.aborted
-          ? "upload-idle-timeout"
-          : timeout.aborted
-            ? "upload-total-timeout"
-            : `upload-transport-${transferErrorName(error)}`,
+        `upload-transport-${transferErrorName(error)}`,
       );
     } finally {
-      clearTimeout(idleTimer!);
-      requestSignal.removeEventListener("abort", abortBody);
-      idle.abort();
       body?.destroy();
-      await closeTransferHandle(handle, "OUTPUT_UPLOAD_FAILED");
+      await handle?.close();
     }
   }
 }
@@ -439,14 +345,16 @@ function validateUploadHeaders(
       value,
     ]),
   );
+  const storageClass = headers.get("x-amz-storage-class");
   if (
-    headers.size !== 4 ||
+    headers.size < 3 ||
+    headers.size > 4 ||
     Object.keys(grant.headers).length !== headers.size ||
     [...headers.keys()].some((name) => !UPLOAD_HEADER_NAMES.has(name)) ||
     headers.get("content-type") !== expected.contentType ||
     headers.get("x-amz-checksum-sha256") !== expected.sha256 ||
     headers.get("if-none-match") !== "*" ||
-    headers.get("x-amz-meta-sha256") !== expected.sha256
+    (storageClass !== undefined && storageClass !== "INTELLIGENT_TIERING")
   )
     throw new TransferError(
       "OUTPUT_UPLOAD_FAILED",
@@ -459,15 +367,4 @@ function boundedTimeout(value: number): number {
   if (!Number.isSafeInteger(value) || value < 100 || value > 7_200_000)
     throw new TypeError("Transfer timeout is invalid");
   return value;
-}
-
-async function closeTransferHandle(
-  handle: Awaited<ReturnType<typeof open>> | undefined,
-  code: "DOWNLOAD_FAILED" | "OUTPUT_UPLOAD_FAILED",
-): Promise<void> {
-  try {
-    await handle?.close();
-  } catch {
-    throw new TransferOwnershipError(code);
-  }
 }

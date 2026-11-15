@@ -9,7 +9,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hatem.musicmute.R
 import com.hatem.musicmute.BuildConfig
-import com.hatem.musicmute.processing.processedAudioExportName
+import com.hatem.musicmute.download.DownloadRecord
+import com.hatem.musicmute.download.DownloadStatus
+import com.hatem.musicmute.download.processedAudioExportName
 import com.hatem.musicmute.playback.AudioPlaybackController
 import com.hatem.musicmute.processing.*
 import java.io.File
@@ -48,10 +50,8 @@ class ProcessingViewModel(
     private val errorOutbox: ClientErrorOutbox,
 ) : ViewModel() {
     val history = JobHistoryController(api, viewModelScope,
-        onJobsChanged = { uid, jobs ->
-            repository.store.updateLibraryJobs(uid, jobs)
-            repository.store.retireConfirmedTerminalOperations(uid, jobs)
-        },
+        loadCached = { repository.store.snapshots(it).first() },
+        saveCached = { uid, jobs -> repository.store.saveSnapshots(uid, jobs) },
         onMissing = { jobId ->
             session()?.let { current ->
                 playback.removeTrack(com.hatem.musicmute.library.LibraryKey(current.uid, jobId))
@@ -89,7 +89,7 @@ class ProcessingViewModel(
         }
     }
 
-    fun importAudio(uri: Uri, trimEnabled: Boolean = true) {
+    fun importAudio(uri: Uri) {
         val operationId = UUID.randomUUID().toString()
         performIntake(operationId) { ticket ->
         val name = withContext(Dispatchers.IO) {
@@ -99,7 +99,29 @@ class ProcessingViewModel(
         }
         try { resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         catch (_: SecurityException) { /* A provider may give only a temporary grant; lost grants require reselection. */ }
-        coordinator.acceptDocument(operationId, name, uri.toString(), trimEnabled)
+        coordinator.acceptDocument(operationId, name, uri.toString())
+        checkSession(ticket)
+        history.refreshAfterChange()
+        }
+    }
+
+    fun submitUrl(url: String, onAccepted: () -> Unit = {}) {
+        val operationId = UUID.randomUUID().toString()
+        performIntake(operationId) { ticket ->
+            coordinator.acceptUrl(operationId, url)
+            checkSession(ticket)
+            onAccepted()
+            history.refreshAfterChange()
+        }
+    }
+
+    fun removeMusic(record: DownloadRecord, file: File) {
+        val operationId = UUID.randomUUID().toString()
+        performIntake(operationId) { ticket ->
+        coordinator.acceptImport(
+            operationId,
+            "${record.title.ifBlank { "Audio" }}.${record.extension}",
+        ) { file.inputStream() }
         checkSession(ticket)
         history.refreshAfterChange()
         }
@@ -161,12 +183,11 @@ class ProcessingViewModel(
         onDeleted()
     }
 
-    fun renameLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String, onRenamed: () -> Unit = {}) = perform { ticket ->
+    fun renameLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, title: String) = perform { ticket ->
         if (ticket.uid != key.ownerUid) throw CancellationException("Library owner changed")
         repository.renameJob(key.jobId, title)
         checkSession(ticket)
         history.refreshAfterChange()
-        onRenamed()
     }
 
     fun deleteLibraryTrack(key: com.hatem.musicmute.library.LibraryKey, onDeleted: () -> Unit) = perform { ticket ->

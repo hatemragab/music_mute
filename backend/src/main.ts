@@ -1,7 +1,6 @@
-import { RealtimeSocketService } from './realtime/realtime-socket.service.js';
-import { YouTubeCommunitySocketService } from './youtube-community/youtube-community-socket.service.js';
 import './observability/sentry.js';
 import 'reflect-metadata';
+import { ConsoleLogger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -9,12 +8,6 @@ import { configureHttp } from './http/configure-http.js';
 import { startupFailureReason } from './startup-error.js';
 import { WorkerHintService } from './worker-hints/worker-hint.service.js';
 import { captureBackendStartupFailure } from './observability/sentry.js';
-import { installFatalDiagnostics } from './observability/fatal-errors.js';
-import { createApiLogger } from './observability/api-logger.js';
-import { localDiagnostics } from './observability/local-diagnostics.js';
-import { installLocalOutboundDiagnostics } from './observability/local-outbound-diagnostics.js';
-
-installFatalDiagnostics();
 
 async function bootstrap() {
   const { AppModule } = await import('./app.module.js');
@@ -23,37 +16,14 @@ async function bootstrap() {
     logger: false,
     abortOnError: false,
   });
-  app.useLogger(createApiLogger());
+  app.useLogger(new ConsoleLogger({ json: true }));
   configureHttp(app);
   app.get(WorkerHintService).attach(app.getHttpServer());
-  app.get(RealtimeSocketService).attach(app.getHttpServer());
-  app.get(YouTubeCommunitySocketService).attach(app.getHttpServer());
   const config = app.get(ConfigService);
-  localDiagnostics.configure(config);
-  installLocalOutboundDiagnostics();
   await app.listen(
     config.getOrThrow<number>('PORT'),
     config.getOrThrow<string>('HOST'),
   );
-  localDiagnostics.event({
-    category: 'lifecycle',
-    name: 'api.started',
-    summary: 'Local API started',
-    data: { port: config.get('PORT') },
-  });
-  if (localDiagnostics.isEnabled) {
-    const diagnosticsHealth = setInterval(
-      () =>
-        localDiagnostics.event({
-          category: 'logging',
-          name: 'logging.health',
-          summary: 'Backend diagnostic delivery health',
-          data: localDiagnostics.status(),
-        }),
-      5000,
-    );
-    diagnosticsHealth.unref();
-  }
 }
 bootstrap().catch(async (error: unknown) => {
   await captureBackendStartupFailure(error);

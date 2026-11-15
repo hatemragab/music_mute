@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sanitizeWorkerDiagnosticLine } from './worker-diagnostic-sanitizer.js';
 import { WorkerDiagnosticsService } from './worker-diagnostics.service.js';
 
@@ -15,88 +15,6 @@ const sessionQuery = (value: unknown) => ({
 });
 
 describe('worker installation diagnostics', () => {
-  const receivedAt = new Date('2026-09-30T10:00:00.000Z');
-  const expiresAt = new Date('2026-10-07T10:00:00.000Z');
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(receivedAt);
-  });
-  afterEach(() => vi.useRealTimers());
-
-  it.each([0, 47, undefined])(
-    'reads the machine cursor %s only for its current session',
-    async (cursor) => {
-      const machine = {
-        status: 'active',
-        currentSession: { sessionId: 'current', incarnation: 'boot' },
-        acknowledgedDiagnosticSequence: cursor,
-      };
-      const machines = { findById: vi.fn().mockReturnValue(query(machine)) };
-      const service = new WorkerDiagnosticsService(
-        {} as never,
-        {} as never,
-        {} as never,
-        machines as never,
-      );
-      const principal = {
-        kind: 'machine' as const,
-        subjectId: 'machine',
-        credential: 'x'.repeat(43),
-      };
-      await expect(
-        service.runtimeLogCursor(principal, {
-          sessionId: 'current',
-          incarnation: 'boot',
-        }),
-      ).resolves.toEqual({ acknowledgedSequence: cursor ?? 0 });
-      await expect(
-        service.runtimeLogCursor(principal, {
-          sessionId: 'old',
-          incarnation: 'boot',
-        }),
-      ).rejects.toMatchObject({ status: 401 });
-      machine.status = 'revoked';
-      await expect(
-        service.runtimeLogCursor(principal, {
-          sessionId: 'current',
-          incarnation: 'boot',
-        }),
-      ).rejects.toMatchObject({ status: 401 });
-    },
-  );
-
-  it('rejects installation credentials and corrupt remote cursors', async () => {
-    const machines = {
-      findById: vi.fn().mockReturnValue(
-        query({
-          status: 'active',
-          currentSession: { sessionId: 's', incarnation: 'i' },
-          acknowledgedDiagnosticSequence: -1,
-        }),
-      ),
-    };
-    const service = new WorkerDiagnosticsService(
-      {} as never,
-      {} as never,
-      {} as never,
-      machines as never,
-    );
-    const identity = { sessionId: 's', incarnation: 'i' };
-    await expect(
-      service.runtimeLogCursor(
-        { kind: 'installation', subjectId: 'x', credential: 'x' },
-        identity,
-      ),
-    ).rejects.toMatchObject({ status: 401 });
-    expect(machines.findById).not.toHaveBeenCalled();
-    await expect(
-      service.runtimeLogCursor(
-        { kind: 'machine', subjectId: 'x', credential: 'x' },
-        identity,
-      ),
-    ).rejects.toMatchObject({ status: 409 });
-  });
   it('redacts bearer credentials, secret assignments and personal paths', () => {
     expect(
       sanitizeWorkerDiagnosticLine(
@@ -147,7 +65,6 @@ describe('worker installation diagnostics', () => {
       sequenceStart: 4,
       sequenceEnd: 5,
       lines: ['starting', 'password=[REDACTED]'],
-      expiresAt,
     });
     expect(installations.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({ _id: id }),
@@ -227,7 +144,6 @@ describe('worker installation diagnostics', () => {
       installationId: null,
       kind: 'runtime_log',
       lines: ['token=[REDACTED]'],
-      expiresAt,
     });
     expect(machines.updateOne).toHaveBeenCalledWith(
       expect.objectContaining({

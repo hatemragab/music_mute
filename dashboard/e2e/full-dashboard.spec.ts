@@ -4,7 +4,6 @@ import {
   createDashboardFixture,
   FIXTURE_IDS,
 } from "../src/test/dashboard-fixtures";
-import { fromWireCase, toWireCase } from "../src/api/wire-case";
 import { installDashboardFixture, setDashboardRole } from "./helpers/session";
 
 test("owner can open every dashboard area without runtime errors", async ({
@@ -46,17 +45,13 @@ test("owner can open every dashboard area without runtime errors", async ({
   expect(runtimeErrors).toEqual([]);
 });
 
-test("owner manages registered machines without enrollment UI", async ({
+test("owner inspects worker detail and one-use enrollment is cleared", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
 
   await page.goto("/workers");
-  await expect(page.getByRole("tab", { name: "Enrollment" })).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: /Create invitation|Create replacement/ }),
-  ).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Windows Z440/ })).toBeVisible();
   await page.getByRole("link", { name: /Windows Z440/ }).click();
   await expect(
@@ -66,19 +61,33 @@ test("owner manages registered machines without enrollment UI", async ({
   await expect(page.getByText(/\[redacted-url\]/)).toBeVisible();
   await expect(page.getByText(/fixture-secret/)).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Revoke", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Revoke worker machine" });
-  await dialog.getByLabel("Reason").fill("Retire the fixture machine");
-  await dialog
-    .getByRole("button", { name: "Reauthenticate with Google" })
+  await page.goto("/workers");
+  const trigger = page.getByRole("button", { name: "Create invitation" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Enroll a worker machine" });
+  await dialog.getByLabel("Reason").fill("Enroll the Windows fixture");
+  await dialog.getByRole("button", { name: "Verify identity" }).click();
+  await dialog.getByRole("button", { name: "Create one-use code" }).click();
+  const credentialDialog = page.getByRole("dialog", {
+    name: "Save the one-use code",
+  });
+  await expect(
+    credentialDialog.getByText("fixture-one-use-enrollment-secret"),
+  ).toBeVisible();
+  await credentialDialog
+    .getByRole("button", { name: "I saved the code" })
     .click();
-  await dialog.getByRole("button", { name: "Revoke machine" }).click();
-  await expect(dialog).toHaveCount(0);
-  expect(fixture.workerMachine.status).toBe("revoked");
-  expect(fixture.user.workerRegistrationAllowed).toBe(false);
-  expect(fixture.requests.some(({ url }) => url.includes("invitations"))).toBe(
-    false,
-  );
+  await expect(credentialDialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(
+    page.getByRole("dialog", { name: "Enroll a worker machine" }),
+  ).not.toContainText("fixture-one-use-enrollment-secret");
+  expect(
+    fixture.requests.some(({ url }) =>
+      url.includes("/admin/workers/invitations"),
+    ),
+  ).toBe(true);
 });
 
 test("support reviews a high-priority account recovery request", async ({
@@ -128,26 +137,29 @@ test("jobs pagination follows opaque cursors and returns to the first page", asy
   await setDashboardRole(page, "owner");
   const fixture = await installDashboardFixture(page);
   const secondJobId = "000000000000000000000003";
-  const original = fixture.handle.bind(fixture);
-  fixture.handle = async (request) => {
-    const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/admin/jobs") {
-      const cursor = url.searchParams.get("cursor");
-      return {
-        status: 200,
-        body: {
-          items: [
-            cursor
-              ? { ...fixture.job, id: secondJobId, queuePosition: 2 }
-              : fixture.job,
-          ],
-          nextCursor: cursor ? null : "fixture-next-page",
-          asOf: "2026-09-11T00:00:00.000Z",
-        },
-      };
+  await page.route(/\/api\/v1\/admin\/jobs(?:\?.*)?$/, async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fallback();
+      return;
     }
-    return original(request);
-  };
+    const cursor = new URL(route.request().url()).searchParams.get("cursor");
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "access-control-allow-origin": "http://127.0.0.1:4173",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        items: [
+          cursor
+            ? { ...fixture.job, id: secondJobId, queuePosition: 2 }
+            : fixture.job,
+        ],
+        nextCursor: cursor ? null : "fixture-next-page",
+        asOf: "2026-09-11T00:00:00.000Z",
+      }),
+    });
+  });
 
   await page.goto("/jobs");
   await expect(page.getByRole("link", { name: FIXTURE_IDS.job })).toBeVisible();
@@ -281,7 +293,7 @@ test("owner withdraws a release with a replacement policy", async ({
   await installDashboardFixture(page, fixture);
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.publishedRelease}`);
-  await page.getByLabel("Play release ID").fill(FIXTURE_IDS.release);
+  await page.getByLabel("Direct release ID").fill(FIXTURE_IDS.release);
   await page.getByRole("button", { name: "Preview policy" }).click();
   await expect(page.getByText("Policy is valid")).toBeVisible();
   await page.getByRole("button", { name: "Withdraw with replacement" }).click();
@@ -293,8 +305,7 @@ test("owner withdraws a release with a replacement policy", async ({
   await dialog.getByRole("button", { name: "Withdraw release" }).click();
   await expect(dialog).toHaveCount(0);
   expect(fixture.releases[1].state).toBe("withdrawn");
-  expect(fixture.policy.android.storeReleaseId).toBe(FIXTURE_IDS.release);
-  expect(fixture.policy.android.directReleaseId).toBeNull();
+  expect(fixture.policy.android.directReleaseId).toBe(FIXTURE_IDS.release);
 });
 
 test("support restricts an account, requests media deliberately, and cancels a job", async ({
@@ -347,31 +358,34 @@ test("support restricts an account, requests media deliberately, and cancels a j
   await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
 });
 
-test("owner publishes a Play release without an upload and saves settings", async ({
+test("owner uploads a direct APK, publishes verified policy, and saves settings", async ({
   page,
 }) => {
   await setDashboardRole(page, "owner");
   const fixture = createDashboardFixture();
+  fixture.releases[0].artifactState = null;
+  fixture.releases[0].bytes = null;
+  fixture.releases[0].sha256Hex = null;
   await installDashboardFixture(page, fixture);
+  await page.route("https://upload.fixture.invalid/", (route) =>
+    route.fulfill({ status: 204, body: "" }),
+  );
+
   await page.goto(`/releases/${FIXTURE_IDS.release}`);
-  await expect(page.getByLabel("APK file")).toHaveCount(0);
+  await page.getByLabel("APK file").setInputFiles({
+    name: "fixture.apk",
+    mimeType: "application/vnd.android.package-archive",
+    buffer: Buffer.from("synthetic APK bytes for browser flow"),
+  });
+  await page.getByRole("button", { name: "Hash and upload" }).click();
   await expect(
-    page.getByRole("button", { name: "Hash and upload" }),
-  ).toHaveCount(0);
-  expect(fixture.releases[0].artifactState).toBeNull();
+    page.getByText("verified", { exact: true }).last(),
+  ).toBeVisible();
+  expect(fixture.releases[0].artifactState).toBe("verified");
 
   await page.goto(`/update-policy?releaseId=${FIXTURE_IDS.release}`);
-  await page.getByLabel("Play release ID").fill(FIXTURE_IDS.release);
   await page.getByRole("button", { name: "Preview policy" }).click();
   await expect(page.getByText("Policy is valid")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Publish release" }),
-  ).toBeDisabled();
-  await page
-    .getByRole("checkbox", {
-      name: "I verified that this store release is available to the intended audience.",
-    })
-    .check();
   await page.getByRole("button", { name: "Publish release" }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason").fill("Publish verified browser fixture");
@@ -386,12 +400,6 @@ test("owner publishes a Play release without an upload and saves settings", asyn
 
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Accept new jobs" }).click();
-  await page.getByRole("switch", { name: "Show import from link" }).click();
-  const countries = page.getByLabel("Hide link import in these countries");
-  await countries.fill("United States");
-  await page.getByRole("checkbox", { name: "United States (US)" }).check();
-  await countries.fill("Egypt");
-  await page.getByRole("checkbox", { name: "Egypt (EG)" }).check();
   await page
     .getByLabel("Maintenance message, English")
     .fill("Processing is paused for maintenance.");
@@ -404,8 +412,6 @@ test("owner publishes a Play release without an upload and saves settings", asyn
   await dialog.getByRole("button", { name: "Save policy" }).click();
   await expect(dialog).toHaveCount(0);
   expect(fixture.settings.acceptNewJobs).toBe(false);
-  expect(fixture.settings.linkImportEnabled).toBe(true);
-  expect(fixture.settings.linkImportDisabledCountries).toEqual(["EG", "US"]);
   expect(fixture.settings.maintenanceMessageEn).toBe(
     "Processing is paused for maintenance.",
   );
@@ -461,15 +467,13 @@ test("a lost settings response is reconciled through the operation receipt", asy
   const fixture = await installDashboardFixture(page);
   let committedOperationId: string | null = null;
   await page.route(
-    "**/admin/settings/account-policy",
+    "**/api/v1/admin/settings/account-policy",
     async (route, request) => {
       if (request.method() !== "PUT" || committedOperationId) {
         await route.fallback();
         return;
       }
-      const body = fromWireCase(request.postDataJSON()) as {
-        operationId: string;
-      };
+      const body = request.postDataJSON() as { operationId: string };
       committedOperationId = body.operationId;
       await fixture.handle({
         method: request.method(),
@@ -480,19 +484,17 @@ test("a lost settings response is reconciled through the operation receipt", asy
       await route.abort("connectionreset");
     },
   );
-  await page.route("**/admin/operations/*", async (route) => {
+  await page.route("**/api/v1/admin/operations/*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(
-        toWireCase({
-          operationId: committedOperationId,
-          status: "succeeded",
-          resourceId: "processing",
-          revision: fixture.settings.revision,
-          code: null,
-        }),
-      ),
+      body: JSON.stringify({
+        operationId: committedOperationId,
+        status: "succeeded",
+        resourceId: "processing",
+        revision: fixture.settings.revision,
+        code: null,
+      }),
     });
   });
 

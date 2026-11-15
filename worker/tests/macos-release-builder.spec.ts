@@ -21,8 +21,7 @@ afterEach(async () => {
   );
 });
 
-// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
-describe.skipIf(process.platform !== "darwin")("macOS release builder", () => {
+describe("macOS release builder", () => {
   it("assembles only the compiled app and private runtime inputs", async () => {
     const root = await temporaryRoot();
     const workerRoot = join(root, "worker");
@@ -40,7 +39,6 @@ describe.skipIf(process.platform !== "darwin")("macOS release builder", () => {
       "ignored\n",
     );
     await writeFile(join(workerRoot, "package.json"), '{"private":true}\n');
-    await writeFile(join(workerRoot, "LICENSE"), "Worker license\n");
     await executable(join(nodeRoot, "bin", "node"));
     await writeFile(join(nodeRoot, "LICENSE"), "Node license\n");
     await mkdir(join(nodeRoot, "share", "doc"), { recursive: true });
@@ -85,7 +83,6 @@ describe.skipIf(process.platform !== "darwin")("macOS release builder", () => {
     });
 
     expect(await verifyMacRelease(outputRoot)).toEqual(built);
-    expect(built.entries.map((entry) => entry.path)).toContain("app/LICENSE");
     expect(
       (await lstat(join(outputRoot, "app", "dist", "src", "cli", "main.js")))
         .mode & 0o777,
@@ -120,19 +117,6 @@ describe.skipIf(process.platform !== "darwin")("macOS release builder", () => {
     await expect(lstat(join(outputRoot, "state"))).rejects.toMatchObject({
       code: "ENOENT",
     });
-    await rm(join(nodeRoot, "LICENSE"));
-    await expect(
-      buildMacRelease({
-        workerRoot,
-        outputRoot: join(root, "missing-notice"),
-        releaseVersion: "0.1.0-builder.2",
-        nodeRoot,
-        pythonRoot,
-        mediaRoot,
-        host: { platform: "darwin", arch: "arm64" },
-        binaryAudit: async () => {},
-      }),
-    ).rejects.toThrow();
   });
 
   it("refuses to produce a Mac package on a non-ARM64 host", async () => {

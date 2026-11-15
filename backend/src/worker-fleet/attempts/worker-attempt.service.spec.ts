@@ -1,7 +1,5 @@
 import { Types } from 'mongoose';
-import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_ACCOUNT_POLICY_VALUES } from '../../admin-settings/account-policy.schema.js';
 import { WorkerAttemptService } from './worker-attempt.service.js';
 
 const machineId = 'cb56441d-f2df-4b44-a320-6f37dfa81f7f';
@@ -18,7 +16,7 @@ function query(value: () => unknown) {
   return chain;
 }
 
-function fixture(sharedAvailable = true) {
+function fixture() {
   const jobId = new Types.ObjectId();
   const userId = new Types.ObjectId();
   const leaseExpiresAt = new Date(Date.now() + 120_000);
@@ -47,7 +45,7 @@ function fixture(sharedAvailable = true) {
     deletedAt: null,
     inputObject: {
       key: `users/${userId.toHexString()}/jobs/${jobId.toHexString()}/input/source.mp3`,
-      etag: '"input-v1"',
+      versionId: 'input-v1',
       bytes: 100,
       sha256: 'A'.repeat(43) + '=',
       contentType: 'audio/mpeg',
@@ -118,7 +116,7 @@ function fixture(sharedAvailable = true) {
     },
   };
   const storage = {
-    isObjectAvailable: vi.fn().mockResolvedValue(true),
+    isPinnedObjectAvailable: vi.fn().mockResolvedValue(true),
     createDownloadGrant: vi.fn().mockResolvedValue({
       url: 'https://storage.invalid/input',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -129,13 +127,12 @@ function fixture(sharedAvailable = true) {
       headers: {
         'Content-Type': 'audio/mpeg',
         'x-amz-checksum-sha256': 'B'.repeat(43) + '=',
-        'x-amz-meta-sha256': 'B'.repeat(43) + '=',
         'If-None-Match': '*',
       },
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     }),
-    findUploadedObject: vi.fn().mockResolvedValue(null),
-    verifyUploadedObject: vi.fn(),
+    findUploadedVersion: vi.fn().mockResolvedValue(null),
+    verifyUploadedVersion: vi.fn(),
   };
   const cleanup = {
     schedule: vi.fn().mockResolvedValue(undefined),
@@ -150,12 +147,6 @@ function fixture(sharedAvailable = true) {
     recordRetainedOutput: vi.fn().mockResolvedValue(undefined),
     settleJob: vi.fn().mockResolvedValue(undefined),
   };
-  const renditions = { wake: vi.fn() };
-  const sharedMedia = {
-    publishOutput: vi.fn(),
-    prepareRequestedOutput: vi.fn(),
-    completeResult: vi.fn().mockResolvedValue(undefined),
-  };
   const service = new WorkerAttemptService(
     { startSession: vi.fn().mockResolvedValue(transaction) } as never,
     attempts as never,
@@ -165,8 +156,6 @@ function fixture(sharedAvailable = true) {
     cleanup as never,
     accountAccess as never,
     usage as never,
-    sharedAvailable ? (sharedMedia as never) : undefined,
-    renditions as never,
   );
   return {
     service,
@@ -180,9 +169,6 @@ function fixture(sharedAvailable = true) {
     accountAccess,
     outbox,
     usage,
-    sharedMedia,
-    renditions,
-    transaction,
   };
 }
 
@@ -207,7 +193,7 @@ const output = {
 };
 const completion = {
   ...ownership,
-  etag: '"output-v1"',
+  versionId: 'output-v1',
   recipeId: 'kim-vocals-v2' as const,
   recipeRevision: 4,
   recipeDigest: 'b'.repeat(64),
@@ -223,234 +209,6 @@ const completion = {
 };
 
 describe('worker attempt transfers and finalization', () => {
-  async function prepareSharedCompletion(f: ReturnType<typeof fixture>) {
-    f.job.sharedSourceKey = 'c'.repeat(64);
-    f.job.sharedResultKey = 'd'.repeat(64);
-    f.job.inputObject.key = `shared/url/${f.job.sharedSourceKey}/c9107c58-bf4a-493f-8079-4bfbcf9bbb06/input/source.mp3`;
-    await f.service.outputGrant(principal, attemptId, output);
-    const privateObject = {
-      key: f.attempt.outputReservation.key,
-      etag: completion.etag,
-      bytes: output.bytes,
-      sha256: output.sha256,
-      contentType: output.contentType,
-    };
-    const sharedObject = {
-      ...privateObject,
-      key: `shared/url/${f.job.sharedResultKey}/c9107c58-bf4a-493f-8079-4bfbcf9bbb06/output/voice.mp3`,
-      etag: '"shared-output-v1"',
-    };
-    f.storage.verifyUploadedObject.mockResolvedValue(privateObject);
-    f.sharedMedia.publishOutput.mockResolvedValue(sharedObject);
-    return { privateObject, sharedObject };
-  }
-
-  it('publishes one shared result while retaining the private attempt identity for completion replay', async () => {
-    const f = fixture();
-    const { privateObject, sharedObject } = await prepareSharedCompletion(f);
-    const sharedCompletion = { ...completion, comparisonRanges: [[0, 44_100]] };
-    await expect(
-      f.service.complete(principal, attemptId, sharedCompletion),
-    ).resolves.toMatchObject({ status: 'ready', replayed: false });
-    expect(f.sharedMedia.publishOutput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        _id: f.job._id,
-        sharedResultKey: 'd'.repeat(64),
-      }),
-      privateObject,
-    );
-    expect(f.sharedMedia.completeResult).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: f.job._id }),
-      sharedObject,
-      sharedCompletion.comparisonRanges,
-      f.transaction,
-    );
-    expect(f.attempt.outputObject).toEqual(privateObject);
-    expect(f.job.outputObject).toEqual(sharedObject);
-    expect(f.job.comparisonRanges).toEqual(sharedCompletion.comparisonRanges);
-    expect(f.job.workerStageTimings).toEqual(completion.stageTimings);
-    expect(f.usage.recordRetainedOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: f.job._id }),
-      sharedObject.bytes + f.job.inputObject.bytes,
-      f.transaction,
-    );
-    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
-    expect(f.cleanup.schedule).toHaveBeenCalledWith(
-      expect.objectContaining({
-        key: privateObject.key,
-        reason: 'AUDIO_OUTPUT_ORPHANED',
-      }),
-      f.transaction,
-    );
-    expect(
-      f.cleanup.schedule.mock.calls.some(
-        ([task]) => task.key === sharedObject.key,
-      ),
-    ).toBe(false);
-    await expect(
-      f.service.complete(principal, attemptId, sharedCompletion),
-    ).resolves.toMatchObject({ replayed: true });
-    expect(f.storage.verifyUploadedObject).toHaveBeenCalledOnce();
-    expect(f.sharedMedia.publishOutput).toHaveBeenCalledOnce();
-    expect(f.sharedMedia.completeResult).toHaveBeenCalledOnce();
-    expect(f.outbox.updateOne).toHaveBeenCalledOnce();
-  });
-
-  it('fails closed without shared publication dependencies while local completions stay compatible', async () => {
-    const f = fixture(false);
-    await prepareSharedCompletion(f);
-    await expect(
-      f.service.complete(principal, attemptId, completion),
-    ).rejects.toMatchObject({
-      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
-    });
-    expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
-    expect(f.sharedMedia.publishOutput).not.toHaveBeenCalled();
-    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it('acknowledges the full master and persists requested trimming without waiting on DSP or another worker', async () => {
-    const f = fixture();
-    const { privateObject, sharedObject } = await prepareSharedCompletion(f);
-    f.job.recipeSnapshot.trimEnabled = false;
-    f.job.requestedTrimEnabled = true;
-    const masterRecipe = { ...f.job.recipeSnapshot };
-    // A slow or unavailable DSP operation must never hold the worker acknowledgement.
-    f.sharedMedia.prepareRequestedOutput.mockImplementation(
-      () => new Promise(() => {}),
-    );
-    const fullCompletion = { ...completion, trimEnabled: false };
-    await expect(
-      f.service.complete(principal, attemptId, fullCompletion),
-    ).resolves.toMatchObject({ status: 'ready', replayed: false });
-    expect(f.sharedMedia.prepareRequestedOutput).not.toHaveBeenCalled();
-    expect(f.sharedMedia.completeResult).toHaveBeenCalledWith(
-      f.job,
-      sharedObject,
-      null,
-      f.transaction,
-    );
-    expect(f.job.recipeSnapshot).toEqual(masterRecipe);
-    expect(f.job.sharedResultKey).toBe('d'.repeat(64));
-    expect(f.job.status).toBe('uploading_result');
-    expect(f.job.renditionPending).toMatchObject({
-      full: sharedObject,
-      attemptId,
-      leaseToken: null,
-      attempts: 0,
-    });
-    expect(f.job.outputObject).toBeNull();
-    expect(f.job.finishedAt).toBeNull();
-    expect(f.job.currentExecution).toBeNull();
-    expect(f.job.retryEligibility.eligible).toBe(false);
-    expect(f.attempt.state).toBe('succeeded');
-    expect(f.attempt.outputObject).toEqual(privateObject);
-    expect(f.slots.updateOne).toHaveBeenCalledOnce();
-    expect(f.usage.recordRetainedOutput).not.toHaveBeenCalled();
-    expect(f.usage.settleJob).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'ready' }),
-      f.transaction,
-    );
-    expect(f.outbox.updateOne).not.toHaveBeenCalled();
-    expect(f.renditions.wake).toHaveBeenCalledOnce();
-    await expect(
-      f.service.complete(principal, attemptId, fullCompletion),
-    ).resolves.toMatchObject({ status: 'ready', replayed: true });
-    expect(f.sharedMedia.publishOutput).toHaveBeenCalledOnce();
-    expect(f.sharedMedia.completeResult).toHaveBeenCalledOnce();
-    expect(f.usage.settleJob).toHaveBeenCalledOnce();
-    expect(f.renditions.wake).toHaveBeenCalledOnce();
-  });
-
-  it('sanitizes publication errors and leaves the verified private output scheduled for cleanup', async () => {
-    const f = fixture();
-    await prepareSharedCompletion(f);
-    f.sharedMedia.publishOutput.mockRejectedValue(
-      new Error('provider credential and signed URL must stay private'),
-    );
-    await expect(
-      f.service.complete(principal, attemptId, completion),
-    ).rejects.toMatchObject({
-      response: {
-        code: 'WORKER_DEPENDENCY_UNAVAILABLE',
-        message: 'Worker dependency is unavailable',
-      },
-    });
-    expect(f.sharedMedia.completeResult).not.toHaveBeenCalled();
-    expect(f.attempts.updateOne).toHaveBeenCalledTimes(1);
-    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
-  });
-
-  it('rechecks attempt ownership before publishing when verification races a newer execution', async () => {
-    const f = fixture();
-    const { privateObject } = await prepareSharedCompletion(f);
-    f.storage.verifyUploadedObject.mockImplementation(async () => {
-      f.job.currentExecution.attemptId = 'a719bfce-c6f5-44e9-8902-51b0cfab3a02';
-      return privateObject;
-    });
-    await expect(
-      f.service.complete(principal, attemptId, completion),
-    ).rejects.toMatchObject({ response: { code: 'WORKER_CONFLICT' } });
-    expect(f.sharedMedia.publishOutput).not.toHaveBeenCalled();
-    expect(f.sharedMedia.completeResult).not.toHaveBeenCalled();
-    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it('rechecks account access before verification and after publication', async () => {
-    const f = fixture();
-    const { sharedObject } = await prepareSharedCompletion(f);
-    f.sharedMedia.publishOutput.mockImplementation(async () => {
-      f.accountAccess.assertActive.mockRejectedValue(
-        new Error('Account access disabled'),
-      );
-      return sharedObject;
-    });
-    await expect(
-      f.service.complete(principal, attemptId, completion),
-    ).rejects.toThrow('Account access disabled');
-    expect(f.accountAccess.assertActive).toHaveBeenCalledWith(f.job.userId);
-    expect(f.accountAccess.assertActive).toHaveBeenLastCalledWith(
-      f.job.userId,
-      f.transaction,
-    );
-    expect(f.sharedMedia.completeResult).not.toHaveBeenCalled();
-    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
-  });
-
-  it('does not publish ready job or billing when shared cache completion cannot commit', async () => {
-    const f = fixture();
-    await prepareSharedCompletion(f);
-    f.sharedMedia.completeResult.mockRejectedValue(
-      new Error('Mongo shared result fence lost'),
-    );
-    await expect(
-      f.service.complete(principal, attemptId, completion),
-    ).rejects.toMatchObject({
-      response: { code: 'WORKER_DEPENDENCY_UNAVAILABLE' },
-    });
-    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(f.usage.recordRetainedOutput).not.toHaveBeenCalled();
-    expect(f.usage.settleJob).not.toHaveBeenCalled();
-    expect(f.outbox.updateOne).not.toHaveBeenCalled();
-    expect(f.cleanup.cancelScheduled).not.toHaveBeenCalled();
-  });
-
-  it('preserves Mongo transaction labels so the driver can retry shared completion conflicts', async () => {
-    const f = fixture();
-    await prepareSharedCompletion(f);
-    const conflict = Object.assign(new Error('Shared result write conflict'), {
-      errorLabels: ['TransientTransactionError'],
-    });
-    f.sharedMedia.completeResult.mockRejectedValue(conflict);
-    await expect(
-      f.service.complete(principal, attemptId, completion),
-    ).rejects.toBe(conflict);
-    expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
-    expect(f.usage.recordRetainedOutput).not.toHaveBeenCalled();
-  });
-
   it('accepts only current-attempt monotonic progress', async () => {
     const f = fixture();
     const update = {
@@ -458,9 +216,6 @@ describe('worker attempt transfers and finalization', () => {
       sequence: 1,
       phase: 'separating' as const,
       phasePercent: 25,
-      executionTimings: [
-        { stage: 'input-download', durationMs: 123, complete: true },
-      ],
     };
     await expect(
       f.service.progress(principal, attemptId, update),
@@ -481,13 +236,6 @@ describe('worker attempt transfers and finalization', () => {
       sequence: 1,
     });
     expect(f.jobs.updateOne).toHaveBeenCalledTimes(1);
-    expect(f.job.stageTimingAttempts).toEqual([
-      {
-        attemptId,
-        attemptNumber: f.attempt.attemptNumber,
-        stages: update.executionTimings,
-      },
-    ]);
     await expect(
       f.service.progress({ ...principal, subjectId: workerId }, attemptId, {
         ...update,
@@ -514,7 +262,9 @@ describe('worker attempt transfers and finalization', () => {
       object: f.job.inputObject,
     });
 
-    expect(f.storage.isObjectAvailable).not.toHaveBeenCalled();
+    expect(f.storage.isPinnedObjectAvailable).toHaveBeenCalledWith(
+      f.job.inputObject,
+    );
     expect(f.usage.reserveDownloadGrant).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: f.job.userId,
@@ -532,9 +282,9 @@ describe('worker attempt transfers and finalization', () => {
     );
   });
 
-  it('does not charge or sign when the confirmed worker input identity is missing', async () => {
+  it('does not charge or sign a missing pinned worker input', async () => {
     const f = fixture();
-    f.job.inputObject = null as never;
+    f.storage.isPinnedObjectAvailable.mockResolvedValue(false);
 
     await expect(
       f.service.inputGrant(principal, attemptId, ownership),
@@ -559,7 +309,6 @@ describe('worker attempt transfers and finalization', () => {
         key: expectedKey,
         reason: 'AUDIO_OUTPUT_ORPHANED',
         nextAt: f.attempt.deadlineAt,
-        settleUntil: new Date(f.attempt.deadlineAt.getTime() + 3_600_000),
       }),
       expect.any(Object),
     );
@@ -573,12 +322,12 @@ describe('worker attempt transfers and finalization', () => {
     await f.service.outputGrant(principal, attemptId, output);
     const object = {
       key: f.attempt.outputReservation.key,
-      etag: '"recovered-version"',
+      versionId: 'recovered-version',
       bytes: output.bytes,
       sha256: output.sha256,
       contentType: output.contentType,
     };
-    f.storage.findUploadedObject.mockResolvedValue(object);
+    f.storage.findUploadedVersion.mockResolvedValue(object);
 
     const replay = await f.service.outputGrant(principal, attemptId, output);
 
@@ -587,51 +336,18 @@ describe('worker attempt transfers and finalization', () => {
     expect(f.cleanup.schedule).toHaveBeenCalledOnce();
   });
 
-  it('records server finalization when an older worker omits execution timings', async () => {
+  it('publishes one verified immutable version and replays identical completion', async () => {
     const f = fixture();
-    await f.service.outputGrant(principal, attemptId, output);
-    f.storage.verifyUploadedObject.mockResolvedValue({
-      key: f.attempt.outputReservation.key,
-      etag: completion.etag,
-      bytes: output.bytes,
-      sha256: output.sha256,
-      contentType: output.contentType,
-    });
-    await f.service.complete(principal, attemptId, completion);
-    expect(f.job.stageTimingAttempts).toEqual([
-      {
-        attemptId,
-        attemptNumber: 1,
-        stages: [
-          {
-            stage: 'completion',
-            durationMs: expect.any(Number),
-            complete: true,
-          },
-        ],
-      },
-    ]);
-  });
-
-  it('publishes one verified immutable object and replays identical completion', async () => {
-    const f = fixture();
-    const lowerBitrateCompletion = {
-      ...completion,
-      outputBitrateKbps: 128,
-      executionTimings: [
-        { stage: 'input-download', durationMs: 123, complete: true },
-        { stage: 'completion', durationMs: 0, complete: false },
-      ],
-    };
+    const lowerBitrateCompletion = { ...completion, outputBitrateKbps: 128 };
     await f.service.outputGrant(principal, attemptId, output);
     const object = {
       key: f.attempt.outputReservation.key,
-      etag: lowerBitrateCompletion.etag,
+      versionId: lowerBitrateCompletion.versionId,
       bytes: output.bytes,
       sha256: output.sha256,
       contentType: output.contentType,
     };
-    f.storage.verifyUploadedObject.mockResolvedValue(object);
+    f.storage.verifyUploadedVersion.mockResolvedValue(object);
 
     await expect(
       f.service.complete(principal, attemptId, lowerBitrateCompletion),
@@ -640,27 +356,13 @@ describe('worker attempt transfers and finalization', () => {
       f.service.complete(principal, attemptId, lowerBitrateCompletion),
     ).resolves.toMatchObject({ status: 'ready', replayed: true });
 
-    expect(f.storage.verifyUploadedObject).toHaveBeenCalledOnce();
-    expect(f.job.stageTimingAttempts).toEqual([
-      {
-        attemptId,
-        attemptNumber: 1,
-        stages: [
-          { stage: 'input-download', durationMs: 123, complete: true },
-          {
-            stage: 'completion',
-            durationMs: expect.any(Number),
-            complete: true,
-          },
-        ],
-      },
-    ]);
+    expect(f.storage.verifyUploadedVersion).toHaveBeenCalledOnce();
     expect(f.job.outputObject).toEqual(object);
     expect(f.job.retainedOutputAccountedAt).toEqual(expect.any(Date));
     expect(f.usage.recordRetainedOutput).toHaveBeenCalledOnce();
     expect(f.usage.recordRetainedOutput).toHaveBeenCalledWith(
       expect.objectContaining({ _id: f.job._id }),
-      object.bytes + f.job.inputObject.bytes,
+      object.bytes,
       expect.any(Object),
     );
     expect(f.job.currentExecution).toBeNull();
@@ -686,7 +388,7 @@ describe('worker attempt transfers and finalization', () => {
     await expect(
       f.service.complete(principal, attemptId, completion),
     ).rejects.toThrow('Worker resource changed');
-    expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
+    expect(f.storage.verifyUploadedVersion).not.toHaveBeenCalled();
     expect(f.jobs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -702,7 +404,7 @@ describe('worker attempt transfers and finalization', () => {
     await expect(
       f.service.complete(principal, attemptId, completion),
     ).rejects.toThrow('Worker resource changed');
-    expect(f.storage.verifyUploadedObject).not.toHaveBeenCalled();
+    expect(f.storage.verifyUploadedVersion).not.toHaveBeenCalled();
     expect(f.cleanup.schedule).toHaveBeenCalledWith(
       expect.objectContaining({
         key: staleKey,
@@ -719,9 +421,6 @@ describe('worker attempt transfers and finalization', () => {
       ...ownership,
       code: 'INVALID_AUDIO' as const,
       summary: 'Decoded media did not satisfy the recipe input contract',
-      executionTimings: [
-        { stage: 'input-validation', durationMs: 300, complete: false },
-      ],
     };
     await expect(
       f.service.fail(principal, attemptId, failure),
@@ -739,94 +438,7 @@ describe('worker attempt transfers and finalization', () => {
       message: 'The file does not contain supported playable audio.',
     });
     expect(f.attempt.failureClass).toBe('client_input');
-    expect(f.job.stageTimingAttempts[0].stages).toEqual(
-      failure.executionTimings,
-    );
     expect(f.outbox.updateOne).toHaveBeenCalledOnce();
     expect(f.slots.updateOne).toHaveBeenCalledOnce();
-  });
-
-  it('requeues three transient failures with backoff and finalizes the fourth exactly once', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-10-01T12:00:00.000Z'));
-    try {
-      const f = fixture();
-      const maxAttempts =
-        DEFAULT_ACCOUNT_POLICY_VALUES.maxInfrastructureAttempts;
-      expect(maxAttempts).toBe(4);
-      f.job.admissionSnapshot.maxInfrastructureAttempts = maxAttempts;
-      f.job.retryEligibility.attemptsRemaining = maxAttempts;
-      const input = f.job.inputObject;
-      const recipe = f.job.recipeSnapshot;
-      const failure = {
-        ...ownership,
-        code: 'SEPARATOR_FAILED' as const,
-        summary: 'Synthetic transient worker failure',
-      };
-      for (let attemptNumber = 1; attemptNumber <= 4; attemptNumber++) {
-        const now = new Date();
-        const currentAttemptId = randomUUID();
-        Object.assign(f.attempt, {
-          _id: currentAttemptId,
-          attemptNumber,
-          state: 'running',
-          leaseExpiresAt: new Date(now.getTime() + 120_000),
-          deadlineAt: new Date(now.getTime() + 300_000),
-        });
-        Object.assign(f.job, {
-          status: 'processing',
-          attemptNumber,
-          currentExecution: {
-            attemptId: currentAttemptId,
-            machineId,
-            workerId,
-            sessionId,
-            incarnation,
-            leaseExpiresAt: f.attempt.leaseExpiresAt,
-            deadlineAt: f.attempt.deadlineAt,
-          },
-        });
-        const status = attemptNumber < 4 ? 'queued' : 'failed';
-        await expect(
-          f.service.fail(principal, currentAttemptId, failure),
-        ).resolves.toMatchObject({ status, replayed: false });
-        await expect(
-          f.service.fail(principal, currentAttemptId, failure),
-        ).resolves.toMatchObject({ status, replayed: true });
-        expect(f.job.currentExecution).toBeNull();
-        expect(f.job.retryEligibility.attemptsRemaining).toBe(
-          4 - attemptNumber,
-        );
-        expect(f.job.inputObject).toBe(input);
-        expect(f.job.recipeSnapshot).toBe(recipe);
-        expect(f.attempts.updateOne).toHaveBeenCalledTimes(attemptNumber);
-        expect(f.slots.updateOne).toHaveBeenCalledTimes(attemptNumber);
-        if (attemptNumber < 4) {
-          const backoffMs = [5_000, 10_000, 20_000][attemptNumber - 1];
-          expect(f.job.retryEligibility).toEqual({
-            eligible: true,
-            attemptsRemaining: 4 - attemptNumber,
-            nextAttemptAt: new Date(now.getTime() + backoffMs),
-          });
-          expect(f.attempt.failureClass).toBe('infrastructure_transient');
-          expect(f.job.finishedAt).toBeNull();
-          expect(f.usage.settleJob).not.toHaveBeenCalled();
-          expect(f.outbox.updateOne).not.toHaveBeenCalled();
-          vi.setSystemTime(f.job.retryEligibility.nextAttemptAt);
-        } else {
-          expect(f.job.retryEligibility).toEqual({
-            eligible: false,
-            attemptsRemaining: 0,
-            nextAttemptAt: null,
-          });
-          expect(f.attempt.failureClass).toBe('infrastructure_terminal');
-          expect(f.job.finishedAt).toEqual(now);
-          expect(f.usage.settleJob).toHaveBeenCalledOnce();
-          expect(f.outbox.updateOne).toHaveBeenCalledOnce();
-        }
-      }
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

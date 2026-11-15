@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
@@ -23,7 +24,7 @@
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
         <service android:name="androidx.work.impl.foreground.SystemForegroundService"
-            tools:node="remove" />
+            android:foregroundServiceType="dataSync" tools:node="merge" />
         <receiver android:name=".processing.AudioTaskNotificationActions" android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -34,40 +35,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/processed_audio_paths" />
         </provider>
-        <service android:name=".playback.AudioPlaybackService" android:exported="true"
+        <service android:name=".playback.AudioPlaybackService" android:exported="false"
             android:foregroundServiceType="mediaPlayback">
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
-                <action android:name="androidx.media3.session.MediaLibraryService" />
-                <action android:name="android.media.browse.MediaBrowserService" />
-            </intent-filter>
+            <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
         </service>
-        <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.MEDIA_BUTTON" /></intent-filter>
-        </receiver>
-        <receiver android:name=".playback.PlaybackWidget" android:exported="false">
-            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
-            <meta-data android:name="android.appwidget.provider" android:resource="@xml/playback_widget" />
-        </receiver>
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
-            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+        <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="audio/*" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
-                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
     </application>

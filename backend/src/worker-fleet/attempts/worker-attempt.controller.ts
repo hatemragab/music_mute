@@ -1,5 +1,5 @@
 import { Body, Controller, Param, Post, Req } from '@nestjs/common';
-import { LimitWorker, WorkerRoute } from '../auth/worker-auth.decorators.js';
+import { WorkerRoute } from '../auth/worker-auth.decorators.js';
 import type { WorkerRequest } from '../auth/worker-auth.types.js';
 import {
   CompleteWorkerAttemptDto,
@@ -10,13 +10,12 @@ import {
 } from './worker-attempt.dto.js';
 import { WorkerAttemptService } from './worker-attempt.service.js';
 
-@Controller('worker/attempts')
+@Controller('worker/v1/attempts')
 @WorkerRoute('machine')
 export class WorkerAttemptController {
   constructor(private readonly attempts: WorkerAttemptService) {}
 
-  @Post(':id/input-grants')
-  @LimitWorker('transfer')
+  @Post(':id/input-grant')
   inputGrant(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -25,8 +24,7 @@ export class WorkerAttemptController {
     return this.attempts.inputGrant(request.workerPrincipal!, id, dto);
   }
 
-  @Post(':id/output-grants')
-  @LimitWorker('transfer')
+  @Post(':id/output-grant')
   outputGrant(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -35,8 +33,7 @@ export class WorkerAttemptController {
     return this.attempts.outputGrant(request.workerPrincipal!, id, dto);
   }
 
-  @Post(':id/progress-events')
-  @LimitWorker('poll')
+  @Post(':id/progress')
   progress(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -45,7 +42,7 @@ export class WorkerAttemptController {
     return this.attempts.progress(request.workerPrincipal!, id, dto);
   }
 
-  @Post(':id/completions')
+  @Post(':id/complete')
   complete(
     @Req() request: WorkerRequest,
     @Param('id') id: string,
@@ -54,7 +51,7 @@ export class WorkerAttemptController {
     return this.attempts.complete(request.workerPrincipal!, id, dto);
   }
 
-  @Post(':id/failures')
+  @Post(':id/fail')
   fail(
     @Req() request: WorkerRequest,
     @Param('id') id: string,

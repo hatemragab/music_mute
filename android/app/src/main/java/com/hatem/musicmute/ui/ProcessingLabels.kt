@@ -7,7 +7,6 @@ import com.hatem.musicmute.processing.AudioTaskPresentation
 import com.hatem.musicmute.processing.ProcessingLocalProblem
 
 internal fun audioTaskFailureLabel(task: AudioTaskPresentation): Int? {
-    if (task.importOnly && task.errorCode != null) return com.hatem.musicmute.ui.home.urlImportMessage(task.errorCode)
     if (task.errorCode != null) return when (task.errorCode) {
         "UPLOAD_EXPIRED" -> R.string.processing_reason_upload_expired
         "INVALID_AUDIO" -> R.string.processing_reason_invalid
@@ -79,16 +78,6 @@ internal fun processingFailureLabel(problem: JobsProblem): Int = when (problem) 
     JobsProblem.UPLOAD_NOT_READY -> R.string.processing_error_state
     JobsProblem.SERVICE_UNAVAILABLE -> R.string.processing_error_service
     else -> R.string.processing_error_policy
-}
-
-internal fun listenerStageLabel(stage: AudioTaskStage): Int = when (stage) {
-    AudioTaskStage.WAITING, AudioTaskStage.QUEUED -> R.string.listener_stage_waiting
-    AudioTaskStage.DOWNLOADING_SOURCE -> R.string.listener_stage_downloading
-    AudioTaskStage.INSPECTING, AudioTaskStage.PREPARING_INPUT, AudioTaskStage.REVIEW -> R.string.listener_stage_preparing
-    AudioTaskStage.RESERVING_JOB, AudioTaskStage.UPLOADING_INPUT, AudioTaskStage.CONFIRMING_UPLOAD -> R.string.listener_stage_sending
-    AudioTaskStage.VALIDATING, AudioTaskStage.PROCESSING, AudioTaskStage.UPLOADING_RESULT -> R.string.listener_stage_removing
-    AudioTaskStage.INTERRUPTED -> R.string.listener_stage_paused
-    else -> audioTaskStageLabel(stage)
 }
 
 internal fun audioTaskStageLabel(stage: AudioTaskStage): Int = when (stage) {

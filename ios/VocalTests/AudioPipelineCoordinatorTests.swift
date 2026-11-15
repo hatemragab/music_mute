@@ -4,6 +4,65 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class AudioPipelineCoordinatorTests: XCTestCase {
+  func testPastePersistsReferenceBeforeWorkAndDuplicateEventStartsOnce() async throws {
+    let fixture = try PipelineFixture()
+    await fixture.bind()
+    let event = UUID()
+    let first = try await fixture.coordinator.acceptURL(
+      "https://youtu.be/jNQXAC9IVRw", eventID: event)
+    let duplicate = try await fixture.coordinator.acceptURL(
+      "https://youtu.be/jNQXAC9IVRw", eventID: event)
+
+    XCTAssertEqual(first, event)
+    XCTAssertEqual(duplicate, event)
+    XCTAssertEqual(fixture.coordinator.pipelines.map(\.operationId), [event])
+    XCTAssertEqual(fixture.coordinator.pipelines.first?.phase, .resolvingSource)
+    XCTAssertTrue(fixture.api.creates.isEmpty)
+
+    try await fixture.waitForDownload(event)
+    fixture.downloadGate.downloads[event]?.resume(returning: ())
+    try await fixture.waitForReview(event)
+    XCTAssertTrue(fixture.api.creates.isEmpty)
+    await fixture.coordinator.resume(event)
+    XCTAssertTrue(fixture.api.creates.isEmpty)
+    try await fixture.coordinator.confirmProcessing(event, rightsConfirmed: true)
+    try await fixture.waitForCreates(1)
+    XCTAssertEqual(fixture.api.creates.first?.requestId, event)
+    XCTAssertEqual(fixture.api.creates.first?.metadata.sourceKind, .url)
+    XCTAssertEqual(fixture.api.creates.first?.metadata.sourceTitle, "Downloaded title")
+    XCTAssertEqual(
+      fixture.api.creates.first?.metadata.sourceURL,
+      "https://www.youtube.com/watch?v=jNQXAC9IVRw")
+  }
+
+  func testExplicitURLAndFileSubmissionsRunAsIndependentPipelines() async throws {
+    let fixture = try PipelineFixture()
+    await fixture.bind()
+    let urlEvent = UUID()
+    let fileEvent = UUID()
+    let imported = fixture.root.appendingPathComponent("Meeting.mp3")
+    try Data([1, 2, 3, 4]).write(to: imported)
+
+    _ = try await fixture.coordinator.acceptURL(
+      "https://www.youtube.com/watch?v=jNQXAC9IVRw", eventID: urlEvent)
+    _ = try await fixture.coordinator.acceptFile(imported, eventID: fileEvent)
+
+    try await fixture.waitForDownload(urlEvent)
+    fixture.downloadGate.downloads[urlEvent]?.resume(returning: ())
+    try await fixture.waitForReview(urlEvent)
+    try await fixture.waitForReview(fileEvent)
+    XCTAssertTrue(fixture.api.creates.isEmpty)
+    try await fixture.coordinator.confirmProcessing(urlEvent, rightsConfirmed: true)
+    try await fixture.coordinator.confirmProcessing(fileEvent, rightsConfirmed: true)
+    try await fixture.waitForCreates(2)
+    try await fixture.waitForTransfers(2)
+    XCTAssertEqual(Set(fixture.api.creates.map(\.requestId)), Set([urlEvent, fileEvent]))
+    let file = try XCTUnwrap(fixture.api.creates.first { $0.requestId == fileEvent })
+    XCTAssertEqual(file.metadata.sourceTitle, "Meeting")
+    XCTAssertEqual(file.metadata.sourceKind, .file)
+    XCTAssertEqual(fixture.transfers.started.count, 2)
+  }
+
   func testReviewSurvivesRebindAndRejectsMissingRightsThenCancelPreservesOriginal() async throws {
     let fixture = try PipelineFixture()
     await fixture.bind()
@@ -32,8 +91,8 @@ import XCTest
     let event = UUID()
     let jobID = "68c000000000000000000001"
     _ = try await fixture.repository.store.createPipeline(
-      operationId: event, ownerUid: "owner-a", sourceKind: .file,
-      clientStartedAt: Date())
+      operationId: event, ownerUid: "owner-a", sourceKind: .url,
+      sourceVideoID: "jNQXAC9IVRw", clientStartedAt: Date())
     _ = try await fixture.repository.store.updatePipeline(id: event, ownerUid: "owner-a") {
       $0.jobId = jobID
       $0.jobStatus = "ready"
@@ -86,6 +145,7 @@ import XCTest
   let transfers = Transfers()
   let repository: ProcessingRepository
   let coordinator: AudioPipelineCoordinator
+  let downloadGate: DownloadGate
 
   init() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -107,8 +167,19 @@ import XCTest
         try FileManager.default.copyItem(at: source, to: target)
         return target
       })
+    let downloadGate = DownloadGate(root: root)
+    self.downloadGate = downloadGate
     coordinator = AudioPipelineCoordinator(
       store: store, repository: repository, preparer: preparer,
+      download: { _, operationID, _, stage, progress in
+        stage(.resolving)
+        await withCheckedContinuation { downloadGate.downloads[operationID] = $0 }
+        stage(.downloading)
+        progress(DownloadProgress(downloadedBytes: 4, totalBytes: 4))
+        let file = downloadGate.root.appendingPathComponent("\(operationID.uuidString).mp3")
+        try Data([1, 2, 3, 4]).write(to: file)
+        return PipelineSourceFile(url: file, title: "Downloaded title")
+      },
       retrySleep: { _ in })
   }
 
@@ -145,7 +216,21 @@ import XCTest
     XCTFail("Timed out waiting for transfers")
   }
 
+  func waitForDownload(_ id: UUID) async throws {
+    for _ in 0..<2_000 {
+      if downloadGate.downloads[id] != nil { return }
+      try await Task.sleep(for: .milliseconds(1))
+    }
+    XCTFail("Timed out waiting for download")
+  }
+
   deinit { try? FileManager.default.removeItem(at: root) }
+
+  @MainActor final class DownloadGate {
+    let root: URL
+    var downloads: [UUID: CheckedContinuation<Void, Never>] = [:]
+    init(root: URL) { self.root = root }
+  }
 
   @MainActor final class API: JobsAPI {
     var creates: [Create] = []
@@ -162,8 +247,7 @@ import XCTest
         upload: UploadGrant(
           method: .put, url: URL(string: "https://storage.fixture.invalid")!,
           headers: [
-            "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
-            "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
+            "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
           ],
           expiresAt: Date().addingTimeInterval(60)),
         requestId: requestId.uuidString.lowercased())
@@ -172,8 +256,7 @@ import XCTest
       UploadGrant(
         method: .put, url: URL(string: "https://storage.fixture.invalid")!,
         headers: [
-          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
-          "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
+          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
         ],
         expiresAt: Date().addingTimeInterval(60))
     }
@@ -200,7 +283,7 @@ import XCTest
     var onProgress: ((TransferContext, TransferProgressSnapshot) -> Void)?
     var started: [TransferContext] = []
     func startUpload(
-      file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext
+      file: S3MultipartFile, grant: UploadGrant, context: TransferContext
     ) async throws -> Int {
       started.append(context)
       return started.count

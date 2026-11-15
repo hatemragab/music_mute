@@ -1,5 +1,5 @@
 import { lstat, readFile } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 import {
   WORKER_RECIPE_IDS,
   type WorkerRecipeId,
@@ -10,13 +10,6 @@ import {
   type RuntimeProvider,
 } from "../platform/runtime-adapter.js";
 import type { RuntimeSlotDefinition } from "./worker-runtime.js";
-
-import { installedCapacityIdentity } from "./capacity-identity.js";
-import {
-  parseCapacityReceipt,
-  assertCapacityReceiptIdentity,
-} from "./capacity-receipt.js";
-import { assertWindowsPrivateDataFile } from "../platform/windows/private-data.js";
 
 const CONFIG_LIMIT_BYTES = 64 * 1024;
 const UUID_V4 =
@@ -38,7 +31,6 @@ const CONFIG_KEYS = new Set([
   "validatedMaxWorkersPerGpu",
   "capacityValidationFile",
   "slots",
-  "inactiveSlots",
 ]);
 const SLOT_KEYS = new Set([
   "workerId",
@@ -71,59 +63,6 @@ export interface RuntimeConfig {
 export async function loadRuntimeConfig(
   path: string,
   host: { platform: NodeJS.Platform; arch: string } = process,
-): Promise<RuntimeConfig> {
-  return await readRuntimeConfig(path, host, true);
-}
-
-/** Read identity for offline qualification without accepting an old capacity receipt.
- * Never returns a runtime configuration that could be used to admit work.
- */
-export async function readBenchmarkMachineIdentity(
-  path: string,
-): Promise<string> {
-  return (await readRuntimeConfig(path, process, false)).machineId;
-}
-
-/** Configuration context for qualification; never returns admission or credentials. */
-export async function readCapacityQualificationContext(path: string) {
-  const {
-    machineId,
-    engineRoot,
-    pythonPath,
-    ffmpegPath,
-    ffprobePath,
-    modelCacheRoot,
-  } = await readRuntimeConfig(path, process, false);
-  return {
-    machineId,
-    engineRoot,
-    pythonPath,
-    ffmpegPath,
-    ffprobePath,
-    modelCacheRoot,
-  };
-}
-
-/** Maintenance must remain possible after capacity evidence expires. This
- * deliberately exposes only connection credentials, never admission settings.
- */
-export async function readMaintenanceConnection(
-  path: string,
-): Promise<
-  Pick<
-    RuntimeConfig,
-    "machineId" | "backendBaseUrl" | "credential" | "allowInsecureLoopback"
-  >
-> {
-  const { machineId, backendBaseUrl, credential, allowInsecureLoopback } =
-    await readRuntimeConfig(path, process, false);
-  return { machineId, backendBaseUrl, credential, allowInsecureLoopback };
-}
-
-async function readRuntimeConfig(
-  path: string,
-  host: { platform: NodeJS.Platform; arch: string },
-  enforceCapacityEvidence: boolean,
 ): Promise<RuntimeConfig> {
   assertAbsolute(path, "Runtime config path");
   const configInfo = await lstat(path);
@@ -171,18 +110,6 @@ async function readRuntimeConfig(
   const slots = value.slots.map((slot, index) =>
     parseSlot(slot, index, adapter),
   );
-  const inactiveSlots = value.inactiveSlots ?? [];
-  if (!Array.isArray(inactiveSlots) || inactiveSlots.length > 16)
-    throw new TypeError("Inactive slots are invalid");
-  // Only active slots are returned to the supervisor. Retained identities do
-  // not grant processing capacity, but must remain unique across both sets.
-  assertSlotCapacity(
-    [
-      ...slots,
-      ...inactiveSlots.map((slot, index) => parseSlot(slot, index, adapter)),
-    ],
-    2,
-  );
   const validatedMaxWorkersPerGpu = safeInteger(
     value.validatedMaxWorkersPerGpu ?? 1,
     "validatedMaxWorkersPerGpu",
@@ -199,9 +126,10 @@ async function readRuntimeConfig(
         );
   if (capacityValidationFile !== undefined)
     assertAbsolute(capacityValidationFile, "capacityValidationFile");
-  if (validatedMaxWorkersPerGpu === 2 && enforceCapacityEvidence) {
+  if (validatedMaxWorkersPerGpu === 2) {
     if (capacityValidationFile === undefined)
       throw new TypeError("Two-worker capacity requires benchmark evidence");
+    await assertCapacityValidation(capacityValidationFile, value.machineId);
   }
   assertSlotCapacity(slots, validatedMaxWorkersPerGpu);
   if (
@@ -219,15 +147,6 @@ async function readRuntimeConfig(
   };
   for (const [name, current] of Object.entries(paths))
     assertAbsolute(current, name);
-  if (validatedMaxWorkersPerGpu === 2 && enforceCapacityEvidence) {
-    await assertCapacityValidation(
-      capacityValidationFile!,
-      value.machineId,
-      paths,
-      slots,
-      adapter,
-    );
-  }
   const localLifecyclePath =
     value.localLifecyclePath === undefined
       ? undefined
@@ -262,23 +181,14 @@ async function readRuntimeConfig(
 async function assertCapacityValidation(
   path: string,
   machineId: unknown,
-  paths: {
-    engineRoot: string;
-    modelCacheRoot: string;
-    pythonPath: string;
-    ffmpegPath: string;
-    ffprobePath: string;
-  },
-  slots: RuntimeSlotDefinition[],
-  adapter: RuntimePlatformAdapter,
 ): Promise<void> {
   const info = await lstat(path);
   if (
     !info.isFile() ||
     info.isSymbolicLink() ||
     info.size < 2 ||
-    info.size > 4 * 1024 * 1024 ||
-    !adapter.credentialModeIsSafe(info.mode)
+    info.size > CONFIG_LIMIT_BYTES ||
+    (info.mode & 0o077) !== 0
   )
     throw new TypeError("Capacity benchmark evidence is unsafe");
   let value: unknown;
@@ -287,31 +197,60 @@ async function assertCapacityValidation(
   } catch {
     throw new TypeError("Capacity benchmark evidence is invalid");
   }
-  if (adapter.platform === "win32") await assertWindowsPrivateDataFile(path);
-  const receipt = parseCapacityReceipt(value, {
-    machineId: uuid(machineId, "machineId"),
-    provider: adapter.provider,
-  });
-  const recipeIds = [
-    ...new Set(slots.flatMap((slot) => slot.recipeIds)),
-  ].sort();
+  const record = strictRecord(
+    value,
+    new Set([
+      "schemaVersion",
+      "status",
+      "machineId",
+      "validatedMaxWorkersPerGpu",
+      "baselineSeconds",
+      "concurrentWallSeconds",
+      "concurrentWorkerSeconds",
+      "throughputSpeedup",
+      "releaseManifestDigest",
+      "modelDigest",
+      "fixtureDigest",
+      "validatedAt",
+      "expiresAt",
+    ]),
+    "Capacity benchmark evidence",
+  );
   if (
-    JSON.stringify(
-      receipt.measurements.recipes.map((recipe) => recipe.recipeId).sort(),
-    ) !== JSON.stringify(recipeIds)
+    record.schemaVersion !== 1 ||
+    record.status !== "PASS" ||
+    typeof record.machineId !== "string" ||
+    !UUID_V4.test(record.machineId) ||
+    record.machineId !== machineId ||
+    record.validatedMaxWorkersPerGpu !== 2 ||
+    !positiveFinite(record.baselineSeconds) ||
+    !positiveFinite(record.concurrentWallSeconds) ||
+    !Array.isArray(record.concurrentWorkerSeconds) ||
+    record.concurrentWorkerSeconds.length !== 2 ||
+    !record.concurrentWorkerSeconds.every(positiveFinite) ||
+    typeof record.throughputSpeedup !== "number" ||
+    !Number.isFinite(record.throughputSpeedup) ||
+    record.throughputSpeedup < 1.1 ||
+    typeof record.releaseManifestDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.releaseManifestDigest) ||
+    typeof record.modelDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.modelDigest) ||
+    typeof record.fixtureDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.fixtureDigest) ||
+    typeof record.validatedAt !== "string" ||
+    !Number.isFinite(Date.parse(record.validatedAt)) ||
+    Date.parse(record.validatedAt) > Date.now() + 5 * 60_000 ||
+    typeof record.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(record.expiresAt)) ||
+    Date.parse(record.expiresAt) <= Date.now() ||
+    Date.parse(record.expiresAt) >
+      Date.parse(record.validatedAt as string) + 7 * 24 * 60 * 60_000
   )
-    throw new TypeError("Capacity recipe identity changed");
-  const identity = await installedCapacityIdentity({
-    ...paths,
-    fixturePath: join(
-      dirname(path),
-      adapter.platform === "win32"
-        ? `qualification-fixture-${receipt.measurements.fixtureDigest}.wav`
-        : "qualification.wav",
-    ),
-    modelDigest: receipt.measurements.modelDigest,
-  });
-  assertCapacityReceiptIdentity(receipt, identity);
+    throw new TypeError("Capacity benchmark evidence did not pass");
+}
+
+function positiveFinite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function assertSlotCapacity(
@@ -320,15 +259,11 @@ function assertSlotCapacity(
 ): void {
   const counts = new Map<string, number>();
   const identities = new Set<string>();
-  const workerIds = new Set<string>();
   for (const slot of slots) {
     const identity = `${slot.gpuId}\0${slot.slotIndex}`;
     if (identities.has(identity))
       throw new TypeError("Runtime slot indexes must be unique per GPU");
     identities.add(identity);
-    if (workerIds.has(slot.workerId))
-      throw new TypeError("Runtime worker IDs must be unique");
-    workerIds.add(slot.workerId);
     const count = (counts.get(slot.gpuId) ?? 0) + 1;
     if (count > validatedMaxWorkersPerGpu)
       throw new TypeError("Runtime slots exceed validated GPU capacity");

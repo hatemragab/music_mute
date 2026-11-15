@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotificationDispatcherService } from './notification-dispatcher.service.js';
-import { PushRegistrationsService } from './push-registration.service.js';
 
 @Injectable()
 export class NotificationMaintenanceService
@@ -20,10 +19,10 @@ export class NotificationMaintenanceService
   constructor(
     private readonly config: ConfigService,
     private readonly dispatcher: NotificationDispatcherService,
-    private readonly registrations: PushRegistrationsService,
   ) {}
 
   onApplicationBootstrap(): void {
+    if (!this.config.get<boolean>('AUDIO_PROCESSING_ENABLED')) return;
     this.timer = setInterval(() => {
       if (this.running) return;
       this.running = this.tick()
@@ -38,14 +37,9 @@ export class NotificationMaintenanceService
   }
 
   private async tick(): Promise<void> {
-    if (this.config.get<boolean>('AUDIO_PROCESSING_ENABLED')) {
-      for (let count = 0; count < 10 && !this.stopping; count++) {
-        if (!(await this.dispatcher.dispatchDue())) break;
-      }
+    for (let count = 0; count < 10 && !this.stopping; count++) {
+      if (!(await this.dispatcher.dispatchDue())) return;
     }
-    if (this.stopping) return;
-    await this.dispatcher.scheduleCompletedRetention();
-    if (!this.stopping) await this.registrations.scheduleInactiveRetention();
   }
 
   async onModuleDestroy(): Promise<void> {

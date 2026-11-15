@@ -1,13 +1,8 @@
-import {
-  type ApiClient,
-  OperationOutcomeUnknownError,
-  submitWithReceiptReadBack,
-} from "@/api/api-client";
+import { type ApiClient, submitWithReceiptReadBack } from "@/api/api-client";
 import type {
   AccountPolicyOverride,
   AccountRestriction,
   Page,
-  OperationReceipt,
   RevisionCommand,
   UserDetail,
   UserSummary,
@@ -25,42 +20,6 @@ export const listUsers = (
 
 export const getUser = (client: ApiClient, id: string) =>
   client.get<UserDetail>(`/admin/users/${encodeURIComponent(id)}`);
-
-export const setWorkerRegistration = async (
-  client: ApiClient,
-  id: string,
-  input: RevisionCommand & { workerRegistrationAllowed: boolean },
-) => {
-  await submitWithReceiptReadBack<OperationReceipt>({
-    client,
-    operationId: input.operationId,
-    submit: () =>
-      client
-        .put<OperationReceipt>(
-          `/admin/users/${encodeURIComponent(id)}/worker-registration`,
-          input,
-        )
-        .catch((error: unknown) => {
-          if (error instanceof SyntaxError)
-            throw new OperationOutcomeUnknownError(
-              input.operationId,
-              "The registration response could not be decoded. Check its outcome before retrying.",
-              error,
-            );
-          throw error;
-        }),
-    readResult: async (receipt) => receipt,
-  });
-  try {
-    return await getUser(client, id);
-  } catch (error) {
-    throw new OperationOutcomeUnknownError(
-      input.operationId,
-      "The registration permission was saved, but its current state could not be loaded. Check the operation outcome before making another change.",
-      error,
-    );
-  }
-};
 
 export const getAccountRestriction = (client: ApiClient, id: string) =>
   client.get<AccountRestriction | null>(
@@ -142,19 +101,3 @@ export const clearAccountPolicyOverride = (
       ),
     readResult: () => getAccountUsage(client, id),
   }).then(() => getAccountUsage(client, id));
-
-export const resetAccountUsage = (
-  client: ApiClient,
-  id: string,
-  input: RevisionCommand & { periodKey: string; dayKey: string },
-) =>
-  submitWithReceiptReadBack<import("@/api/contracts").AccountUsage>({
-    client,
-    operationId: input.operationId,
-    submit: () =>
-      client.post(
-        `/admin/users/${encodeURIComponent(id)}/account-usage-resets`,
-        input,
-      ),
-    readResult: () => getAccountUsage(client, id),
-  });

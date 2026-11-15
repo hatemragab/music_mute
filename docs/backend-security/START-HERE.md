@@ -47,7 +47,7 @@ Do not read a later task as authorization to start it.
 | Media                   | Maximum 20 minutes and 50,000,000 prepared bytes                                 |
 | Upload grants           | 30 per UTC day and 200 per UTC calendar month                                    |
 | Upload bytes            | 1,000,000,000 confirmed bytes per UTC calendar month                             |
-| Queue                   | One processing job plus at most twenty waiting jobs per account by default       |
+| Queue                   | One processing job plus at most three waiting jobs per account                   |
 | Picking                 | Oldest eligible queued job; no advanced fairness engine for launch               |
 | Infrastructure failures | At most three total processing attempts; no user charge on failure               |
 | Client/input failures   | At most five newly issued attempts for the same logical audio                    |
@@ -55,7 +55,7 @@ Do not read a later task as authorization to start it.
 | Download estimate       | 10,000,000,000 bytes per UTC calendar month                                      |
 | Signed URLs             | Maximum ten-minute validity and bucket signature age                             |
 | Retention               | Successful output remains until job/account deletion; temporary input is cleaned |
-| R2 class                | Standard only; current storage setup is in `../r2-storage/README.md`             |
+| S3 class                | Intelligent-Tiering through Frequent, Infrequent, and Archive Instant Access     |
 | Abuse response          | Typed events and manual account restriction; no automatic bans at launch         |
 | Deletion                | Fifteen-day recovery period, followed by permanent cleanup                       |
 | Admin override          | One active per-account replacement record with optional expiry                   |
@@ -124,6 +124,6 @@ latest instruction and this accepted contract cannot both be satisfied.
 - Branch 3 completed C1–C7 and merged into the collection branch.
 - Branch 4 completed D1–D6 and merged into the collection branch as PR #13.
 - Branch 5 completed E1–E6 and merged into the collection branch as PR #14.
-- No provider console, live database, Redis, R2, Firebase, deployment, or user data
+- No provider console, live database, Redis, S3, Firebase, deployment, or user data
   was changed.
 - Device-based quota enforcement and automatic bans remain deferred.

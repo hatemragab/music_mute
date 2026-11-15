@@ -1,23 +1,16 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
-import type { Model } from 'mongoose';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
-import { isStorageEtag } from '../../storage/object-identity.js';
 import type { ObjectIdentity } from '../../jobs/job.types.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import type { WorkerPlatform } from '../protocol/v1/protocol.js';
 import { workerError } from '../worker-errors.js';
-import { WorkerMachine } from '../machines/worker-machine.schema.js';
-import {
-  QUALIFIED_MODEL_BYTES,
-  QUALIFIED_MODEL_DIGEST,
-} from '../../jobs/worker-recipes.js';
 
 const CATALOG_LIMIT_BYTES = 64 * 1024;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const VERSION_ID = /^[A-Za-z0-9+/=_.,:-]{1,1024}$/u;
 const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u;
 const SAFE_KEY =
   /^worker-installation-artifacts\/[A-Za-z0-9][A-Za-z0-9/._-]{0,900}$/u;
@@ -29,7 +22,7 @@ const SUPPORTED_PLATFORMS = new Set<WorkerPlatform>([
 interface CatalogArtifact {
   filename: string;
   key: string;
-  etag: string;
+  versionId: string;
   bytes: number;
   sha256: string;
   contentType: string;
@@ -58,24 +51,18 @@ export interface CatalogModel {
 }
 
 interface InstallationCatalog {
-  releases: Partial<
-    Record<WorkerPlatform | 'windows-amd64-user', CatalogRelease>
-  >;
+  releases: Partial<Record<WorkerPlatform, CatalogRelease>>;
   model: CatalogModel;
-  fixture: CatalogArtifact | null;
+  fixture: CatalogArtifact;
 }
 
 @Injectable()
 export class WorkerInstallationArtifactsService {
   private readonly catalogPath: string | undefined;
-  private readonly logger = new Logger(WorkerInstallationArtifactsService.name);
-  private unavailableReported = false;
 
   constructor(
     config: ConfigService,
     private readonly transfers: StorageTransfersService,
-    @InjectModel(WorkerMachine.name)
-    private readonly machines?: Model<WorkerMachine>,
   ) {
     this.catalogPath = config.get<string>('WORKER_INSTALLATION_CATALOG_PATH');
   }
@@ -84,7 +71,6 @@ export class WorkerInstallationArtifactsService {
     principal: WorkerPrincipal,
     installationId: string,
     platform: WorkerPlatform,
-    installationProfile?: 'windows-user',
   ) {
     if (
       principal.kind !== 'installation' ||
@@ -93,72 +79,26 @@ export class WorkerInstallationArtifactsService {
       throw workerError('WORKER_NOT_FOUND');
     if (!SUPPORTED_PLATFORMS.has(platform))
       throw workerError('WORKER_INVALID_REQUEST');
-    const target = artifactTarget(platform, installationProfile);
     const catalog = await this.loadCatalog();
-    const release = catalog.releases[target];
-    if (!release || !catalog.fixture) this.unavailableArtifacts();
-    if (installationProfile && !release.update) this.unavailableArtifacts();
+    const release = catalog.releases[platform];
+    if (!release) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     const artifacts = [release, catalog.fixture] as const;
     try {
       const objects = artifacts.map(toObjectIdentity);
+      const available = await Promise.all(
+        objects.map((object) => this.transfers.isPinnedObjectAvailable(object)),
+      );
+      if (available.some((value) => !value))
+        throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
       const grants = await Promise.all(
         objects.map((object) => this.transfers.createDownloadGrant(object)),
       );
       return {
         schemaVersion: 1,
         platform,
-        ...(installationProfile ? { installationProfile } : {}),
-        release: {
-          ...presentArtifact(release, grants[0], release.version),
-          ...(release.update === undefined
-            ? {}
-            : {
-                signed: signedRelease(release, platform, installationProfile),
-              }),
-        },
+        release: presentArtifact(release, grants[0], release.version),
         model: catalog.model,
         fixture: presentArtifact(catalog.fixture, grants[1]),
-      };
-    } catch (error) {
-      if (isWorkerException(error)) throw error;
-      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-    }
-  }
-
-  /** Store owns executable delivery. This separate operation grants only the
-   * trusted qualification fixture and returns the upstream model descriptor. */
-  async createStoreQualificationDataGrants(
-    principal: WorkerPrincipal,
-    installationId: string,
-  ) {
-    if (
-      principal.kind !== 'installation' ||
-      principal.subjectId !== installationId
-    )
-      throw workerError('WORKER_NOT_FOUND');
-    const catalog = await this.loadCatalog(),
-      fixture = catalog.fixture;
-    if (
-      !fixture ||
-      catalog.model.filename !== 'Kim_Vocal_2.onnx' ||
-      catalog.model.sha256 !== QUALIFIED_MODEL_DIGEST ||
-      catalog.model.bytes !== QUALIFIED_MODEL_BYTES ||
-      fixture.bytes < 44 ||
-      fixture.bytes > 64 * 1024 ** 2 ||
-      !/\.wav$/iu.test(fixture.filename)
-    )
-      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-    try {
-      const grant = await this.transfers.createDownloadGrant(
-        toObjectIdentity(fixture),
-      );
-      return {
-        schemaVersion: 1 as const,
-        purpose: 'store-qualification-data' as const,
-        platform: 'windows-amd64' as const,
-        installationProfile: 'windows-user' as const,
-        model: catalog.model,
-        fixture: presentArtifact(fixture, grant),
       };
     } catch (error) {
       if (isWorkerException(error)) throw error;
@@ -170,63 +110,48 @@ export class WorkerInstallationArtifactsService {
     principal: WorkerPrincipal,
     platform: WorkerPlatform,
     includeGrant = true,
-    installationProfile?: 'windows-user',
   ) {
     if (principal.kind !== 'machine') throw workerError('WORKER_NOT_FOUND');
     if (!SUPPORTED_PLATFORMS.has(platform))
       throw workerError('WORKER_INVALID_REQUEST');
-    const target = artifactTarget(platform, installationProfile);
-    if (this.machines) {
-      const machine = await this.machines
-        .findById(principal.subjectId)
-        .maxTimeMS(2000)
-        .lean()
-        .catch(() => {
-          throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-        });
-      if (!machine || machine.deletedAt || machine.status === 'revoked')
-        throw workerError('WORKER_NOT_FOUND');
-      if (
-        (machine.runtimeIdentity?.installationProfile ?? undefined) !==
-          installationProfile ||
-        !machine.approvedCapabilities?.some(
-          (capability) => capability.platform === platform,
-        )
-      )
-        throw workerError('WORKER_INVALID_REQUEST');
-    } else if (installationProfile) {
-      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-    }
     const catalog = await this.loadCatalog();
-    const release = catalog.releases[target];
-    if (!release) this.unavailableArtifacts();
+    const release = catalog.releases[platform];
+    if (!release) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     if (!release.update) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     try {
       const object = toObjectIdentity(release);
+      if (!(await this.transfers.isPinnedObjectAvailable(object)))
+        throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
       const grant = includeGrant
         ? await this.transfers.createDownloadGrant(object)
         : undefined;
       return {
         schemaVersion: 1,
         platform,
-        ...(installationProfile ? { installationProfile } : {}),
-        signed: signedRelease(release, platform, installationProfile),
+        signed: {
+          keyId: release.update.keyId,
+          metadata: {
+            schemaVersion: 1,
+            sequence: release.update.sequence,
+            platform,
+            releaseVersion: release.version,
+            publishedAt: release.update.publishedAt,
+            expiresAt: release.update.expiresAt,
+            release: {
+              filename: release.filename,
+              bytes: release.bytes,
+              sha256: release.sha256,
+              contentType: release.contentType,
+            },
+          },
+          signature: release.update.signature,
+        },
         ...(grant === undefined ? {} : { grant }),
       };
     } catch (error) {
       if (isWorkerException(error)) throw error;
       throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     }
-  }
-
-  private unavailableArtifacts(): never {
-    if (!this.unavailableReported) {
-      this.logger.warn(
-        'Worker artifacts unavailable: publish immutable runtime and qualification objects to private R2, verify their checksums and ETags, and configure the trusted backend installation catalog.',
-      );
-      this.unavailableReported = true;
-    }
-    throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
   }
 
   private async loadCatalog(): Promise<InstallationCatalog> {
@@ -259,17 +184,18 @@ function parseCatalog(value: unknown): InstallationCatalog {
     throw new TypeError('Worker installation catalog schema is invalid');
   const releases = strictRecord(
     root.releases,
-    new Set(['darwin-arm64', 'windows-amd64', 'windows-amd64-user']),
+    new Set(['darwin-arm64', 'windows-amd64']),
   );
+  if (!('darwin-arm64' in releases) && !('windows-amd64' in releases))
+    throw new TypeError('Worker installation releases are incomplete');
   return {
     releases: Object.fromEntries(
-      (['darwin-arm64', 'windows-amd64', 'windows-amd64-user'] as const)
+      (['darwin-arm64', 'windows-amd64'] as const)
         .filter((platform) => platform in releases)
         .map((platform) => [platform, parseRelease(releases[platform])]),
     ),
     model: parseModel(root.model),
-    fixture:
-      root.fixture === null ? null : parseArtifact(root.fixture, 'audio/wav'),
+    fixture: parseArtifact(root.fixture, 'audio/wav'),
   };
 }
 
@@ -342,7 +268,7 @@ function parseRelease(value: unknown): CatalogRelease {
       'version',
       'filename',
       'key',
-      'etag',
+      'versionId',
       'bytes',
       'sha256',
       'contentType',
@@ -358,7 +284,7 @@ function parseRelease(value: unknown): CatalogRelease {
     {
       filename: record.filename,
       key: record.key,
-      etag: record.etag,
+      versionId: record.versionId,
       bytes: record.bytes,
       sha256: record.sha256,
       contentType: record.contentType,
@@ -411,7 +337,7 @@ function parseArtifact(
       'version',
       'filename',
       'key',
-      'etag',
+      'versionId',
       'bytes',
       'sha256',
       'contentType',
@@ -419,7 +345,7 @@ function parseArtifact(
   );
   const filename = boundedText(record.filename, 120);
   const key = boundedText(record.key, 1024);
-  const etag = boundedText(record.etag, 1024);
+  const versionId = boundedText(record.versionId, 1024);
   const sha256 = boundedText(record.sha256, 64);
   const contentType = boundedText(record.contentType, 100);
   const accepted = Array.isArray(expectedContentType)
@@ -428,7 +354,7 @@ function parseArtifact(
   if (
     !SAFE_FILENAME.test(filename) ||
     !SAFE_KEY.test(key) ||
-    !isStorageEtag(etag) ||
+    !VERSION_ID.test(versionId) ||
     !Number.isSafeInteger(record.bytes) ||
     (record.bytes as number) < 1 ||
     (record.bytes as number) > 16 * 1024 * 1024 * 1024 ||
@@ -439,7 +365,7 @@ function parseArtifact(
   return {
     filename,
     key,
-    etag,
+    versionId,
     bytes: record.bytes as number,
     sha256,
     contentType,
@@ -449,48 +375,10 @@ function parseArtifact(
 function toObjectIdentity(artifact: CatalogArtifact): ObjectIdentity {
   return {
     key: artifact.key,
-    etag: artifact.etag,
+    versionId: artifact.versionId,
     bytes: artifact.bytes,
     sha256: Buffer.from(artifact.sha256, 'hex').toString('base64'),
     contentType: artifact.contentType,
-  };
-}
-
-function artifactTarget(
-  platform: WorkerPlatform,
-  installationProfile?: 'windows-user',
-) {
-  if (installationProfile === undefined) return platform;
-  if (installationProfile !== 'windows-user' || platform !== 'windows-amd64')
-    throw workerError('WORKER_INVALID_REQUEST');
-  return 'windows-amd64-user' as const;
-}
-
-function signedRelease(
-  release: CatalogRelease,
-  platform: WorkerPlatform,
-  installationProfile?: 'windows-user',
-) {
-  if (release.update === undefined)
-    throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-  return {
-    keyId: release.update.keyId,
-    metadata: {
-      schemaVersion: 1,
-      sequence: release.update.sequence,
-      platform,
-      ...(installationProfile ? { installationProfile } : {}),
-      releaseVersion: release.version,
-      publishedAt: release.update.publishedAt,
-      expiresAt: release.update.expiresAt,
-      release: {
-        filename: release.filename,
-        bytes: release.bytes,
-        sha256: release.sha256,
-        contentType: release.contentType,
-      },
-    },
-    signature: release.update.signature,
   };
 }
 

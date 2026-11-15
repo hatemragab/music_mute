@@ -1,18 +1,19 @@
-import { type ApiClient, submitWithReceiptReadBack } from "@/api/api-client";
+import {
+  OperationOutcomeUnknownError,
+  type ApiClient,
+  submitWithReceiptReadBack,
+} from "@/api/api-client";
 import type {
   Page,
   ReleaseDetail,
   ReleasePlatform,
   ReleaseProposal,
-  ReleaseWriteSource,
+  ReleaseSource,
   ReleaseSummary,
   RevisionCommand,
   UpdatePolicy,
 } from "@/api/contracts";
 import { withQuery } from "@/api/query-string";
-
-export const GOOGLE_PLAY_LISTING_URL =
-  "https://play.google.com/store/apps/details?id=com.hatem.musicmute";
 
 export const listReleases = (
   client: ApiClient,
@@ -30,7 +31,7 @@ export const getRelease = (client: ApiClient, id: string) =>
 export const getReleaseProposal = (
   client: ApiClient,
   platform: ReleasePlatform,
-  source: ReleaseWriteSource,
+  source: ReleaseSource,
 ) =>
   client.get<ReleaseProposal>(
     withQuery("/admin/releases/proposal", { platform, source }),
@@ -38,7 +39,7 @@ export const getReleaseProposal = (
 
 export interface ReleaseDraftInput {
   platform: ReleasePlatform;
-  source: ReleaseWriteSource;
+  source: ReleaseSource;
   versionName: string;
   buildNumber: number;
   changelogEn: string;
@@ -53,7 +54,7 @@ export type UpdatePolicySelection = Pick<UpdatePolicy, "android" | "ios">;
 const policySelection = (
   policy: UpdatePolicySelection,
 ): UpdatePolicySelection => ({
-  android: { ...policy.android, source: "google_play", directReleaseId: null },
+  android: policy.android,
   ios: policy.ios,
 });
 
@@ -104,18 +105,91 @@ export const updateRelease = (
   });
 };
 
-export const getUpdatePolicy = async (
+export const reserveReleaseUpload = (
   client: ApiClient,
-): Promise<UpdatePolicy> => {
-  const policy = await client.get<UpdatePolicy>("/admin/update-policy");
-  return { ...policy, ...policySelection(policy) };
+  id: string,
+  input: {
+    bytes: number;
+    sha256Hex: string;
+    expectedRevision: number;
+    operationId: string;
+  },
+) =>
+  submitWithReceiptReadBack<{
+    uploadId: string;
+    grant: {
+      method: "PUT";
+      url: string;
+      headers: Record<string, string>;
+      expiresAt: string;
+    };
+    expectedBytes: number;
+    expectedSha256: string;
+  }>({
+    client,
+    operationId: input.operationId,
+    submit: () =>
+      client.post<{
+        uploadId: string;
+        grant: {
+          method: "PUT";
+          url: string;
+          headers: Record<string, string>;
+          expiresAt: string;
+        };
+        expectedBytes: number;
+        expectedSha256: string;
+      }>(`/admin/releases/${encodeURIComponent(id)}/uploads`, input),
+    readResult: (receipt) => {
+      throw new OperationOutcomeUnknownError(
+        input.operationId,
+        `Upload ${receipt.resourceId ?? "reservation"} was reserved, but its one-time upload grant response was lost. Refresh the release and reserve a new upload.`,
+      );
+    },
+  });
+
+export interface ReleaseUploadStatus {
+  artifactState: string;
+  code?: string;
+  checkedAt?: string;
+}
+
+export const completeReleaseUpload = (
+  client: ApiClient,
+  releaseId: string,
+  uploadId: string,
+) => {
+  const operationId = crypto.randomUUID();
+  return submitWithReceiptReadBack<ReleaseUploadStatus>({
+    client,
+    operationId,
+    submit: () =>
+      client.post<ReleaseUploadStatus>(
+        `/admin/releases/${encodeURIComponent(releaseId)}/uploads/${encodeURIComponent(uploadId)}/complete`,
+        { operationId },
+      ),
+    readResult: (receipt) =>
+      getReleaseUpload(client, releaseId, receipt.resourceId ?? uploadId),
+  });
 };
 
-export const previewUpdatePolicy = async (
+export const getReleaseUpload = (
+  client: ApiClient,
+  releaseId: string,
+  uploadId: string,
+) =>
+  client.get<ReleaseUploadStatus>(
+    `/admin/releases/${encodeURIComponent(releaseId)}/uploads/${encodeURIComponent(uploadId)}`,
+  );
+
+export const getUpdatePolicy = (client: ApiClient) =>
+  client.get<UpdatePolicy>("/admin/update-policy");
+
+export const previewUpdatePolicy = (
   client: ApiClient,
   policy: UpdatePolicySelection,
-) => {
-  const result = await client.post<{
+) =>
+  client.post<{
     currentRevision: number;
     valid: boolean;
     errors: string[];
@@ -126,16 +200,7 @@ export const previewUpdatePolicy = async (
       decision: string;
       targetBuild: number | null;
     }>;
-  }>("/admin/update-policy/previews", policySelection(policy));
-  return {
-    ...result,
-    examples:
-      result.examples?.filter(
-        (example) =>
-          example.platform !== "android" || example.distribution === "play",
-      ) ?? [],
-  };
-};
+  }>("/admin/update-policy/preview", policySelection(policy));
 
 export const publishRelease = (
   client: ApiClient,
@@ -162,7 +227,7 @@ export const publishRelease = (
         release: ReleaseDetail;
         policyRevision: number;
         operationId: string;
-      }>(`/admin/releases/${encodeURIComponent(id)}/publications`, body),
+      }>(`/admin/releases/${encodeURIComponent(id)}/publish`, body),
     readResult: async (receipt) => {
       const [release, policy] = await Promise.all([
         getRelease(client, receipt.resourceId ?? id),
@@ -204,7 +269,7 @@ export const withdrawRelease = (
         release: ReleaseDetail;
         policyRevision: number;
         operationId: string;
-      }>(`/admin/releases/${encodeURIComponent(id)}/withdrawals`, body),
+      }>(`/admin/releases/${encodeURIComponent(id)}/withdraw`, body),
     readResult: async (receipt) => {
       const [release, policy] = await Promise.all([
         getRelease(client, receipt.resourceId ?? id),

@@ -1,10 +1,5 @@
-import { getEventListeners } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import {
-  ControlPlaneError,
-  WorkerControlPlaneClient,
-} from "../src/runtime/control-plane-client.js";
-import { toWireCase } from "../src/runtime/wire-case.js";
+import { WorkerControlPlaneClient } from "../src/runtime/control-plane-client.js";
 
 const machineId = "cb56441d-f2df-4b44-a320-6f37dfa81f7f";
 const workerId = "a69d3899-2214-4427-98cf-b9a4449aeae1";
@@ -13,180 +8,37 @@ const incarnation = "e221c880-7196-4fa5-b1b8-ee504e87c04c";
 const attemptId = "99f8016b-67f3-4f4b-beb4-205a7b87147e";
 const commandId = "f684cb4d-cdef-4bbf-8925-d5701fdf20c7";
 
-function json(
-  value: unknown,
-  status = 200,
-  headers?: Record<string, string>,
-): Response {
-  return new Response(JSON.stringify(toWireCase(value)), {
+function json(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json" },
   });
-}
-
-function problem(
-  code: string,
-  status: number,
-  headers?: Record<string, string>,
-): Response {
-  return json(
-    {
-      type: "about:blank",
-      title: status === 429 ? "Too Many Requests" : "Service Unavailable",
-      status,
-      detail: "The request cannot be completed yet.",
-      code,
-      request_id: "request-1",
-    },
-    status,
-    { "Content-Type": "application/problem+json; charset=utf-8", ...headers },
-  );
 }
 
 describe("worker control-plane client", () => {
-  it("requires the API origin without a route prefix", () => {
-    expect(
-      () =>
-        new WorkerControlPlaneClient({
-          baseUrl: "https://api.music-mute.com/old-prefix",
-          credential: "x".repeat(43),
-        }),
-    ).toThrow("API origin");
-  });
-
-  it("preserves the worker rate-limit code and skips a retry beyond the delay ceiling", async () => {
-    const fetchMock = vi.fn(async (_input: string | URL | Request) =>
-      problem("WORKER_RATE_LIMITED", 429, { "Retry-After": "60" }),
-    );
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: fetchMock as unknown as typeof fetch,
-      maxAttempts: 3,
-    });
-
-    await expect(
-      client.openSession(sessionId, incarnation),
-    ).rejects.toMatchObject({
-      code: "WORKER_RATE_LIMITED",
-      status: 429,
-      retryable: true,
-      retryAfterMs: 60_000,
-    } satisfies Partial<ControlPlaneError>);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "http://localhost/worker/sessions",
-    );
-  });
-
-  it("does not decode legacy JSON errors as problem details", async () => {
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: vi.fn(async () =>
-        json({ code: "WORKER_FORBIDDEN", message: "legacy" }, 403),
-      ) as unknown as typeof fetch,
-      maxAttempts: 1,
-    });
-
-    await expect(
-      client.openSession(sessionId, incarnation),
-    ).rejects.toMatchObject({
-      code: "HTTP_403",
-      status: 403,
-    });
-  });
-
-  it("retries a rate limit once its short Retry-After expires", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        problem("WORKER_RATE_LIMITED", 429, { "Retry-After": "0" }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          machineId,
-          policyRevision: 3,
-          serverTime: "2026-01-01T00:00:00.000Z",
-        }),
-      );
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: fetchMock as unknown as typeof fetch,
-      maxAttempts: 2,
-    });
-
-    await expect(
-      client.openSession(sessionId, incarnation),
-    ).resolves.toMatchObject({ machineId });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it.each([500, 502, 503, 504])(
-    "retries HTTP %i with the same claim request identity",
-    async (status) => {
-      const requestBodies: string[] = [];
-      const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-        requestBodies.push(String(init?.body));
-        if (requestBodies.length === 1)
-          return problem("WORKER_DEPENDENCY_UNAVAILABLE", status);
-        return json({ claim: null, serverTime: "2026-01-01T00:00:00.000Z" });
-      });
-      const client = new WorkerControlPlaneClient({
-        baseUrl: "http://127.0.0.1",
-        credential: "x".repeat(43),
-        allowInsecureLoopback: true,
-        fetch: fetchMock as unknown as typeof fetch,
-        maxAttempts: 2,
-      });
-      const requestId = "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea";
-      const controller = new AbortController();
-
-      await expect(
-        client.claim(
-          { workerId, sessionId, incarnation },
-          "gpu-0",
-          0,
-          1,
-          requestId,
-          controller.signal,
-        ),
-      ).resolves.toEqual({
-        claim: null,
-        serverTime: "2026-01-01T00:00:00.000Z",
-      });
-      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
-      expect(requestBodies).toHaveLength(2);
-      expect(requestBodies[0]).toBe(requestBodies[1]);
-      expect(JSON.parse(requestBodies[0]!) as unknown).toMatchObject({
-        request_id: requestId,
-        applied_policy_revision: 1,
-      });
-      expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
-        Authorization: `Bearer ${"x".repeat(43)}`,
-      });
-    },
-  );
-
-  it("recovers from a non-JSON HTTP 521 response without changing the claim identity", async () => {
-    const bodies: string[] = [];
+  it("retries a lost claim response with the same request identity", async () => {
+    const requestBodies: string[] = [];
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      bodies.push(String(init?.body));
-      return bodies.length === 1
-        ? new Response("Origin unavailable", { status: 521 })
-        : json({ claim: null, serverTime: "2026-01-01T00:00:00.000Z" });
+      requestBodies.push(String(init?.body));
+      if (requestBodies.length === 1)
+        return json(
+          {
+            statusCode: 503,
+            code: "WORKER_DEPENDENCY_UNAVAILABLE",
+            message: "unavailable",
+          },
+          503,
+        );
+      return json({ claim: null, serverTime: "2026-01-01T00:00:00.000Z" });
     });
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://127.0.0.1",
+      baseUrl: "http://127.0.0.1/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
       maxAttempts: 2,
     });
+    const requestId = "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea";
 
     await expect(
       client.claim(
@@ -194,38 +46,25 @@ describe("worker control-plane client", () => {
         "gpu-0",
         0,
         1,
-        "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea",
+        requestId,
       ),
-    ).resolves.toMatchObject({ claim: null });
-    expect(bodies).toHaveLength(2);
-    expect(bodies[1]).toBe(bodies[0]);
-  });
-
-  it("reports an exhausted HTTP 521 response as retryable", async () => {
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://127.0.0.1",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: vi.fn(
-        async () => new Response("Origin unavailable", { status: 521 }),
-      ) as unknown as typeof fetch,
-      maxAttempts: 1,
+    ).resolves.toEqual({
+      claim: null,
+      serverTime: "2026-01-01T00:00:00.000Z",
     });
-
-    await expect(
-      client.claim(
-        { workerId, sessionId, incarnation },
-        "gpu-0",
-        0,
-        1,
-        "74fcfb85-8cc8-49cb-b8c2-5db33a9896ea",
-      ),
-    ).rejects.toMatchObject({ code: "HTTP_521", status: 521, retryable: true });
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]).toBe(requestBodies[1]);
+    expect(JSON.parse(requestBodies[0]!) as unknown).toMatchObject({
+      requestId,
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: `Bearer ${"x".repeat(43)}`,
+    });
   });
 
   it("validates the machine identity returned when a session opens", async () => {
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: vi.fn(async () =>
@@ -248,29 +87,28 @@ describe("worker control-plane client", () => {
     const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
       json({
         ticket: "t".repeat(43),
-        path: "/worker/hints/socket",
+        path: "/api/v1/worker/v1/hints/socket",
         expiresAt: new Date(Date.now() + 30_000).toISOString(),
       }),
     );
     const client = new WorkerControlPlaneClient({
-      baseUrl: "https://api.music-mute.com",
+      baseUrl: "https://api.music-mute.com/api/v1",
       credential: "x".repeat(43),
       fetch: fetchMock as unknown as typeof fetch,
     });
 
     await expect(client.hintTicket()).resolves.toMatchObject({
-      socketUrl: "wss://api.music-mute.com/worker/hints/socket",
-      ticket: "t".repeat(43),
+      socketUrl: `wss://api.music-mute.com/api/v1/worker/v1/hints/socket?ticket=${"t".repeat(43)}`,
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "https://api.music-mute.com/worker/hints/tickets",
+      "https://api.music-mute.com/api/v1/worker/v1/hints/ticket",
     );
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
   });
 
   it("parses pending remote commands from worker configuration", async () => {
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: vi.fn(async () =>
@@ -319,7 +157,7 @@ describe("worker control-plane client", () => {
       json({ commandId, state: "succeeded", replayed: false }),
     );
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
@@ -331,13 +169,13 @@ describe("worker control-plane client", () => {
       metrics: [{ name: "check.service", value: 1, unit: "boolean" }],
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      `http://localhost/worker/commands/${commandId}/results`,
+      `http://localhost/api/v1/worker/v1/commands/${commandId}/result`,
     );
     expect(
       JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)),
     ).toMatchObject({
-      request_id: requestId,
-      session_id: sessionId,
+      requestId,
+      sessionId,
       incarnation,
       outcome: "succeeded",
     });
@@ -345,7 +183,7 @@ describe("worker control-plane client", () => {
 
   it("rejects a mixed-attempt response", async () => {
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: vi.fn(async () =>
@@ -354,7 +192,7 @@ describe("worker control-plane client", () => {
           attemptId,
           object: {
             key: "input/source.mp3",
-            etag: '"v1"',
+            versionId: "v1",
             bytes: 1,
             sha256: "A".repeat(43) + "=",
             contentType: "audio/mpeg",
@@ -377,7 +215,7 @@ describe("worker control-plane client", () => {
       json({ machineId, status: "revoked", confirmed: true, revision: 4 }),
     );
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
@@ -394,55 +232,7 @@ describe("worker control-plane client", () => {
     });
   });
 
-  it("preserves an explicit deleted confirmation and rejects ambiguous deletion values", async () => {
-    const fetchMock = vi.fn(async () =>
-      json({
-        machineId,
-        status: "revoked",
-        confirmed: true,
-        revision: 4,
-        deleted: true,
-      }),
-    );
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: fetchMock as typeof fetch,
-    });
-    await expect(client.unpair()).resolves.toMatchObject({
-      confirmed: true,
-      deleted: true,
-    });
-    fetchMock.mockImplementation(async () =>
-      json({
-        machineId,
-        status: "revoked",
-        confirmed: true,
-        revision: 4,
-        deleted: "true",
-      }),
-    );
-    await expect(client.unpair()).rejects.toThrow("Unpair response is invalid");
-  });
-
-  it("reports machine deletion as a permanent410 and never retries or substitutes authentication", async () => {
-    const fetchMock = vi.fn(async () => problem("WORKER_MACHINE_DELETED", 410));
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: fetchMock as typeof fetch,
-    });
-    await expect(client.machineStatus()).rejects.toMatchObject({
-      code: "WORKER_MACHINE_DELETED",
-      status: 410,
-      retryable: false,
-    });
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("validates machine authority status and tolerates future fields", async () => {
+  it("reads strict machine authority status without changing backend state", async () => {
     const response = {
       machineId,
       status: "paused",
@@ -452,78 +242,22 @@ describe("worker control-plane client", () => {
       lastSeenAt: "2026-09-21T01:00:00.000Z",
       activeAttempts: 2,
       claimsAllowed: false,
-      future_field: "new server field",
     };
     const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
       json(response),
     );
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
     });
-    await expect(client.machineStatus()).resolves.toEqual({
-      ...response,
-      future_field: undefined,
-      futureField: "new server field",
-    });
+    await expect(client.machineStatus()).resolves.toEqual(response);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "http://localhost/worker/status",
+      "http://localhost/api/v1/worker/v1/status",
     );
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
-  });
-
-  it("still rejects a machine status with an invalid required field", async () => {
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: (async () =>
-        json({
-          machineId,
-          status: "paused",
-          groupId: "studio",
-          policyRevision: 9,
-          revision: 12,
-          lastSeenAt: null,
-          activeAttempts: 2,
-          claimsAllowed: "false",
-          future_field: "new server field",
-        })) as typeof fetch,
-    });
-
-    await expect(client.machineStatus()).rejects.toThrow(
-      "Machine status response is invalid",
-    );
-  });
-
-  it("requests Windows metadata with an explicit download flag and rejects a different target", async () => {
-    const response = {
-      schemaVersion: 1,
-      platform: "windows-amd64",
-      signed: { keyId: "release-test" },
-    };
-    const fetchMock = vi.fn(async () => json(response));
-    const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
-      credential: "x".repeat(43),
-      allowInsecureLoopback: true,
-      fetch: fetchMock,
-    });
-    await expect(
-      client.updateCandidate("windows-amd64", true),
-    ).resolves.toEqual({ signed: response.signed });
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.any(URL),
-      expect.objectContaining({
-        body: JSON.stringify({ platform: "windows-amd64", download: true }),
-      }),
-    );
-    await expect(client.updateCandidate("darwin-arm64")).rejects.toThrow(
-      "target is invalid",
-    );
   });
 
   it("requests a machine-authenticated macOS update candidate", async () => {
@@ -540,20 +274,18 @@ describe("worker control-plane client", () => {
       json(response),
     );
     const client = new WorkerControlPlaneClient({
-      baseUrl: "http://localhost",
+      baseUrl: "http://localhost/api/v1",
       credential: "x".repeat(43),
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
     });
 
-    await expect(client.updateCandidate("darwin-arm64")).resolves.toMatchObject(
-      {
-        signed: response.signed,
-        grant: response.grant,
-      },
-    );
+    await expect(client.macUpdateCandidate()).resolves.toMatchObject({
+      signed: response.signed,
+      grant: response.grant,
+    });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "http://localhost/worker/updates",
+      "http://localhost/api/v1/worker/v1/update",
     );
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       platform: "darwin-arm64",

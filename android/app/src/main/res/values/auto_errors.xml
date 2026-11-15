@@ -1,7 +1,0 @@
-<resources>
-    <string name="auto_sign_in_required">Sign in to MusicMute on your phone when it is safe to do so.</string>
-    <string name="auto_update_required">Update MusicMute on your phone when it is safe to do so.</string>
-    <string name="auto_library_unavailable">Your audio is temporarily unavailable. Try again, or open MusicMute on your phone when it is safe to do so.</string>
-    <string name="auto_audio_unavailable">This audio is unavailable. Choose another track from your Library.</string>
-    <string name="auto_open_phone">Open MusicMute on phone</string>
-</resources>

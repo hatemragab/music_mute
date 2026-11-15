@@ -78,15 +78,6 @@ export class AdminWorkerListQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
 }
 
-export class AdminWorkerPageQueryDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(1024)
-  @Matches(/^[A-Za-z0-9_-]+$/)
-  cursor?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
-}
-
 export class RequestWorkerDoctorDto {
   @IsUUID('4') operationId!: string;
   @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER - 1) expectedRevision!: number;
@@ -121,13 +112,4 @@ export class CompleteWorkerCommandDto extends WorkerConfigQueryDto {
   @ValidateNested({ each: true })
   @Type(() => WorkerCommandMetricDto)
   metrics!: WorkerCommandMetricDto[];
-}
-
-/** Operator approval after reviewing the installed two-worker qualification. */
-export class ApproveWorkerCapacityDto {
-  @IsUUID('4') operationId!: string;
-  @IsInt() @Min(0) @Max(Number.MAX_SAFE_INTEGER - 1) expectedRevision!: number;
-  @Transform(trim) @IsString() @Length(1, 128) gpuId!: string;
-  @IsIn([true]) qualificationConfirmed!: true;
-  @Transform(trim) @IsString() @Length(1, 500) reason!: string;
 }

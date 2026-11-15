@@ -67,7 +67,7 @@ class DefaultLibraryRepository(
                             records.map { record ->
                                 val job = record.job
                                 val key = LibraryKey(session.uid, job.id)
-                                val transfer = progress[job.id]?.takeIf { it.artifact == "output" }
+                                val transfer = progress[job.id]
                                 val problem = problems[key]
                                 LibraryEntry(
                                     key = key,
@@ -77,7 +77,6 @@ class DefaultLibraryRepository(
                                     durationMs = job.input.durationSeconds.takeIf { it.isFinite() && it >= 0 }
                                         ?.let { (it * 1000).toLong() },
                                     starred = record.starred,
-                                    playCount = record.playCount,
                                     hidden = record.hidden,
                                     offlineStatus = when {
                                         transfer != null -> OfflineStatus.DOWNLOADING
@@ -88,7 +87,6 @@ class DefaultLibraryRepository(
                                     downloadedBytes = transfer?.bytes ?: 0,
                                     totalBytes = transfer?.totalBytes,
                                     problem = problem,
-                                    thumbnailUrl = com.hatem.musicmute.processing.validatedThumbnailUrl(job.thumbnailUrl),
                                 )
                             }
                         }.collect { entries ->

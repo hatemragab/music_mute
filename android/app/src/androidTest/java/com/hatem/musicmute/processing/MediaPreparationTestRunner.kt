@@ -12,34 +12,14 @@ import kotlinx.coroutines.runBlocking
 /** Opt-in native preparation check against a URI already granted to the installed app. */
 class MediaPreparationTestRunner : Instrumentation() {
     private var sourceUri: String? = null
-    private var playbackCard = false
-    private var listeningFeatures = false
-    private var notificationBadges = false
 
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         sourceUri = arguments?.getString("sourceUri")
-        playbackCard = arguments?.getString("check") == "playbackCard"
-        listeningFeatures = arguments?.getString("check") == "listeningFeatures"
-        notificationBadges = arguments?.getString("check") == "notificationBadges"
         start()
     }
 
     override fun onStart() {
-        if (playbackCard || listeningFeatures || notificationBadges) {
-            val report = Bundle()
-            try {
-                if (notificationBadges) com.hatem.musicmute.checkNotificationBadges(targetContext)
-                else if (listeningFeatures) runBlocking { com.hatem.musicmute.playback.checkListeningFeatures(targetContext) }
-                else com.hatem.musicmute.playback.checkPlaybackCard(targetContext)
-                report.putString("result", "PASS: requested framework checks")
-                finish(Activity.RESULT_OK, report)
-            } catch (error: Exception) {
-                report.putString("failure", error.stackTraceToString())
-                finish(Activity.RESULT_CANCELED, report)
-            }
-            return
-        }
         val output = File(targetContext.cacheDir, "native-preparation-test.m4a")
         val staging = File(targetContext.cacheDir, "native-preparation-staging")
         val report = Bundle()

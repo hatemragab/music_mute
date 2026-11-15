@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Send, Undo2 } from "lucide-react";
 import { useSearchParams } from "react-router";
@@ -34,23 +34,13 @@ import { PolicyPreview, type PolicyPreviewResult } from "./policy-preview";
 import { PublishReleaseDialog } from "./publish-release-dialog";
 import { UpdatePolicyForm } from "./update-policy-form";
 import { WithdrawReleaseDialog } from "./withdraw-release-dialog";
-import { DesktopPolicySection } from "./desktop-policy-section";
 
 export function UpdatePolicyPage() {
-  return (
-    <div className="space-y-6">
-      <MobileUpdatePolicyEditor />
-      <DesktopPolicySection />
-    </div>
-  );
-}
-function MobileUpdatePolicyEditor() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
   const [params, setParams] = useSearchParams();
   const [editedDraft, setEditedDraft] = useState<UpdatePolicy | null>(null);
-  const previewGeneration = useRef(0);
   const [preview, setPreview] = useState<PolicyPreviewResult | null>(null);
   const [storeConfirmed, setStoreConfirmed] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -71,11 +61,8 @@ function MobileUpdatePolicyEditor() {
     [releaseId, releases.data],
   );
   const previewMutation = useMutation({
-    mutationFn: ({ value }: { value: UpdatePolicy; generation: number }) =>
-      previewUpdatePolicy(client, value),
-    onSuccess: (result, request) => {
-      if (request.generation === previewGeneration.current) setPreview(result);
-    },
+    mutationFn: (value: UpdatePolicy) => previewUpdatePolicy(client, value),
+    onSuccess: setPreview,
   });
   const publish = useMutation({
     mutationFn: ({
@@ -86,15 +73,14 @@ function MobileUpdatePolicyEditor() {
       reason: string;
     }) => {
       if (!draft || !policy.data) throw new Error("Policy is unavailable.");
-      if (release.source === "direct_apk")
-        throw new Error("Retired direct APK releases are read-only.");
       return publishRelease(client, release.id, {
         expectedRevision: policy.data.revision,
         expectedReleaseRevision: release.revision,
         policy: draft,
         operationId: createOperationId(),
         reason,
-        storeAvailabilityConfirmed: storeConfirmed,
+        storeAvailabilityConfirmed:
+          release.source !== "direct_apk" && storeConfirmed,
       });
     },
     onSuccess: async () => {
@@ -113,8 +99,6 @@ function MobileUpdatePolicyEditor() {
       reason: string;
     }) => {
       if (!draft || !policy.data) throw new Error("Policy is unavailable.");
-      if (release.source === "direct_apk")
-        throw new Error("Retired direct APK releases are read-only.");
       return withdrawRelease(client, release.id, {
         expectedRevision: policy.data.revision,
         expectedReleaseRevision: release.revision,
@@ -148,17 +132,17 @@ function MobileUpdatePolicyEditor() {
     if (id) next.set("releaseId", id);
     else next.delete("releaseId");
     setParams(next);
-    previewGeneration.current += 1;
     setPreview(null);
     setStoreConfirmed(false);
   };
   const updateDraft = (value: UpdatePolicy) => {
     setEditedDraft(value);
-    previewGeneration.current += 1;
     setPreview(null);
   };
-  const retired = selected?.source === "direct_apk";
-  const publishEligible = selected?.state === "draft" && !retired;
+  const storeRequired = selected?.source !== "direct_apk";
+  const publishEligible =
+    selected?.state === "draft" &&
+    (selected.source !== "direct_apk" || selected.artifactState === "verified");
   return (
     <div className="space-y-6">
       <PageHeader
@@ -168,12 +152,7 @@ function MobileUpdatePolicyEditor() {
           <Button
             variant="outline"
             disabled={previewMutation.isPending}
-            onClick={() =>
-              previewMutation.mutate({
-                value: draft,
-                generation: previewGeneration.current,
-              })
-            }
+            onClick={() => previewMutation.mutate(draft)}
           >
             <Eye aria-hidden="true" /> Preview policy
           </Button>
@@ -190,15 +169,12 @@ function MobileUpdatePolicyEditor() {
                 <SelectValue placeholder="Select a release" />
               </SelectTrigger>
               <SelectContent>
-                {releases.data?.items
-                  .filter((release) => release.source !== "direct_apk")
-                  .map((release) => (
-                    <SelectItem key={release.id} value={release.id}>
-                      {release.platform} {release.versionName} (
-                      {release.buildNumber}) · {release.source} ·{" "}
-                      {release.state}
-                    </SelectItem>
-                  ))}
+                {releases.data?.items.map((release) => (
+                  <SelectItem key={release.id} value={release.id}>
+                    {release.platform} {release.versionName} (
+                    {release.buildNumber}) · {release.source} · {release.state}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             {selected ? (
@@ -211,7 +187,7 @@ function MobileUpdatePolicyEditor() {
                 </p>
               </div>
             ) : null}
-            {selected && !retired ? (
+            {selected && storeRequired ? (
               <div className="flex items-start gap-3">
                 <Checkbox
                   id="store-availability"
@@ -227,13 +203,15 @@ function MobileUpdatePolicyEditor() {
             <div className="flex flex-wrap gap-2">
               {manage && selected && publishEligible ? (
                 <Button
-                  disabled={!preview?.valid || !storeConfirmed}
+                  disabled={
+                    !preview?.valid || (storeRequired && !storeConfirmed)
+                  }
                   onClick={() => setPublishOpen(true)}
                 >
                   <Send aria-hidden="true" /> Publish release
                 </Button>
               ) : null}
-              {manage && selected?.state === "published" && !retired ? (
+              {manage && selected?.state === "published" ? (
                 <Button
                   variant="destructive"
                   disabled={!preview?.valid}
@@ -242,10 +220,9 @@ function MobileUpdatePolicyEditor() {
                   <Undo2 aria-hidden="true" /> Withdraw with replacement
                 </Button>
               ) : null}
-              {retired ? (
-                <p className="text-sm text-muted-foreground">
-                  Retired direct APK. This release is read-only and cannot be
-                  selected as an Android update target.
+              {selected && !publishEligible && selected.state === "draft" ? (
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  Direct APK publication requires a server-verified artifact.
                 </p>
               ) : null}
             </div>

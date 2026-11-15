@@ -24,10 +24,6 @@ import kotlinx.coroutines.launch
 
 data class PlaybackState(
     val trackId: String? = null,
-    val original: Boolean = false,
-    val switching: Boolean = false,
-    val comparisonFailed: Boolean = false,
-    val queueEditFailed: Boolean = false,
     val playing: Boolean = false,
     val buffering: Boolean = false,
     val positionMs: Long = 0,
@@ -41,16 +37,10 @@ data class PlaybackState(
     val orderedQueue: List<QueueTrack> = emptyList(),
     val speed: Float = 1f,
     val volume: Float = 1f,
-    val skipSilence: Boolean = false,
-    val loopStart: Long = -1,
-    val loopEnd: Long = -1,
-    val sleepAt: Long = 0,
-    val sleepEnd: Boolean = false,
 )
 
 class AudioPlaybackController(context: Context) : QueueCommands {
-    private val appContext = context.applicationContext
-    private val dependencies = appContext as? PlaybackDependencies
+    private val dependencies = context.applicationContext as? PlaybackDependencies
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(PlaybackState())
     val state = mutableState.asStateFlow()
@@ -61,7 +51,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
             )
             .buildAsync()
     private var controller: MediaController? = null
-    private var comparisonTask: kotlinx.coroutines.Job? = null
     private var pendingQueue: Pair<List<QueueTrack>, LibraryKey>? = null
     private var released = false
     private var clearPrivateOnConnect = false
@@ -141,8 +130,7 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         }
         val player = controller
         if (player == null) { pendingQueue = queue to startKey; return }
-        markPlaybackStart(startKey)
-        player.setMediaItems(queue.map { it.mediaItem(appContext) }, queue.indexOfFirst { it.key == startKey }, 0)
+        player.setMediaItems(queue.map { it.mediaItem() }, queue.indexOfFirst { it.key == startKey }, 0)
         player.prepare(); player.play()
         mutableState.update { it.copy(failed = false) }
         refresh()
@@ -160,17 +148,13 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         refresh()
     }
     fun togglePlayback() {
-        com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("action.playback_toggle", "action", data = mapOf("trackId" to mutableState.value.trackId, "playing" to mutableState.value.playing, "result" to "requested"))
         controller?.let { player ->
             if (player.playerError != null) {
                 player.prepare()
                 player.play()
             } else if (player.playWhenReady) player.pause() else {
                 if (player.playbackState == Player.STATE_IDLE) player.prepare()
-                if (player.playbackState == Player.STATE_ENDED) {
-                    player.currentMediaItem?.queueTrack()?.key?.let(::markPlaybackStart)
-                    player.seekTo(0)
-                }
+                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
                 player.play()
             }
         }
@@ -193,50 +177,16 @@ class AudioPlaybackController(context: Context) : QueueCommands {
         refresh()
     }
 
-    fun moveQueueTrack(key: LibraryKey, target: LibraryKey) = editQueue(QueueEdit.MOVE, key, target)
-    fun playNext(key: LibraryKey) = editQueue(QueueEdit.PLAY_NEXT, key)
-    fun clearQueuedTracks() = editQueue(QueueEdit.CLEAR)
-
-    private fun editQueue(edit: QueueEdit, key: LibraryKey? = null, target: LibraryKey? = null) {
-        val expected = dependencies?.currentPlaybackSession() ?: return
-        if (key != null && key.ownerUid != expected.uid || target != null && target.ownerUid != expected.uid) return
-        val player = controller ?: return
-        val result = player.sendCustomCommand(SessionCommand(EDIT_QUEUE_COMMAND, Bundle.EMPTY), Bundle().apply {
-            putString("edit", edit.name)
-            putString("owner", expected.uid)
-            putLong("epoch", expected.epoch)
-            putString("job", key?.jobId)
-            putString("target", target?.jobId)
-            putStringArrayList("order", ArrayList(state.value.orderedQueue.map { it.key.jobId }))
-        })
-        result.addListener({
-            if (!released && dependencies?.currentPlaybackSession() == expected) {
-                val success = runCatching { result.get().resultCode == androidx.media3.session.SessionResult.RESULT_SUCCESS }.getOrDefault(false)
-                mutableState.update { it.copy(queueEditFailed = !success) }
-                refresh()
-            }
-        }, ContextCompat.getMainExecutor(appContext))
-    }
-
     fun selectQueueTrack(key: LibraryKey) {
         if (dependencies?.currentPlaybackSession()?.uid != key.ownerUid) return
         controller?.let { player ->
             val index = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).queueTrack()?.key == key }
                 ?: return@let
-            markPlaybackStart(key)
             player.seekToDefaultPosition(index)
             player.prepare()
             player.play()
         }
         refresh()
-    }
-
-    private fun markPlaybackStart(key: LibraryKey) {
-        val expected = dependencies?.currentPlaybackSession() ?: return
-        if (key.ownerUid != expected.uid) return
-        controller?.sendCustomCommand(SessionCommand(PLAY_START_COMMAND, Bundle.EMPTY), Bundle().apply {
-            putString("owner", expected.uid); putLong("epoch", expected.epoch); putString("job", key.jobId)
-        })
     }
 
     /** Update the existing media items so queue, notification and Player titles agree. */
@@ -257,42 +207,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                     .setMediaMetadata(item.mediaMetadata.buildUpon().setTitle(title).build()).build())
             }
         }
-    }
-
-    fun selectOriginal(original: Boolean) {
-        val player = controller ?: return
-        val item = player.currentMediaItem ?: return
-        val track = item.queueTrack() ?: return
-        val expected = dependencies?.currentPlaybackSession() ?: return
-        if (item.mediaMetadata.extras?.getBoolean("original") == original) return
-        comparisonTask?.cancel()
-        comparisonTask = scope.launch {
-            mutableState.update { it.copy(switching = true, comparisonFailed = false) }
-            try {
-                val deps = dependencies ?: return@launch
-                val job = deps.comparisonJob(track.key)
-                if (original) deps.resolveOriginalFile(track.key) else deps.resolvePlaybackFile(track.key)
-                if (deps.currentPlaybackSession() != expected || player.currentMediaItem != item) return@launch
-                val target = comparisonPosition(player.currentPosition, original, job.trimEnabled, job.comparisonRanges)
-                val playing = player.playWhenReady
-                val index = player.currentMediaItemIndex
-                player.replaceMediaItem(index, track.mediaItem(appContext, original))
-                player.seekTo(index, target)
-                player.prepare()
-                player.playWhenReady = playing
-                refresh()
-            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-            catch (_: Exception) {
-                if (dependencies?.currentPlaybackSession() == expected && player.currentMediaItem == item)
-                    mutableState.update { it.copy(comparisonFailed = true) }
-            } finally { mutableState.update { it.copy(switching = false) } }
-        }
-    }
-
-    fun listeningAction(action: String, configure: Bundle.() -> Unit = {}) {
-        controller?.sendCustomCommand(SessionCommand(LISTENING_COMMAND, Bundle.EMPTY), Bundle().apply {
-            putString("action", action); configure()
-        })
     }
 
     fun seek(positionMs: Long) {
@@ -322,11 +236,9 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 }
             }
         }
-        val currentItem = player.currentMediaItem
         mutableState.update { old ->
             old.copy(
-                trackId = currentItem?.mediaId,
-                original = currentItem?.mediaMetadata?.extras?.getBoolean("original") == true,
+                trackId = player.currentMediaItem?.mediaId,
                 playing =
                     player.isPlaying ||
                         (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING),
@@ -342,11 +254,6 @@ class AudioPlaybackController(context: Context) : QueueCommands {
                 orderedQueue = cachedOrder,
                 speed = player.playbackParameters.speed,
                 volume = player.volume,
-                skipSilence = player.sessionExtras.getBoolean("skipSilence"),
-                loopStart = player.sessionExtras.getLong("loopStart", -1),
-                loopEnd = player.sessionExtras.getLong("loopEnd", -1),
-                sleepAt = player.sessionExtras.getLong("sleepAt"),
-                sleepEnd = player.sessionExtras.getBoolean("sleepEnd"),
             )
         }
     }

@@ -7,17 +7,12 @@ import kotlinx.serialization.Serializable
 
 data class LibraryKey(val ownerUid: String, val jobId: String)
 enum class OfflineStatus { REMOTE_ONLY, DOWNLOADING, AVAILABLE, FAILED }
-enum class LibraryFilter { ALL, STARRED, MOST_PLAYED, DOWNLOADED, NOT_DOWNLOADED, REMOVED }
-enum class LibrarySort { NEWEST, TITLE, MOST_PLAYED }
+enum class LibraryFilter { ALL, STARRED, DOWNLOADED, NOT_DOWNLOADED, REMOVED }
+enum class LibrarySort { NEWEST, TITLE }
 enum class LibraryProblem { OFFLINE, MISSING_FILE, STORAGE, TRANSFER, INVALID_AUDIO }
 
 @Serializable
-data class StoredLibraryTrack(
-    val job: Job,
-    val starred: Boolean = false,
-    val hidden: Boolean = false,
-    @Serializable(with = LibraryPlayCountSerializer::class) val playCount: Long = 0,
-)
+data class StoredLibraryTrack(val job: Job, val starred: Boolean = false, val hidden: Boolean = false)
 
 data class LibraryEntry(
     val key: LibraryKey,
@@ -30,8 +25,6 @@ data class LibraryEntry(
     val downloadedBytes: Long = 0,
     val totalBytes: Long? = null,
     val problem: LibraryProblem? = null,
-    val playCount: Long = 0,
-    val thumbnailUrl: String? = null,
 )
 
 interface LibraryRepository {

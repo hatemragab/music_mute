@@ -1,10 +1,10 @@
-import { useLiveQuery } from "@/realtime/hooks";
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
 
 import { createOperationId } from "@/api/api-client";
 import { ALERT_SEVERITIES, type AlertRecord } from "@/api/contracts";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { CursorPagination } from "@/components/cursor-pagination";
 import {
@@ -13,6 +13,7 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -25,7 +26,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDateTime } from "@/lib/format";
-import { acknowledgeAlert } from "./health-api";
+import { useVisibleInterval } from "@/hooks/use-visible-interval";
+import { acknowledgeAlert, getHealth, listAlerts } from "./health-api";
 import { AlertDetail } from "./alert-detail";
 import { AlertsTable } from "./alerts-table";
 import { HealthComponentCards } from "./health-component-cards";
@@ -47,19 +49,18 @@ export function SystemHealthPage() {
   const cursor = params.get("cursor");
   const [selected, setSelected] = useState<AlertRecord | null>(null);
   const [acknowledging, setAcknowledging] = useState<AlertRecord | null>(null);
-  const health = useLiveQuery({
+  const health = useQuery({
     queryKey: ["health"],
-    resource: "admin.health",
-    params: {},
+    queryFn: () => getHealth(client),
   });
-  const alerts = useLiveQuery({
+  const alerts = useQuery({
     queryKey: ["alerts", state, severity, cursor],
-    resource: "admin.alerts",
-    params: {
-      state: state === "all" ? undefined : state,
-      severity: severity === "all" ? undefined : severity,
-      cursor,
-    },
+    queryFn: () =>
+      listAlerts(client, {
+        state: state === "all" ? undefined : state,
+        severity: severity === "all" ? undefined : severity,
+        cursor,
+      }),
   });
   const change = (name: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -68,6 +69,10 @@ export function SystemHealthPage() {
     if (name !== "cursor") next.delete("cursor");
     setParams(next);
   };
+  useVisibleInterval(() => {
+    void health.refetch();
+    void alerts.refetch();
+  }, DASHBOARD_POLL_INTERVAL_MS.background);
   const acknowledge = useMutation({
     mutationFn: ({ alert, reason }: { alert: AlertRecord; reason: string }) =>
       acknowledgeAlert(client, alert.id, {
@@ -85,6 +90,15 @@ export function SystemHealthPage() {
       <PageHeader
         title="System health"
         description="Safe dependency status and durable alert episodes. Unknown or stale checks are never displayed as healthy."
+        actions={
+          <RefreshButton
+            refreshing={health.isFetching || alerts.isFetching}
+            onRefresh={() => {
+              void health.refetch();
+              void alerts.refetch();
+            }}
+          />
+        }
       />
       {health.isLoading ? (
         <LoadingState rows={3} />

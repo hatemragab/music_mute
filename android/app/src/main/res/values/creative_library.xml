@@ -12,8 +12,6 @@
     <string name="creative_library_search">Search your audio</string>
     <string name="creative_library_all">All</string>
     <string name="creative_library_starred">Starred</string>
-    <string name="creative_library_show_starred">Show starred</string>
-    <string name="creative_library_most_played">Most played</string>
     <string name="creative_library_downloaded">Downloaded</string>
     <string name="creative_library_not_downloaded">Not downloaded</string>
     <string name="creative_library_removed">Removed</string>
@@ -22,10 +20,6 @@
     <string name="creative_library_sort">Sort</string>
     <string name="creative_library_voice">Voice output</string>
     <string name="creative_library_offline">Available offline</string>
-    <string name="creative_library_offline_badge">Offline</string>
-    <string name="creative_library_online_badge">Online</string>
-    <string name="creative_library_downloading_badge">Downloading</string>
-    <string name="creative_library_unavailable_badge">Unavailable</string>
     <string name="creative_library_remote">Download to listen offline</string>
     <string name="creative_library_downloading">Downloading complete audio…</string>
     <string name="creative_library_failed">Audio unavailable. Check your connection or available storage and try again.</string>
@@ -35,7 +29,6 @@
     <string name="creative_library_home">Go to Home</string>
     <string name="creative_library_refresh">Refresh</string>
     <string name="creative_library_play">Play</string>
-    <string name="creative_library_play_now">Play now</string>
     <string name="creative_library_pause">Pause</string>
     <string name="creative_library_next">Next track</string>
     <string name="creative_library_previous">Previous track</string>
@@ -45,7 +38,6 @@
     <string name="creative_library_download">Keep offline</string>
     <string name="creative_library_restore">Restore to Library</string>
     <string name="creative_library_hide">Remove from Library</string>
-    <string name="creative_library_hide_title">Remove from Library?</string>
     <string name="creative_library_hide_body">This hides the item in Library. Your downloaded file and account audio are kept. Find it again under Removed.</string>
     <string name="creative_library_more">Audio actions</string>
     <string name="creative_library_now_playing">Now playing</string>
@@ -70,6 +62,7 @@
     <string name="creative_library_view_job">View job</string>
     <string name="creative_library_save_copy">Save a copy</string>
     <string name="creative_library_share">Share</string>
+    <string name="creative_library_job_unavailable">Job information is unavailable. Your downloaded audio remains usable.</string>
     <string name="creative_library_cached_job">Saved job information. Refresh when connected for the latest status.</string>
     <string name="creative_library_availability">Offline availability</string>
     <string name="creative_library_remove_queue">Remove from queue</string>

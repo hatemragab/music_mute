@@ -6,7 +6,7 @@ import {
   loadLocalRuntimeStatus,
   writeLocalRuntimeStatus,
 } from "../src/runtime/local-runtime-status.js";
-import { waitForLocalDrain } from "../src/platform/shared/local-drain.js";
+import { waitForLocalDrain } from "../src/platform/macos/local-drain.js";
 
 const roots: string[] = [];
 const attemptId = "cb56441d-f2df-4b44-a320-6f37dfa81f7f";
@@ -18,42 +18,6 @@ afterEach(async () => {
 });
 
 describe("local runtime status and drain", () => {
-  it("does not accept idle status before the requested drain is acknowledged", async () => {
-    const root = await temporaryRoot();
-    const path = join(root, "runtime-status.json");
-    for (const observedLifecycle of [
-      undefined,
-      { revision: 1, intent: "draining" as const },
-      { revision: 2, intent: "active" as const },
-    ]) {
-      await writeLocalRuntimeStatus(
-        path,
-        [],
-        observedLifecycle === undefined ? {} : { observedLifecycle },
-      );
-      await expect(
-        waitForLocalDrain({
-          runtimeStatusPath: path,
-          expectedRevision: 2,
-          force: false,
-          timeoutMs: 0,
-        }),
-      ).rejects.toThrow("awaiting lifecycle acknowledgement");
-    }
-    let waits = 0;
-    await waitForLocalDrain({
-      runtimeStatusPath: path,
-      expectedRevision: 2,
-      force: false,
-      wait: async () => {
-        waits++;
-        await writeLocalRuntimeStatus(path, [], {
-          observedLifecycle: { revision: 2, intent: "draining" },
-        });
-      },
-    });
-    expect(waits).toBe(1);
-  });
   it("writes private active-attempt state and observes idle", async () => {
     const root = await temporaryRoot();
     const path = join(root, "runtime-status.json");
@@ -61,15 +25,9 @@ describe("local runtime status and drain", () => {
     await expect(loadLocalRuntimeStatus(path)).resolves.toMatchObject({
       activeAttemptIds: [attemptId],
     });
-    await writeLocalRuntimeStatus(path, [], {
-      observedLifecycle: { revision: 2, intent: "draining" },
-    });
+    await writeLocalRuntimeStatus(path, []);
     await expect(
-      waitForLocalDrain({
-        runtimeStatusPath: path,
-        expectedRevision: 2,
-        force: false,
-      }),
+      waitForLocalDrain({ runtimeStatusPath: path, force: false }),
     ).resolves.toEqual({ forced: false, activeAttempts: 0 });
   });
 
@@ -104,17 +62,12 @@ describe("local runtime status and drain", () => {
     await expect(
       waitForLocalDrain({
         runtimeStatusPath: path,
-        expectedRevision: 2,
         force: false,
         timeoutMs: 0,
       }),
     ).rejects.toThrow("timed out");
     await expect(
-      waitForLocalDrain({
-        runtimeStatusPath: path,
-        expectedRevision: 2,
-        force: true,
-      }),
+      waitForLocalDrain({ runtimeStatusPath: path, force: true }),
     ).resolves.toEqual({ forced: true, activeAttempts: 1 });
   });
 
@@ -122,18 +75,10 @@ describe("local runtime status and drain", () => {
     const root = await temporaryRoot();
     const path = join(root, "missing.json");
     await expect(
-      waitForLocalDrain({
-        runtimeStatusPath: path,
-        expectedRevision: 2,
-        force: false,
-      }),
+      waitForLocalDrain({ runtimeStatusPath: path, force: false }),
     ).rejects.toThrow("status is unavailable");
     await expect(
-      waitForLocalDrain({
-        runtimeStatusPath: path,
-        expectedRevision: 2,
-        force: true,
-      }),
+      waitForLocalDrain({ runtimeStatusPath: path, force: true }),
     ).resolves.toEqual({ forced: true, activeAttempts: -1 });
   });
 });

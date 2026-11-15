@@ -1,8 +1,6 @@
-import { useLiveQuery } from "@/realtime/hooks";
-import { RealtimeProvider, ConnectionIndicator } from "@/realtime/provider";
 import {
   Activity,
-  BellRing,
+  AudioLines,
   BriefcaseBusiness,
   ChevronRight,
   CircleGauge,
@@ -10,7 +8,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  MonitorDown,
   PackageOpen,
   Settings,
   ServerCog,
@@ -25,7 +22,6 @@ import { NavLink, Outlet } from "react-router";
 
 import type { Permission } from "@/api/contracts";
 import { useAdminSession } from "@/auth/admin-session";
-import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -37,6 +33,11 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useTheme } from "./theme";
+import { useQuery } from "@tanstack/react-query";
+import { useApiClient } from "@/auth/admin-session";
+import { useVisibleInterval } from "@/hooks/use-visible-interval";
+import { getAccountRecoverySummary } from "@/features/account-recovery/account-recovery-api";
+import { DASHBOARD_POLL_INTERVAL_MS } from "./polling";
 
 interface NavItem {
   label: string;
@@ -58,12 +59,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/jobs",
     permission: "jobs.read",
     icon: BriefcaseBusiness,
-  },
-  {
-    label: "Push notifications",
-    to: "/notifications",
-    permission: "notifications.read",
-    icon: BellRing,
   },
   { label: "Users", to: "/users", permission: "users.read", icon: Users },
   {
@@ -90,12 +85,6 @@ export const NAV_ITEMS: NavItem[] = [
     to: "/update-policy",
     permission: "releases.read",
     icon: ShieldCheck,
-  },
-  {
-    label: "Mac updates",
-    to: "/macos-updates",
-    permission: "releases.read",
-    icon: MonitorDown,
   },
   {
     label: "Settings",
@@ -183,22 +172,17 @@ function Navigation({
 }
 
 export function AppShell() {
-  return (
-    <RealtimeProvider>
-      <ConnectedShell />
-    </RealtimeProvider>
-  );
-}
-
-function ConnectedShell() {
   const { session, signOut, can } = useAdminSession();
+  const client = useApiClient();
   const { theme, toggle } = useTheme();
-  const recovery = useLiveQuery({
+  const recovery = useQuery({
     queryKey: ["account-recovery-summary"],
-    resource: "admin.recovery_summary",
-    params: {},
+    queryFn: () => getAccountRecoverySummary(client),
     enabled: can("users.account-recovery.manage"),
   });
+  useVisibleInterval(() => {
+    if (can("users.account-recovery.manage")) void recovery.refetch();
+  }, DASHBOARD_POLL_INTERVAL_MS.background);
   const pendingRecoveryCount = recovery.data?.pendingCount ?? 0;
   return (
     <div className="min-h-svh bg-background text-foreground">
@@ -210,7 +194,9 @@ function ConnectedShell() {
       </a>
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-sidebar lg:flex lg:flex-col">
         <div className="flex h-16 items-center gap-3 px-5">
-          <BrandMark className="size-9 rounded-lg shadow-sm" />
+          <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <AudioLines aria-hidden="true" className="size-5" />
+          </div>
           <div>
             <div className="font-semibold tracking-tight">MusicMute</div>
             <div className="text-xs text-muted-foreground">
@@ -249,15 +235,15 @@ function ConnectedShell() {
               <SheetContent side="left" className="w-72 p-4">
                 <SheetHeader className="mb-5">
                   <SheetTitle className="flex items-center gap-2">
-                    <BrandMark className="size-6 rounded-md" /> MusicMute
-                    Operations
+                    <AudioLines aria-hidden="true" /> MusicMute Operations
                   </SheetTitle>
                 </SheetHeader>
                 <Navigation pendingRecoveryCount={pendingRecoveryCount} />
               </SheetContent>
             </Sheet>
             <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
-              <ConnectionIndicator />
+              <span className="size-2 rounded-full bg-emerald-500" />
+              <span>Admin session active</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -273,11 +259,7 @@ function ConnectedShell() {
                 <Moon aria-hidden="true" />
               )}
             </Button>
-            <Button
-              variant="outline"
-              aria-label="Sign out"
-              onClick={() => void signOut()}
-            >
+            <Button variant="outline" onClick={() => void signOut()}>
               <LogOut aria-hidden="true" />{" "}
               <span className="hidden sm:inline">Sign out</span>
             </Button>

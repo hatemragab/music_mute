@@ -1,45 +1,12 @@
-import { open, readFile, lstat, link, unlink } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import {
-  DarwinFileLockBusyError,
-  withDarwinFileLock,
-} from "../../runtime/darwin-file-lock.js";
+import { open, readFile, stat, unlink } from "node:fs/promises";
 
 const LOCK_LIMIT_BYTES = 1024;
-
-export class MacCommandBusyError extends Error {
-  constructor(readonly operation?: string) {
-    super("Another MusicMute CLI operation is already running");
-  }
-}
 
 export async function withMacUserCommandLock<T>(
   path: string,
   operation: () => Promise<T>,
-  purpose?: string,
 ): Promise<T> {
-  if (process.platform === "darwin") {
-    try {
-      return await withDarwinFileLock(`${path}.guard`, () =>
-        withLegacyCommandLock(path, operation, purpose),
-      );
-    } catch (error) {
-      if (!(error instanceof DarwinFileLockBusyError)) throw error;
-      const owner = await inspectLock(path);
-      throw new MacCommandBusyError(
-        owner && !owner.dead ? owner.operation : undefined,
-      );
-    }
-  }
-  return await withLegacyCommandLock(path, operation, purpose);
-}
-
-async function withLegacyCommandLock<T>(
-  path: string,
-  operation: () => Promise<T>,
-  purpose?: string,
-): Promise<T> {
-  const handle = await acquire(path, true, purpose);
+  const handle = await acquire(path, true);
   const identity = await handle.stat();
   try {
     return await operation();
@@ -49,32 +16,24 @@ async function withLegacyCommandLock<T>(
   }
 }
 
-async function acquire(
-  path: string,
-  allowStaleRecovery: boolean,
-  purpose?: string,
-) {
+async function acquire(path: string, allowStaleRecovery: boolean) {
   try {
-    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-    const handle = await open(temporary, "wx", 0o600);
+    const handle = await open(path, "wx", 0o600);
     try {
       await handle.writeFile(
         `${JSON.stringify({
           schemaVersion: 1,
           pid: process.pid,
-          ...(purpose === undefined ? {} : { operation: purpose }),
           createdAt: new Date().toISOString(),
         })}\n`,
         "utf8",
       );
       await handle.sync();
-      await link(temporary, path);
       return handle;
     } catch (error) {
       await handle.close().catch(() => undefined);
+      await unlink(path).catch(() => undefined);
       throw error;
-    } finally {
-      await unlink(temporary);
     }
   } catch (error) {
     if (
@@ -82,29 +41,24 @@ async function acquire(
       (error as NodeJS.ErrnoException).code !== "EEXIST"
     )
       throw error;
-    const owner = await inspectLock(path);
-    if (owner === null)
-      throw new Error("MusicMute CLI lock ownership is unknown");
-    if (!owner.dead) throw new MacCommandBusyError(owner.operation);
+    if (!(await staleLock(path)))
+      throw new Error("Another MusicMute CLI operation is already running");
     await unlink(path);
-    return await acquire(path, false, purpose);
+    return await acquire(path, false);
   }
 }
 
-async function inspectLock(
-  path: string,
-): Promise<{ dead: boolean; operation?: string } | null> {
+async function staleLock(path: string): Promise<boolean> {
   try {
-    const info = await lstat(path);
+    const info = await stat(path);
     if (
       !info.isFile() ||
-      info.isSymbolicLink() ||
       info.size < 2 ||
       info.size > LOCK_LIMIT_BYTES ||
       (info.mode & 0o077) !== 0 ||
       info.uid !== process.getuid?.()
     )
-      return null;
+      return false;
     const value = JSON.parse(await readFile(path, "utf8")) as unknown;
     if (
       value === null ||
@@ -114,21 +68,15 @@ async function inspectLock(
       !Number.isSafeInteger((value as Record<string, unknown>).pid) ||
       ((value as Record<string, unknown>).pid as number) <= 0
     )
-      return null;
+      return false;
     try {
       process.kill((value as Record<string, unknown>).pid as number, 0);
-      const operation = (value as Record<string, unknown>).operation;
-      return {
-        dead: false,
-        ...(typeof operation === "string" ? { operation } : {}),
-      };
+      return false;
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ESRCH"
-        ? { dead: true }
-        : null;
+      return (error as NodeJS.ErrnoException).code === "ESRCH";
     }
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -138,7 +86,7 @@ async function releaseIfSame(
   inode: number | bigint,
 ): Promise<void> {
   try {
-    const current = await lstat(path);
+    const current = await stat(path);
     if (current.dev === device && current.ino === inode) await unlink(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

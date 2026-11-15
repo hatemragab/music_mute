@@ -12,12 +12,7 @@ export const updateAccountPolicy = (
   client: ApiClient,
   policy: Pick<
     AccountPolicy,
-    | "acceptNewJobs"
-    | "maintenanceMessageEn"
-    | "maintenanceMessageAr"
-    | "linkImportEnabled"
-    | "linkImportDisabledCountries"
-    | "linkImportDisabledUserIds"
+    "acceptNewJobs" | "maintenanceMessageEn" | "maintenanceMessageAr"
   > &
     AccountPolicyValues &
     RevisionCommand,

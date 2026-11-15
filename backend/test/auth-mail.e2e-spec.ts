@@ -12,24 +12,24 @@ describe('voluntary verification and generic recovery HTTP', () => {
   const token = 'Bearer fixture-owner-token';
   it('sends verification on request, short circuits verified users, and rejects target overrides', async () => {
     await request(f.app.getHttpServer())
-      .post('/auth/verification-emails')
+      .post('/api/v1/auth/verification-email')
       .set('Authorization', token)
       .send({})
       .expect(202, { status: 'accepted' });
     expect(f.mail.sendVerification).toHaveBeenCalledWith('fixture-owner-token');
     f.state.emailVerified = true;
     await request(f.app.getHttpServer())
-      .post('/auth/verification-emails')
+      .post('/api/v1/auth/verification-email')
       .set('Authorization', token)
       .send({})
       .expect(200, { status: 'already_verified' });
     expect(f.mail.sendVerification).toHaveBeenCalledTimes(1);
     await request(f.app.getHttpServer())
-      .post('/auth/verification-emails')
+      .post('/api/v1/auth/verification-email')
       .set('Authorization', token)
       .send({
         email: 'other@fixture.invalid',
-        continue_url: 'https://evil.invalid',
+        continueUrl: 'https://evil.invalid',
       })
       .expect(400);
   });
@@ -39,23 +39,23 @@ describe('voluntary verification and generic recovery HTTP', () => {
       'unknown@fixture.invalid',
     ])
       await request(f.app.getHttpServer())
-        .post('/auth/password-reset-requests')
+        .post('/api/v1/auth/password-reset')
         .send({ email })
         .expect(202, { status: 'accepted' });
     expect(f.firebase.getProfile).not.toHaveBeenCalled();
     await request(f.app.getHttpServer())
-      .post('/auth/password-reset-requests')
+      .post('/api/v1/auth/password-reset')
       .send({ email: 'bad' })
       .expect(400);
     await request(f.app.getHttpServer())
-      .post('/auth/password-reset-requests')
+      .post('/api/v1/auth/password-reset')
       .send({ email: 'a@fixture.invalid', uid: 'forged' })
       .expect(400);
   });
   it('returns a retry header when mail reservation is refused and sanitizes storage failure', async () => {
     f.state.uidDenied = true;
     const limited = await request(f.app.getHttpServer())
-      .post('/auth/password-reset-requests')
+      .post('/api/v1/auth/password-reset')
       .send({ email: 'owner@fixture.invalid' })
       .expect(429);
     expect(limited.headers['retry-after']).toBe('12');
@@ -64,16 +64,13 @@ describe('voluntary verification and generic recovery HTTP', () => {
     f.state.uidDenied = false;
     f.budgets.isPaused.mockRejectedValue(new Error('private redis URL'));
     const unavailable = await request(f.app.getHttpServer())
-      .post('/auth/password-reset-requests')
+      .post('/api/v1/auth/password-reset')
       .send({ email: 'owner@fixture.invalid' })
       .expect(503);
     expect(unavailable.body).toEqual({
-      type: 'about:blank',
-      title: 'Service Unavailable',
-      status: 503,
+      statusCode: 503,
       code: 'SERVICE_UNAVAILABLE',
-      detail: 'Service unavailable',
-      request_id: expect.any(String),
+      message: 'Service unavailable',
     });
     expect(unavailable.text).not.toContain('private');
   });

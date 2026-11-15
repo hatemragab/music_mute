@@ -13,15 +13,13 @@ const expectedNavigation: Record<AdminRole, string[]> = {
     "Account recovery",
     "Releases",
     "Update policy",
-    "Mac updates",
     "Settings",
     "Worker fleet",
     "Health & alerts",
     "Activity",
     "Administrators",
-    "Push notifications",
   ],
-  release_manager: ["Overview", "Releases", "Update policy", "Mac updates"],
+  release_manager: ["Overview", "Releases", "Update policy"],
   support: [
     "Overview",
     "Jobs",
@@ -36,7 +34,6 @@ const expectedNavigation: Record<AdminRole, string[]> = {
     "Jobs",
     "Releases",
     "Update policy",
-    "Mac updates",
     "Settings",
     "Worker fleet",
   ],
@@ -80,10 +77,10 @@ test("direct route and forged API request remain forbidden to support", async ({
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        verified_email: "forged@example.invalid",
+        verifiedEmail: "forged@example.invalid",
         role: "owner",
         reason: "Forged UI request",
-        operation_id: crypto.randomUUID(),
+        operationId: crypto.randomUUID(),
       }),
     });
     return response.status;

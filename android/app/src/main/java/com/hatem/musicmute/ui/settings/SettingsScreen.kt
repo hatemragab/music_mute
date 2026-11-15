@@ -1,7 +1,5 @@
 package com.hatem.musicmute.ui.settings
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
@@ -11,10 +9,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.LaptopMac
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -25,47 +23,17 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.disabled
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-
+import androidx.compose.ui.unit.sp
 import com.hatem.musicmute.BuildConfig
 import com.hatem.musicmute.R
 import com.hatem.musicmute.data.LanguageChoice
-import com.hatem.musicmute.processing.ProcessingUsage
 import com.hatem.musicmute.state.VocalUiState
 import com.hatem.musicmute.ui.auth.AccountPublicLinks
 import com.hatem.musicmute.ui.design.*
-import java.net.URI
-import java.util.Locale
-
-internal const val MUSICMUTE_WEB_APP_URL = "https://app.music-mute.com"
-internal const val MUSICMUTE_MACOS_DOWNLOADS_URL = "https://music-mute.com/#downloads"
-
-internal fun isTrustedMusicMutePlatformUrl(value: String): Boolean =
-    runCatching {
-        val uri = URI(value)
-        val host = uri.host?.lowercase(Locale.ROOT)
-        val rootPath = uri.rawPath.isNullOrEmpty() || uri.rawPath == "/"
-        uri.scheme.equals("https", ignoreCase = true) &&
-            uri.rawUserInfo == null && uri.port == -1 && uri.rawQuery == null && rootPath &&
-            when (host) {
-                "app.music-mute.com" -> uri.rawFragment == null
-                "music-mute.com" -> uri.rawFragment == "downloads"
-                else -> false
-            }
-    }.getOrDefault(false)
-
-internal fun availableMusicMutePlatformUrl(value: String): String? =
-    value.takeIf { isTrustedMusicMutePlatformUrl(it) }
-        ?.takeIf { URI(it).host.equals(URI(MUSICMUTE_WEB_APP_URL).host, ignoreCase = true) }
-        ?.let { MUSICMUTE_WEB_APP_URL }
 
 @Composable
 fun CreativeSettingsScreen(
@@ -76,11 +44,9 @@ fun CreativeSettingsScreen(
     onLanguage: (LanguageChoice) -> Unit,
     onRetry: () -> Unit,
     displayName: String? = null,
-    usage: ProcessingUsage? = null,
 ) {
     var showUsage by rememberSaveable { mutableStateOf(false) }
     var showLanguage by rememberSaveable { mutableStateOf(false) }
-    val context = LocalContext.current
     val firstName = displayName?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.isNotBlank() }
         ?: stringResource(R.string.creative_settings_profile)
     val preferencesEnabled = !state.preferencesLoading && !state.preferencesError
@@ -119,14 +85,18 @@ fun CreativeSettingsScreen(
             }
         }
         SettingsSection(stringResource(R.string.creative_settings_help)) {
-            SettingsItem(stringResource(R.string.creative_settings_support), onProfile)
+            SettingsItem(stringResource(R.string.creative_settings_feedback))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_support))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_sponsored))
+        }
+        SettingsSection(stringResource(R.string.creative_settings_legal)) {
+            SettingsItem(stringResource(R.string.creative_settings_terms))
+            SettingsDivider()
+            SettingsItem(stringResource(R.string.creative_settings_privacy))
             SettingsDivider()
             SettingsItem(stringResource(R.string.creative_settings_about), onAbout)
-        }
-        if (BuildConfig.PRIVACY_URL.isNotBlank()) SettingsSection(stringResource(R.string.creative_settings_legal)) {
-            SettingsItem(stringResource(R.string.creative_settings_privacy), {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.PRIVACY_URL))) }
-            })
         }
         Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -134,17 +104,11 @@ fun CreativeSettingsScreen(
     if (showUsage) {
         CreativeSheet(onDismiss = { showUsage = false }) {
             Text(stringResource(R.string.creative_settings_usage), style = MaterialTheme.typography.headlineMedium)
-            if (usage == null) {
-                Text(stringResource(R.string.listener_usage_unavailable), style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Text(stringResource(R.string.listener_usage_time,
-                    (usage.processing.remainingSeconds / 60.0).toInt(),
-                    (usage.processing.limitSeconds / 60.0).toInt()),
-                    style = MaterialTheme.typography.titleLarge)
-                Text(stringResource(R.string.listener_usage_uploads, usage.uploads.dailyRemainingGrants),
-                    style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text("∞", modifier = Modifier.fillMaxWidth(), fontSize = 64.sp, lineHeight = 72.sp,
+                color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.creative_settings_usage_unlimited), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.creative_settings_usage_temporary), style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             CreativePrimaryButton(onClick = { showUsage = false }, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.creative_library_close))
             }
@@ -178,8 +142,7 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
 
 @Composable
 private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(content = content)
     }
 }
@@ -209,7 +172,6 @@ private fun languageLabel(choice: LanguageChoice): Int = when (choice) {
 
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
-    val context = LocalContext.current
     CreativePage {
         TextButton(onClick = onBack) { Text(stringResource(R.string.back)) }
         CreativeHeader(stringResource(R.string.about_vocal), stringResource(R.string.creative_settings_about_summary))
@@ -223,75 +185,8 @@ fun AboutScreen(onBack: () -> Unit) {
                 Text(stringResource(description), style = MaterialTheme.typography.bodyLarge)
             }
         }
-        Text(
-            stringResource(R.string.creative_settings_other_platforms),
-            modifier = Modifier.semantics { heading() },
-            style = MaterialTheme.typography.titleLarge,
-        )
-        PlatformLinkCard(
-            title = stringResource(R.string.creative_settings_web),
-            description = stringResource(R.string.creative_settings_web_description),
-            icon = Icons.Outlined.Language,
-            modifier = Modifier.testTag("about-platform-web"),
-        ) { context.openMusicMutePlatformUrl(MUSICMUTE_WEB_APP_URL) }
-        PlatformLinkCard(
-            title = stringResource(R.string.creative_settings_macos),
-            description = stringResource(R.string.creative_settings_macos_description),
-            icon = Icons.Outlined.LaptopMac,
-            availabilityLabel = stringResource(R.string.creative_settings_coming_soon),
-            modifier = Modifier.testTag("about-platform-macos"),
-        )
         Text(stringResource(R.string.creative_settings_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         AccountPublicLinks()
     }
-}
-
-@Composable
-private fun PlatformLinkCard(
-    title: String,
-    description: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    availabilityLabel: String? = null,
-    onClick: (() -> Unit)? = null,
-) {
-    val cardModifier = if (onClick == null) modifier.semantics(mergeDescendants = true) {
-        disabled()
-        availabilityLabel?.let { stateDescription = it }
-    } else modifier
-    CreativeCard(modifier = cardModifier, onClick = onClick) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(CreativeTokens.ContentGap),
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(CreativeTokens.CompactGap),
-            ) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (onClick != null) Icon(
-                Icons.AutoMirrored.Outlined.OpenInNew,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) else if (availabilityLabel != null) Text(
-                availabilityLabel,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-private fun android.content.Context.openMusicMutePlatformUrl(url: String) {
-    val destination = availableMusicMutePlatformUrl(url) ?: return
-    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(destination))) }
 }

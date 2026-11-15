@@ -1,8 +1,4 @@
 import {
-  LocalMediaSync,
-  LocalMediaSyncSchema,
-} from '../local-media-syncs/local-media-sync.schema.js';
-import {
   ProcessingAdmissionFence,
   ProcessingAdmissionFenceSchema,
 } from '../admin-settings/processing-settings.schema.js';
@@ -24,18 +20,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Job, JobSchema } from '../jobs/job.schema.js';
 import {
-  SharedMediaSource,
-  SharedMediaSourceSchema,
-  SharedMediaResult,
-  SharedMediaResultSchema,
-  SharedMediaArtifact,
-  SharedMediaArtifactSchema,
-} from '../shared-media/shared-media.schema.js';
-import {
-  PurgedJobRequest,
-  PurgedJobRequestSchema,
-} from '../jobs/purged-job-request.schema.js';
-import {
   ClientError,
   ClientErrorSchema,
 } from '../client-errors/client-error.schema.js';
@@ -54,10 +38,6 @@ import {
 } from '../notifications/notification-delivery.schema.js';
 
 export const PROCESSING_MODELS = [
-  { name: LocalMediaSync.name, schema: LocalMediaSyncSchema },
-  { name: SharedMediaSource.name, schema: SharedMediaSourceSchema },
-  { name: SharedMediaResult.name, schema: SharedMediaResultSchema },
-  { name: SharedMediaArtifact.name, schema: SharedMediaArtifactSchema },
   {
     name: ProcessingAdmissionFence.name,
     schema: ProcessingAdmissionFenceSchema,
@@ -73,7 +53,6 @@ export const PROCESSING_MODELS = [
   { name: ServiceUsagePeriod.name, schema: ServiceUsagePeriodSchema },
   { name: ClientError.name, schema: ClientErrorSchema },
   { name: Job.name, schema: JobSchema },
-  { name: PurgedJobRequest.name, schema: PurgedJobRequestSchema },
   { name: JobError.name, schema: JobErrorSchema },
   { name: NotificationOutbox.name, schema: NotificationOutboxSchema },
   { name: PushInstallation.name, schema: PushInstallationSchema },

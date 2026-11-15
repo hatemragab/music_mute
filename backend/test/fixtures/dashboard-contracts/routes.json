@@ -3,214 +3,6 @@
   "roles": ["owner", "release_manager", "support", "viewer"],
   "routes": [
     {
-      "controller": "AdminUsersController",
-      "method": "GET",
-      "path": "/admin/users/:id/devices",
-      "permissions": ["users.read"],
-      "roles": ["owner", "support"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "page",
-      "validationOwner": "dto",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminUsersController",
-      "method": "PUT",
-      "path": "/admin/users/:id/worker-registration",
-      "permissions": ["users.worker-registration.manage"],
-      "roles": ["owner", "support"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "worker_registration_allowed": true,
-        "expected_revision": 0,
-        "operation_id": "7f107510-108d-4c25-a091-ecf28e43bd7b",
-        "reason": "Approve worker registration for fixture account"
-      },
-      "responseCategory": "operation_receipt",
-      "validationOwner": "dto",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "GET",
-      "path": "/admin/macos-updates/configuration",
-      "permissions": ["releases.read"],
-      "roles": ["owner", "release_manager", "viewer"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "resource",
-      "validationOwner": "none",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "PUT",
-      "path": "/admin/macos-updates/configuration",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic macOS release fixture",
-        "expected_revision": 0,
-        "public_ed_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-      },
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "GET",
-      "path": "/admin/macos-updates",
-      "permissions": ["releases.read"],
-      "roles": ["owner", "release_manager", "viewer"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "page",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "GET",
-      "path": "/admin/macos-updates/:id",
-      "permissions": ["releases.read"],
-      "roles": ["owner", "release_manager", "viewer"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "POST",
-      "path": "/admin/macos-updates",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic macOS release fixture",
-        "appcast_base64": "synthetic",
-        "archive_name": "MusicMute-1.2.3-42-arm64-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.dmg",
-        "bytes": 42,
-        "sha256_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      },
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 201
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "POST",
-      "path": "/admin/macos-updates/:id/uploads",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic macOS release fixture",
-        "expected_revision": 0
-      },
-      "responseCategory": "upload_grant",
-      "validationOwner": "service",
-      "successStatus": 201
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "POST",
-      "path": "/admin/macos-updates/:id/completions",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
-      },
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 201
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "POST",
-      "path": "/admin/macos-updates/:id/publications",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic macOS release fixture",
-        "expected_revision": 0,
-        "expected_configuration_revision": 1
-      },
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 201
-    },
-    {
-      "controller": "AdminMacosUpdatesController",
-      "method": "POST",
-      "path": "/admin/macos-updates/:id/withdrawals",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Synthetic macOS release fixture",
-        "expected_revision": 1,
-        "expected_configuration_revision": 2
-      },
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 201
-    },
-    {
-      "controller": "AdminWorkerControlController",
-      "method": "POST",
-      "path": "/admin/worker-fleet/machines/:id/capacity-approvals",
-      "permissions": ["workers.manage"],
-      "roles": ["owner"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
-        "gpu_id": "gpu0",
-        "qualification_confirmed": true,
-        "reason": "Reviewed native qualification evidence"
-      },
-      "responseCategory": "resource",
-      "validationOwner": "dto",
-      "successStatus": 201
-    },
-    {
-      "controller": "AdminRealtimeTicketController",
-      "method": "POST",
-      "path": "/admin/realtime-tickets",
-      "permissions": [],
-      "roles": ["owner", "release_manager", "support", "viewer"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": {},
-      "responseCategory": "realtime_ticket",
-      "validationOwner": "service",
-      "successStatus": 201
-    },
-    {
       "controller": "AdminSessionController",
       "method": "GET",
       "path": "/admin/session",
@@ -245,9 +37,9 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "verified_email": "fixture@example.com",
+        "verifiedEmail": "fixture@example.com",
         "role": "viewer"
       },
       "responseCategory": "resource",
@@ -263,9 +55,9 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0,
+        "expectedRevision": 0,
         "role": "viewer",
         "active": true
       },
@@ -360,10 +152,10 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason_code": "manual_review",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "reasonCode": "manual_review",
         "note": "Synthetic contract fixture",
-        "expected_revision": 0
+        "expectedRevision": 0
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -378,9 +170,9 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 1
+        "expectedRevision": 1
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -428,15 +220,15 @@
     {
       "controller": "AdminAccountRecoveryController",
       "method": "POST",
-      "path": "/admin/account-recovery-requests/:id/approvals",
+      "path": "/admin/account-recovery-requests/:id/approve",
       "permissions": ["users.account-recovery.manage"],
       "roles": ["owner", "support"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0
+        "expectedRevision": 0
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -445,15 +237,15 @@
     {
       "controller": "AdminAccountRecoveryController",
       "method": "POST",
-      "path": "/admin/account-recovery-requests/:id/rejections",
+      "path": "/admin/account-recovery-requests/:id/reject",
       "permissions": ["users.account-recovery.manage"],
       "roles": ["owner", "support"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0
+        "expectedRevision": 0
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -488,15 +280,15 @@
     {
       "controller": "AdminJobsController",
       "method": "POST",
-      "path": "/admin/jobs/:id/cancellations",
+      "path": "/admin/jobs/:id/cancel",
       "permissions": ["jobs.manage"],
       "roles": ["owner", "support"],
       "freshAuth": false,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0
+        "expectedRevision": 0
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -505,15 +297,15 @@
     {
       "controller": "AdminJobsController",
       "method": "POST",
-      "path": "/admin/jobs/:id/retry-attempts",
+      "path": "/admin/jobs/:id/retry",
       "permissions": ["jobs.manage"],
       "roles": ["owner", "support"],
       "freshAuth": false,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0
+        "expectedRevision": 0
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -528,7 +320,7 @@
       "freshAuth": true,
       "rateClass": "media",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
         "asset": "result",
         "purpose": "download"
@@ -559,28 +351,28 @@
       "freshAuth": true,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0,
-        "accept_new_jobs": true,
-        "maintenance_message_en": "",
-        "maintenance_message_ar": null,
-        "monthly_processing_seconds": 7200,
-        "max_duration_seconds": 1200,
-        "max_prepared_audio_bytes": 50000000,
-        "daily_upload_grants": 30,
-        "monthly_upload_grants": 200,
-        "monthly_confirmed_upload_bytes": 1000000000,
-        "max_waiting_jobs": 3,
-        "max_processing_jobs": 1,
-        "max_infrastructure_attempts": 3,
-        "max_client_input_attempts": 5,
-        "monthly_download_grants": 150,
-        "monthly_estimated_download_bytes": 10000000000,
-        "max_retained_output_bytes": 1000000000,
-        "signed_url_ttl_seconds": 600,
-        "monthly_service_outbound_bytes": 80000000000,
-        "deletion_grace_hours": 360
+        "expectedRevision": 0,
+        "acceptNewJobs": true,
+        "maintenanceMessageEn": "",
+        "maintenanceMessageAr": null,
+        "monthlyProcessingSeconds": 7200,
+        "maxDurationSeconds": 1200,
+        "maxPreparedAudioBytes": 50000000,
+        "dailyUploadGrants": 30,
+        "monthlyUploadGrants": 200,
+        "monthlyConfirmedUploadBytes": 1000000000,
+        "maxWaitingJobs": 3,
+        "maxProcessingJobs": 1,
+        "maxInfrastructureAttempts": 3,
+        "maxClientInputAttempts": 5,
+        "monthlyDownloadGrants": 150,
+        "monthlyEstimatedDownloadBytes": 10000000000,
+        "maxRetainedOutputBytes": 1000000000,
+        "signedUrlTtlSeconds": 600,
+        "monthlyServiceOutboundBytes": 80000000000,
+        "deletionGraceHours": 360
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -634,14 +426,14 @@
       "freshAuth": false,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
         "platform": "android",
         "source": "google_play",
-        "version_name": "1.0.0",
-        "build_number": 1,
-        "changelog_en": "Synthetic release",
-        "store_url": "https://play.google.com/store/apps/details?id=com.example.synthetic"
+        "versionName": "1.0.0",
+        "buildNumber": 1,
+        "changelogEn": "Synthetic release",
+        "storeUrl": "https://play.google.com/store/apps/details?id=com.example.synthetic"
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -656,10 +448,10 @@
       "freshAuth": false,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0,
-        "version_name": "1.0.1"
+        "expectedRevision": 0,
+        "versionName": "1.0.1"
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -668,29 +460,29 @@
     {
       "controller": "AdminReleasesController",
       "method": "POST",
-      "path": "/admin/releases/:id/publications",
+      "path": "/admin/releases/:id/publish",
       "permissions": ["releases.manage"],
       "roles": ["owner", "release_manager"],
       "freshAuth": true,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0,
-        "expected_release_revision": 0,
+        "expectedRevision": 0,
+        "expectedReleaseRevision": 0,
         "policy": {
           "android": {
-            "minimum_build": null,
-            "direct_release_id": null,
-            "store_release_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+            "minimumBuild": null,
+            "directReleaseId": null,
+            "storeReleaseId": "aaaaaaaaaaaaaaaaaaaaaaaa",
             "source": "google_play"
           },
           "ios": {
-            "minimum_build": null,
-            "store_release_id": null
+            "minimumBuild": null,
+            "storeReleaseId": null
           }
         },
-        "store_availability_confirmed": true
+        "storeAvailabilityConfirmed": true
       },
       "responseCategory": "resource",
       "validationOwner": "service",
@@ -699,26 +491,26 @@
     {
       "controller": "AdminReleasesController",
       "method": "POST",
-      "path": "/admin/releases/:id/withdrawals",
+      "path": "/admin/releases/:id/withdraw",
       "permissions": ["releases.manage"],
       "roles": ["owner", "release_manager"],
       "freshAuth": true,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0,
-        "expected_release_revision": 0,
-        "replacement_policy": {
+        "expectedRevision": 0,
+        "expectedReleaseRevision": 0,
+        "replacementPolicy": {
           "android": {
-            "minimum_build": null,
-            "direct_release_id": null,
-            "store_release_id": null,
+            "minimumBuild": null,
+            "directReleaseId": null,
+            "storeReleaseId": null,
             "source": "google_play"
           },
           "ios": {
-            "minimum_build": null,
-            "store_release_id": null
+            "minimumBuild": null,
+            "storeReleaseId": null
           }
         }
       },
@@ -736,28 +528,28 @@
       "rateClass": "sensitive",
       "requestBody": {
         "bytes": 100,
-        "sha256_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "expected_revision": 0,
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
+        "sha256Hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expectedRevision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
       },
-      "responseCategory": "retired",
-      "validationOwner": "none",
-      "successStatus": 400
+      "responseCategory": "upload-reservation",
+      "validationOwner": "service",
+      "successStatus": 201
     },
     {
       "controller": "AdminReleaseUploadsController",
       "method": "POST",
-      "path": "/admin/releases/:id/uploads/:uploadId/completions",
+      "path": "/admin/releases/:id/uploads/:uploadId/complete",
       "permissions": ["releases.manage"],
       "roles": ["owner", "release_manager"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29"
       },
-      "responseCategory": "retired",
-      "validationOwner": "none",
-      "successStatus": 400
+      "responseCategory": "upload",
+      "validationOwner": "service",
+      "successStatus": 201
     },
     {
       "controller": "AdminReleaseUploadsController",
@@ -787,57 +579,22 @@
     },
     {
       "controller": "AdminUpdatePolicyController",
-      "method": "GET",
-      "path": "/admin/update-policy/desktop",
-      "permissions": ["releases.read"],
-      "roles": ["owner", "release_manager", "viewer"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "desktop-policy",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminUpdatePolicyController",
-      "method": "PATCH",
-      "path": "/admin/update-policy/desktop",
-      "permissions": ["releases.manage"],
-      "roles": ["owner", "release_manager"],
-      "freshAuth": true,
-      "rateClass": "write",
-      "requestBody": {
-        "expected_revision": 2,
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "reason": "Reviewed desktop build",
-        "platforms": {
-          "windows": {
-            "minimum_build": 3
-          }
-        }
-      },
-      "responseCategory": "desktop-policy",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminUpdatePolicyController",
       "method": "POST",
-      "path": "/admin/update-policy/previews",
+      "path": "/admin/update-policy/preview",
       "permissions": ["releases.read"],
       "roles": ["owner", "release_manager", "viewer"],
       "freshAuth": false,
       "rateClass": "write",
       "requestBody": {
         "android": {
-          "minimum_build": null,
-          "direct_release_id": null,
-          "store_release_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+          "minimumBuild": null,
+          "directReleaseId": null,
+          "storeReleaseId": "aaaaaaaaaaaaaaaaaaaaaaaa",
           "source": "google_play"
         },
         "ios": {
-          "minimum_build": null,
-          "store_release_id": null
+          "minimumBuild": null,
+          "storeReleaseId": null
         }
       },
       "responseCategory": "policy-preview",
@@ -886,15 +643,15 @@
     {
       "controller": "AdminAlertsController",
       "method": "POST",
-      "path": "/admin/alerts/:id/acknowledgements",
+      "path": "/admin/alerts/:id/acknowledge",
       "permissions": ["alerts.manage"],
       "roles": ["owner"],
       "freshAuth": false,
       "rateClass": "write",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0
+        "expectedRevision": 0
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -948,9 +705,9 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 1
+        "expectedRevision": 1
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -965,17 +722,17 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
         "reason": "Synthetic contract fixture",
-        "expected_revision": 0,
+        "expectedRevision": 0,
         "values": {
-          "monthly_processing_seconds": 14400,
-          "monthly_upload_grants": 300,
-          "monthly_estimated_download_bytes": 12000000000,
-          "max_retained_output_bytes": 2000000000,
-          "signed_url_ttl_seconds": 300
+          "monthlyProcessingSeconds": 14400,
+          "monthlyUploadGrants": 300,
+          "monthlyEstimatedDownloadBytes": 12000000000,
+          "maxRetainedOutputBytes": 2000000000,
+          "signedUrlTtlSeconds": 300
         },
-        "expires_at": null
+        "expiresAt": null
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
@@ -990,8 +747,8 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expires_in_seconds": 900,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expiresInSeconds": 900,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
@@ -1001,14 +758,14 @@
     {
       "controller": "AdminWorkerEnrollmentController",
       "method": "POST",
-      "path": "/admin/workers/invitations/:id/revocations",
+      "path": "/admin/workers/invitations/:id/revoke",
       "permissions": ["workers.enroll"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
@@ -1018,14 +775,14 @@
     {
       "controller": "AdminWorkerEnrollmentController",
       "method": "POST",
-      "path": "/admin/workers/machines/:id/pauses",
+      "path": "/admin/workers/machines/:id/pause",
       "permissions": ["workers.manage"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
@@ -1035,14 +792,14 @@
     {
       "controller": "AdminWorkerEnrollmentController",
       "method": "POST",
-      "path": "/admin/workers/machines/:id/drains",
+      "path": "/admin/workers/machines/:id/drain",
       "permissions": ["workers.manage"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
@@ -1052,14 +809,14 @@
     {
       "controller": "AdminWorkerEnrollmentController",
       "method": "POST",
-      "path": "/admin/workers/machines/:id/resumptions",
+      "path": "/admin/workers/machines/:id/resume",
       "permissions": ["workers.manage"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
@@ -1069,14 +826,14 @@
     {
       "controller": "AdminWorkerEnrollmentController",
       "method": "POST",
-      "path": "/admin/workers/machines/:id/revocations",
+      "path": "/admin/workers/machines/:id/revoke",
       "permissions": ["workers.manage"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
@@ -1094,29 +851,6 @@
       "requestBody": null,
       "responseCategory": "page",
       "validationOwner": "controller-query",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminWorkerEnrollmentController",
-      "method": "POST",
-      "path": "/admin/workers/machines/:id/deletions",
-      "permissions": [
-        "workers.manage",
-        "users.read",
-        "users.worker-registration.manage"
-      ],
-      "roles": ["owner"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
-        "reason": "Delete synthetic machine registration",
-        "registration_user_id": "64b000000000000000000001",
-        "expected_user_revision": 0
-      },
-      "responseCategory": "operation_receipt",
-      "validationOwner": "dto",
       "successStatus": 200
     },
     {
@@ -1148,14 +882,14 @@
     {
       "controller": "AdminWorkerControlController",
       "method": "POST",
-      "path": "/admin/worker-fleet/machines/:id/diagnostic-runs",
+      "path": "/admin/worker-fleet/machines/:id/doctor",
       "permissions": ["workers.manage"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
         "checks": ["service", "provider"],
         "reason": "Synthetic contract fixture"
       },
@@ -1166,15 +900,15 @@
     {
       "controller": "AdminWorkerControlController",
       "method": "POST",
-      "path": "/admin/worker-fleet/machines/:id/benchmark-runs",
+      "path": "/admin/worker-fleet/machines/:id/benchmark",
       "permissions": ["workers.manage"],
       "roles": ["owner"],
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
-        "recipe_id": "kim-vocals-v2",
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "recipeId": "kim-vocals-v2",
         "iterations": 1,
         "reason": "Synthetic contract fixture"
       },
@@ -1217,86 +951,23 @@
       "freshAuth": true,
       "rateClass": "sensitive",
       "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "expected_revision": 0,
-        "accept_claims": true,
+        "operationId": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
+        "expectedRevision": 0,
+        "acceptClaims": true,
         "recipes": [
           {
-            "recipe_id": "kim-vocals-v2",
+            "recipeId": "kim-vocals-v2",
             "enabled": true,
-            "max_slots_per_machine": 1
+            "maxSlotsPerMachine": 1
           }
         ],
-        "lease_seconds": 60,
-        "processing_deadline_seconds": 900,
+        "leaseSeconds": 60,
+        "processingDeadlineSeconds": 900,
         "reason": "Synthetic contract fixture"
       },
       "responseCategory": "resource",
       "validationOwner": "dto",
       "successStatus": 200
-    },
-    {
-      "controller": "AdminUsersController",
-      "method": "POST",
-      "path": "/admin/users/:id/account-usage-resets",
-      "permissions": ["users.processing.manage"],
-      "roles": ["owner", "support"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "expected_revision": 0,
-        "period_key": "2026-09",
-        "day_key": "2026-09-29",
-        "operation_id": "7f107510-108d-4c25-a091-ecf28e43bd7b",
-        "reason": "Fixture reset"
-      },
-      "responseCategory": "resource",
-      "validationOwner": "dto",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminNotificationsController",
-      "method": "GET",
-      "path": "/admin/notifications",
-      "permissions": ["notifications.read"],
-      "roles": ["owner"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "page",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminNotificationsController",
-      "method": "GET",
-      "path": "/admin/notifications/:id",
-      "permissions": ["notifications.read"],
-      "roles": ["owner"],
-      "freshAuth": false,
-      "rateClass": "read",
-      "requestBody": null,
-      "responseCategory": "resource",
-      "validationOwner": "service",
-      "successStatus": 200
-    },
-    {
-      "controller": "AdminNotificationsController",
-      "method": "POST",
-      "path": "/admin/notifications",
-      "permissions": ["notifications.send"],
-      "roles": ["owner"],
-      "freshAuth": true,
-      "rateClass": "sensitive",
-      "requestBody": {
-        "operation_id": "2bd185fb-d2d7-4c1e-82a8-63cfb6a7ed29",
-        "title": "Fixture announcement",
-        "body": "Fixture message",
-        "reason": "Synthetic contract fixture"
-      },
-      "responseCategory": "resource",
-      "validationOwner": "dto",
-      "successStatus": 201
     }
   ]
 }

@@ -1,4 +1,3 @@
-import { ResetAccountUsageDto } from './reset-account-usage.dto.js';
 import {
   Body,
   Controller,
@@ -6,8 +5,6 @@ import {
   Get,
   Header,
   Param,
-  Post,
-  HttpCode,
   Put,
   Query,
   Req,
@@ -19,9 +16,6 @@ import {
   RequireFreshAdminAuth,
 } from '../admin/admin.decorators.js';
 import { AdminUsersService } from './admin-users.service.js';
-import { AdminUserDevicesService } from './admin-user-devices.service.js';
-import { ListDevicesDto } from '../devices/dto/list-devices.dto.js';
-import { PutWorkerRegistrationDto } from './worker-registration.dto.js';
 import {
   DeleteAccountPolicyOverrideDto,
   PutAccountPolicyOverrideDto,
@@ -30,10 +24,7 @@ import {
 @Controller('admin/users')
 @RequireAdminPermission('users.read')
 export class AdminUsersController {
-  constructor(
-    private readonly users: AdminUsersService,
-    private readonly devices: AdminUserDevicesService,
-  ) {}
+  constructor(private readonly users: AdminUsersService) {}
 
   @Get()
   list(@Query() query: Record<string, unknown>) {
@@ -45,43 +36,10 @@ export class AdminUsersController {
     return this.users.detail(id);
   }
 
-  @Get(':id/devices')
-  @Header('Cache-Control', 'no-store')
-  deviceList(@Param('id') id: string, @Query() query: ListDevicesDto) {
-    return this.devices.list(id, query);
-  }
-
-  @Put(':id/worker-registration')
-  @Header('Cache-Control', 'no-store')
-  @RequireAdminPermission('users.worker-registration.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  workerRegistration(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: PutWorkerRegistrationDto,
-  ) {
-    return this.users.putWorkerRegistration(request.adminActor!, id, body);
-  }
-
   @Get(':id/account-usage')
   @Header('Cache-Control', 'no-store')
   usage(@Param('id') id: string) {
     return this.users.accountUsage(id);
-  }
-
-  @Post(':id/account-usage-resets')
-  @HttpCode(200)
-  @Header('Cache-Control', 'no-store')
-  @RequireAdminPermission('users.processing.manage')
-  @RequireFreshAdminAuth()
-  @LimitAdmin('sensitive')
-  resetUsage(
-    @Req() request: AuthRequest,
-    @Param('id') id: string,
-    @Body() body: ResetAccountUsageDto,
-  ) {
-    return this.users.resetUsage(request.adminActor!, id, body);
   }
 
   @Put(':id/account-policy-override')

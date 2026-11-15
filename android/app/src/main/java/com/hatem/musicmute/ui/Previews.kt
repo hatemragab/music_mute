@@ -14,7 +14,6 @@ import com.hatem.musicmute.state.VocalUiState
 import com.hatem.musicmute.ui.home.HomeScreen
 import com.hatem.musicmute.ui.library.LibraryActions
 import com.hatem.musicmute.ui.library.LibraryScreen
-import com.hatem.musicmute.ui.library.LibraryTrackActionsSheet
 import com.hatem.musicmute.ui.player.PlayerActions
 import com.hatem.musicmute.ui.player.PlayerScreen
 import com.hatem.musicmute.ui.player.MiniPlayer
@@ -25,7 +24,7 @@ import com.hatem.musicmute.ui.settings.CreativeSettingsScreen
 @Preview(name = "Creative Home narrow large text", widthDp = 320, heightDp = 900, fontScale = 1.6f)
 @Composable
 private fun HomePreview() = VocalTheme {
-    Surface { HomeScreen(emptyList(), JobHistoryState(), false, {}, {}, {}, {}, {}) }
+    Surface { HomeScreen(emptyList(), JobHistoryState(), false, {}, {}, {}, {}, {}, {}, {}, { _, _ -> }) }
 }
 
 private val savedTrack = LibraryEntry(
@@ -36,9 +35,9 @@ private val savedTrack = LibraryEntry(
 private val queueTrack = QueueTrack(savedTrack.key, savedTrack.title)
 private val previewPlayback = PlaybackState(
     trackId = "processing:68c000000000000000000001", queue = listOf(queueTrack), orderedQueue = listOf(queueTrack),
-    currentIndex = 0, positionMs = 42_000, durationMs = 182_000, playing = true,
+    currentIndex = 0, positionMs = 42_000, durationMs = 182_000,
 )
-private val libraryActions = LibraryActions({}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, { _, _, _ -> })
+private val libraryActions = LibraryActions({}, {}, {}, {}, {}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {})
 private val playerActions = PlayerActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 
 @Preview(name = "Creative Library offline", widthDp = 390, heightDp = 850)
@@ -48,19 +47,6 @@ private fun LibraryPreview() = VocalTheme {
     Surface { LibraryScreen(LibraryUiState(entries = listOf(savedTrack)), libraryActions) {
         MiniPlayer(previewPlayback, {}, {}, {}, {}, {})
     } }
-}
-
-@Preview(name = "Grouped Library actions", widthDp = 390, heightDp = 850)
-@Preview(name = "Grouped Library actions Arabic", locale = "ar", widthDp = 320, heightDp = 1000, fontScale = 1.6f)
-@Composable
-private fun LibraryActionsPreview() = VocalTheme {
-    LibraryTrackActionsSheet(savedTrack, {}, {}, {}, {}, {}, {}, {})
-}
-
-@Preview(name = "Grouped Library actions restore and download", widthDp = 320, heightDp = 850)
-@Composable
-private fun RemovedLibraryActionsPreview() = VocalTheme {
-    LibraryTrackActionsSheet(savedTrack.copy(hidden = true, offlineStatus = OfflineStatus.REMOTE_ONLY), {}, {}, {}, {}, {}, {}, {})
 }
 
 @Preview(name = "Creative Player", widthDp = 390, heightDp = 1000)

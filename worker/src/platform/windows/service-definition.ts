@@ -1,8 +1,4 @@
 import { win32 } from "node:path";
-import {
-  WORKER_RECIPE_IDS,
-  type WorkerRecipeId,
-} from "../../../protocol/v1/protocol.js";
 
 export const WINDOWS_SERVICE_ID = "MusicMuteWorker";
 export const WINDOWS_SERVICE_ACCOUNT = "NT AUTHORITY\\LocalService";
@@ -22,12 +18,6 @@ export interface WindowsServiceLayout {
   serviceRoot: string;
   serviceExecutablePath: string;
   serviceConfigPath: string;
-  lifecyclePath: string;
-  runtimeStatusPath: string;
-  commandLockPath: string;
-  activeReleasePath: string;
-  stdoutPath: string;
-  stderrPath: string;
 }
 
 export interface WindowsReleaseLayout {
@@ -46,12 +36,6 @@ export interface WindowsServiceQualification {
   fixturePath: string;
   fixtureSha256: string;
   reportPath: string;
-  benchmark?: {
-    recipeId: WorkerRecipeId;
-    warmupRuns: number;
-    measuredRuns: number;
-  };
-  capacity?: { warmupRuns: number; measuredRuns: number };
 }
 
 export function createWindowsServiceLayout(
@@ -69,12 +53,6 @@ export function createWindowsServiceLayout(
     runtimeCacheRoot: win32.join(stateRoot, "cache"),
     temporaryRoot: win32.join(stateRoot, "tmp"),
     configPath: win32.join(stateRoot, "runtime.json"),
-    lifecyclePath: win32.join(stateRoot, "lifecycle.json"),
-    runtimeStatusPath: win32.join(stateRoot, "runtime-status.json"),
-    commandLockPath: win32.join(stateRoot, "operator.lock"),
-    activeReleasePath: win32.join(stateRoot, "active-release.json"),
-    stdoutPath: win32.join(stateRoot, "logs", "MusicMuteWorkerService.out.log"),
-    stderrPath: win32.join(stateRoot, "logs", "MusicMuteWorkerService.err.log"),
     credentialPath: win32.join(stateRoot, "machine.credential"),
     logRoot: win32.join(stateRoot, "logs"),
     serviceRoot,
@@ -135,23 +113,6 @@ export function renderWinSWConfig(
       "Qualification report path",
     );
   }
-  const benchmark = qualification?.benchmark;
-  const capacity = qualification?.capacity;
-  const measurement = benchmark ?? capacity;
-  if (benchmark !== undefined && capacity !== undefined)
-    throw new TypeError("Choose one Windows benchmark mode");
-  if (
-    measurement !== undefined &&
-    ((benchmark !== undefined &&
-      !WORKER_RECIPE_IDS.includes(benchmark.recipeId)) ||
-      !Number.isSafeInteger(measurement.warmupRuns) ||
-      measurement.warmupRuns < (capacity === undefined ? 0 : 1) ||
-      measurement.warmupRuns > 2 ||
-      !Number.isSafeInteger(measurement.measuredRuns) ||
-      measurement.measuredRuns < 3 ||
-      measurement.measuredRuns > 10)
-  )
-    throw new TypeError("Windows benchmark settings are invalid");
   const executable =
     qualification === undefined ? release.nodePath : release.pythonPath;
   const arguments_ =
@@ -164,13 +125,7 @@ export function renderWinSWConfig(
         ].join(" ")
       : [
           "-m",
-          "musicmute_engine.windows_service_task",
-          capacity !== undefined
-            ? "musicmute_engine.capacity_benchmark"
-            : benchmark === undefined
-              ? "musicmute_engine.qualification"
-              : "musicmute_engine.benchmark_file",
-          "--",
+          "musicmute_engine.qualification",
           "--provider",
           "directml",
           "--fixture",
@@ -178,14 +133,7 @@ export function renderWinSWConfig(
           "--fixture-sha256",
           qualification.fixtureSha256,
           "--work-root",
-          quoteWindowsArgument(
-            measurement === undefined
-              ? layout.workRoot
-              : win32.join(
-                  layout.temporaryRoot,
-                  win32.basename(qualification.reportPath, ".json"),
-                ),
-          ),
+          quoteWindowsArgument(layout.workRoot),
           "--release-root",
           quoteWindowsArgument(release.releaseRoot),
           "--model-cache",
@@ -194,19 +142,8 @@ export function renderWinSWConfig(
           quoteWindowsArgument(release.ffmpegPath),
           "--ffprobe",
           quoteWindowsArgument(release.ffprobePath),
-          ...(measurement === undefined
-            ? ["--directml-device-id", "0"]
-            : [
-                ...(benchmark === undefined
-                  ? []
-                  : ["--recipe-id", benchmark.recipeId]),
-                "--warmup-runs",
-                String(measurement.warmupRuns),
-                "--measured-runs",
-                String(measurement.measuredRuns),
-                "--group-size",
-                "1",
-              ]),
+          "--directml-device-id",
+          "0",
           "--report",
           quoteWindowsArgument(qualification.reportPath),
         ].join(" ");
@@ -245,7 +182,6 @@ export function renderWinSWConfig(
   <env name="TEMP" value="${xml(layout.temporaryRoot)}"/>
   <env name="TMP" value="${xml(layout.temporaryRoot)}"/>
   <env name="XDG_CACHE_HOME" value="${xml(layout.runtimeCacheRoot)}"/>
-  <env name="PYTHONDONTWRITEBYTECODE" value="1"/>
   <serviceaccount>
     <domain>NT AUTHORITY</domain>
     <user>LocalService</user>
@@ -278,8 +214,8 @@ function assertReleaseInsideLayout(
 
 function safeWindowsRoot(value: string): string {
   assertSafeWindowsValue(value);
-  if (!win32.isAbsolute(value) || !/^[A-Za-z]:\\/u.test(value))
-    throw new TypeError("Windows install root must be a local absolute path");
+  if (!win32.isAbsolute(value))
+    throw new TypeError("Windows install root must be absolute");
   const normalized = win32.resolve(value);
   if (normalized === win32.parse(normalized).root)
     throw new TypeError("Windows install root is unsafe");

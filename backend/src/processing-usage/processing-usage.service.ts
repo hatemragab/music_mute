@@ -1,14 +1,9 @@
-import { isStorageEtag } from '../storage/object-identity.js';
-import { adminError } from '../admin/admin-errors.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
 import { trusted, type ClientSession, type Model, type Types } from 'mongoose';
-import {
-  AccountPolicyService,
-  type EffectiveAccountPolicy,
-} from '../admin-settings/account-policy.service.js';
+import { AccountPolicyService } from '../admin-settings/account-policy.service.js';
 import { Job } from '../jobs/job.schema.js';
 import type { ObjectIdentity } from '../jobs/job.types.js';
 import { jobError } from '../jobs/job-errors.js';
@@ -88,38 +83,31 @@ export class ProcessingUsageService {
     let dailyQuery = this.dailyPeriods.findById(usageDayId(accountId, day.key));
     if (session) usageQuery = usageQuery.session(session);
     if (session) dailyQuery = dailyQuery.session(session);
-    // MongoDB does not support concurrent operations in the same transaction.
-    const [stored, dailyStored] = session
-      ? [
-          await usageQuery.maxTimeMS(5000).lean(),
-          await dailyQuery.maxTimeMS(5000).lean(),
-        ]
-      : await Promise.all([
-          usageQuery.maxTimeMS(5000).lean(),
-          dailyQuery.maxTimeMS(5000).lean(),
-        ]);
+    const [stored, dailyStored] = await Promise.all([
+      usageQuery.maxTimeMS(5000).lean(),
+      dailyQuery.maxTimeMS(5000).lean(),
+    ]);
     const counters = stored ?? emptyCounters();
     const processing = summarizeMonthlyProcessing(
       counters,
       effective.values.monthlyProcessingSeconds,
     );
-    const waitingQuery = this.jobs
-      .countDocuments({
-        userId: accountId,
-        deletedAt: null,
-        status: trusted({ $in: WAITING_CAPACITY_STATUSES }),
-      })
-      .session(session ?? null);
-    const processingQuery = this.jobs
-      .countDocuments({
-        userId: accountId,
-        deletedAt: null,
-        status: trusted({ $in: PROCESSING_CAPACITY_STATUSES }),
-      })
-      .session(session ?? null);
-    const [waitingJobs, processingJobs] = session
-      ? [await waitingQuery, await processingQuery]
-      : await Promise.all([waitingQuery, processingQuery]);
+    const [waitingJobs, processingJobs] = await Promise.all([
+      this.jobs
+        .countDocuments({
+          userId: accountId,
+          deletedAt: null,
+          status: trusted({ $in: WAITING_CAPACITY_STATUSES }),
+        })
+        .session(session ?? null),
+      this.jobs
+        .countDocuments({
+          userId: accountId,
+          deletedAt: null,
+          status: trusted({ $in: PROCESSING_CAPACITY_STATUSES }),
+        })
+        .session(session ?? null),
+    ]);
     const processingEnabled =
       this.config?.get<boolean>('AUDIO_PROCESSING_ENABLED') ?? true;
     const retainedOutputBytes = user.retainedOutputBytes ?? 0;
@@ -223,141 +211,12 @@ export class ProcessingUsageService {
     };
   }
 
-  async resetUsage(
-    accountId: Types.ObjectId,
-    expected: { expectedRevision: number; periodKey: string; dayKey: string },
-    session: ClientSession,
-    now = new Date(),
-  ) {
-    this.assertTransaction(session);
-    const month = utcMonthPeriod(now);
-    const day = utcDayPeriod(now);
-    if (expected.periodKey !== month.key || expected.dayKey !== day.key)
-      throw adminError('REVISION_CONFLICT');
-    // The caller holds the account admission fence. Never erase live holds:
-    // their later settlement must still subtract from the original counters.
-    if (
-      await this.reservations
-        .exists({ accountId, state: 'reserved' })
-        .session(session)
-    )
-      throw adminError('USAGE_RESET_ACTIVE_WORK');
-    if (
-      await this.jobs
-        .exists({
-          userId: accountId,
-          deletedAt: null,
-          status: trusted({
-            $in: [
-              ...WAITING_CAPACITY_STATUSES,
-              ...PROCESSING_CAPACITY_STATUSES,
-            ],
-          }),
-        })
-        .session(session)
-    )
-      throw adminError('USAGE_RESET_ACTIVE_WORK');
-    const periodId = usagePeriodId(accountId, month.key);
-    const dayId = usageDayId(accountId, day.key);
-    await this.ensurePeriod(accountId, periodId, month, session, now);
-    await this.ensureDay(accountId, dayId, day, session, now);
-    const before = await this.periods
-      .findById(periodId)
-      .session(session)
-      .lean();
-    const dailyBefore = await this.dailyPeriods
-      .findById(dayId)
-      .session(session)
-      .lean();
-    if (!before || before.revision !== expected.expectedRevision)
-      throw adminError('REVISION_CONFLICT');
-    if (before.processingReservationCount || before.processingReservedSeconds)
-      throw adminError('USAGE_RESET_ACTIVE_WORK');
-    const counters = {
-      processingUsedSeconds: 0,
-      processingReleasedSeconds: 0,
-      uploadGrants: 0,
-      confirmedUploadBytes: 0,
-      downloadGrants: 0,
-      estimatedDownloadBytes: 0,
-    };
-    const updated = await this.periods.updateOne(
-      { _id: periodId, revision: expected.expectedRevision },
-      { $set: { ...counters, lastMutationAt: now }, $inc: { revision: 1 } },
-      { session, runValidators: true },
-    );
-    if (updated.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
-    await this.dailyPeriods.updateOne(
-      { _id: dayId },
-      { $set: { uploadGrants: 0, lastMutationAt: now }, $inc: { revision: 1 } },
-      { session, runValidators: true },
-    );
-    return {
-      previousRevision: before.revision,
-      revision: before.revision + 1,
-      processingChanges: [
-        ...Object.entries(counters).map(([field, after]) => ({
-          field,
-          before: before[field as keyof typeof counters],
-          after,
-        })),
-        {
-          field: 'dailyUsedUploadGrants',
-          before: dailyBefore?.uploadGrants ?? 0,
-          after: 0,
-        },
-        { field: 'usagePeriodKey', before: month.key, after: month.key },
-        { field: 'usageDayKey', before: day.key, after: day.key },
-      ],
-    };
-  }
-
-  /** Hold capacity before provider submission; any positive remaining allowance admits one full file. */
-  async reserveForImport(
-    importId: Types.ObjectId,
-    accountId: Types.ObjectId,
-    duration: number,
-    session: ClientSession,
-    now = new Date(),
-  ) {
-    this.assertTransaction(session);
-    const existing = await this.reservations
-      .findById(importId)
-      .session(session)
-      .lean();
-    // A claimed import may submit only once, even after a crash or failure.
-    if (existing) throw jobError('IDEMPOTENCY_CONFLICT');
-    await this.reserveForJob(importId, accountId, duration, session, now);
-  }
-
-  async releaseImport(
-    importId: Types.ObjectId,
-    accountId: Types.ObjectId,
-    session: ClientSession,
-    required = false,
-  ) {
-    this.assertTransaction(session);
-    const reservation = await this.reservations
-      .findOne({ _id: importId, accountId, state: 'reserved' })
-      .session(session)
-      .lean();
-    if (!reservation) {
-      if (required) throw jobError('UPLOAD_RESERVATION_EXPIRED');
-      return;
-    }
-    await this.settleJob(
-      { _id: importId, userId: accountId, status: 'cancelled' },
-      session,
-    );
-  }
-
   async reserveForJob(
     jobId: Types.ObjectId,
     accountId: Types.ObjectId,
     duration: number,
     session: ClientSession,
     now = new Date(),
-    policy?: EffectiveAccountPolicy,
   ) {
     this.assertTransaction(session);
     const processingSeconds = Math.ceil(duration);
@@ -377,8 +236,7 @@ export class ProcessingUsageService {
       return existing;
     }
 
-    const effective =
-      policy ?? (await this.policies.effective(accountId, now, session));
+    const effective = await this.policies.effective(accountId, now, session);
     if (processingSeconds > effective.values.maxDurationSeconds)
       throw jobError('MEDIA_TOO_LONG');
     const period = utcMonthPeriod(now);
@@ -389,10 +247,13 @@ export class ProcessingUsageService {
         {
           _id: periodId,
           $expr: {
-            // Admit based on usage BEFORE this file. The accepted file may cross the limit.
-            $lt: [
+            $lte: [
               {
-                $add: ['$processingUsedSeconds', '$processingReservedSeconds'],
+                $add: [
+                  '$processingUsedSeconds',
+                  '$processingReservedSeconds',
+                  processingSeconds,
+                ],
               },
               effective.values.monthlyProcessingSeconds,
             ],
@@ -453,7 +314,6 @@ export class ProcessingUsageService {
     requestId: string,
     session: ClientSession,
     now = new Date(),
-    policy?: EffectiveAccountPolicy,
   ) {
     this.assertTransaction(session);
     if (!isUUID(requestId, '4')) throw jobError('IDEMPOTENCY_CONFLICT');
@@ -478,8 +338,7 @@ export class ProcessingUsageService {
     const snapshot = job.admissionSnapshot;
     if (!snapshot || snapshot.reservationExpiresAt.getTime() <= now.getTime())
       throw jobError('UPLOAD_RESERVATION_EXPIRED');
-    const effective =
-      policy ?? (await this.policies.effective(job.userId, now, session));
+    const effective = await this.policies.effective(job.userId, now, session);
     const expiresAt = new Date(
       Math.min(
         snapshot.reservationExpiresAt.getTime(),
@@ -533,7 +392,7 @@ export class ProcessingUsageService {
       },
       {
         $inc: { uploadGrants: 1, revision: 1 },
-        $set: { lastMutationAt: now },
+        $set: { lastMutationAt: now, purgeAt: null },
       },
       { session, returnDocument: 'after', runValidators: true },
     );
@@ -567,7 +426,6 @@ export class ProcessingUsageService {
     bytes: number,
     session: ClientSession,
     now = new Date(),
-    policy?: EffectiveAccountPolicy,
   ) {
     this.assertTransaction(session);
     if (job.inputObject) return;
@@ -604,8 +462,7 @@ export class ProcessingUsageService {
         return;
       throw jobError('JOB_STATE_CONFLICT');
     }
-    const effective =
-      policy ?? (await this.policies.effective(job.userId, now, session));
+    const effective = await this.policies.effective(job.userId, now, session);
     await this.ensurePeriod(job.userId, periodId, period, session, now);
     const updated = await this.periods.updateOne(
       {
@@ -619,124 +476,13 @@ export class ProcessingUsageService {
       },
       {
         $inc: { confirmedUploadBytes: bytes, revision: 1 },
-        $set: { lastMutationAt: now },
+        $set: { lastMutationAt: now, purgeAt: null },
       },
       { session, runValidators: true },
     );
     if (updated.modifiedCount !== 1)
       throw jobError('UPLOAD_BYTE_LIMIT_REACHED', {
         nextResetAt: period.end.toISOString(),
-      });
-  }
-
-  /** The caller persists the local-sync grant receipt in this same transaction. */
-  async reserveLocalMediaGrants(
-    accountId: Types.ObjectId,
-    session: ClientSession,
-    now = new Date(),
-  ): Promise<void> {
-    this.assertTransaction(session);
-    const policy = await this.policies.effective(accountId, now, session);
-    const day = utcDayPeriod(now);
-    const month = utcMonthPeriod(now);
-    const dayId = usageDayId(accountId, day.key);
-    const periodId = usagePeriodId(accountId, month.key);
-    await this.ensureDay(accountId, dayId, day, session, now);
-    await this.ensurePeriod(accountId, periodId, month, session, now);
-    const daily = await this.dailyPeriods.updateOne(
-      {
-        _id: dayId,
-        uploadGrants: { $lte: policy.values.dailyUploadGrants - 2 },
-      },
-      { $inc: { uploadGrants: 2, revision: 1 }, $set: { lastMutationAt: now } },
-      { session, runValidators: true },
-    );
-    if (daily.modifiedCount !== 1)
-      throw jobError('UPLOAD_GRANT_LIMIT_REACHED', {
-        nextResetAt: day.end.toISOString(),
-      });
-    const monthly = await this.periods.updateOne(
-      {
-        _id: periodId,
-        uploadGrants: { $lte: policy.values.monthlyUploadGrants - 2 },
-      },
-      { $inc: { uploadGrants: 2, revision: 1 }, $set: { lastMutationAt: now } },
-      { session, runValidators: true },
-    );
-    if (monthly.modifiedCount !== 1)
-      throw jobError('UPLOAD_GRANT_LIMIT_REACHED', {
-        nextResetAt: month.end.toISOString(),
-      });
-  }
-
-  /** Account both validated uploads once, independently of cloud inference. */
-  async recordLocalMediaUploads(
-    job: Pick<Job, '_id' | 'userId' | 'inputObject' | 'outputObject'>,
-    session: ClientSession,
-    now = new Date(),
-  ): Promise<void> {
-    this.assertTransaction(session);
-    const bytes =
-      (job.inputObject?.bytes ?? 0) + (job.outputObject?.bytes ?? 0);
-    if (
-      !job.inputObject ||
-      !job.outputObject ||
-      !Number.isSafeInteger(bytes) ||
-      bytes < 2
-    )
-      throw jobError('UPLOAD_NOT_READY');
-    const month = utcMonthPeriod(now);
-    const claimed = await this.jobs.updateOne(
-      {
-        _id: job._id,
-        userId: job.userId,
-        status: 'ready',
-        confirmedUploadAccountedAt: null,
-      },
-      {
-        $set: {
-          confirmedUploadAccountedAt: now,
-          confirmedUploadPeriodKey: month.key,
-          confirmedUploadBytes: bytes,
-        },
-      },
-      { session, runValidators: true },
-    );
-    if (claimed.modifiedCount !== 1) {
-      const existing = await this.jobs
-        .findById(job._id)
-        .session(session)
-        .lean();
-      if (
-        existing?.userId.equals(job.userId) &&
-        existing.confirmedUploadAccountedAt &&
-        existing.confirmedUploadBytes === bytes
-      )
-        return;
-      throw jobError('JOB_STATE_CONFLICT');
-    }
-    const policy = await this.policies.effective(job.userId, now, session);
-    const periodId = usagePeriodId(job.userId, month.key);
-    await this.ensurePeriod(job.userId, periodId, month, session, now);
-    const charged = await this.periods.updateOne(
-      {
-        _id: periodId,
-        $expr: trusted({
-          $lte: [
-            { $add: ['$confirmedUploadBytes', bytes] },
-            policy.values.monthlyConfirmedUploadBytes,
-          ],
-        }),
-      },
-      {
-        $inc: { confirmedUploadBytes: bytes, revision: 1 },
-        $set: { lastMutationAt: now },
-      },
-      { session, runValidators: true },
-    );
-    if (charged.modifiedCount !== 1)
-      throw jobError('UPLOAD_BYTE_LIMIT_REACHED', {
-        nextResetAt: month.end.toISOString(),
       });
   }
 
@@ -747,7 +493,7 @@ export class ProcessingUsageService {
       scope: DownloadGrantScope;
       requestId: string;
       attemptId?: string | null;
-      object: Pick<ObjectIdentity, 'etag' | 'bytes'>;
+      object: Pick<ObjectIdentity, 'versionId' | 'bytes'>;
     },
     session: ClientSession,
     now = new Date(),
@@ -759,7 +505,8 @@ export class ProcessingUsageService {
     if (
       (input.scope === 'worker_input' && (!attemptId || !isUUID(attemptId))) ||
       (input.scope !== 'worker_input' && attemptId !== null) ||
-      !isStorageEtag(input.object.etag) ||
+      !input.object.versionId ||
+      input.object.versionId === 'null' ||
       !Number.isSafeInteger(input.object.bytes) ||
       input.object.bytes < 1
     )
@@ -779,7 +526,7 @@ export class ProcessingUsageService {
         existing.scope !== input.scope ||
         existing.attemptId !== attemptId ||
         existing.requestId !== requestId ||
-        existing.objectEtag !== input.object.etag ||
+        existing.objectVersionId !== input.object.versionId ||
         existing.estimatedBytes !== input.object.bytes
       )
         throw jobError('IDEMPOTENCY_CONFLICT');
@@ -816,7 +563,7 @@ export class ProcessingUsageService {
             estimatedDownloadBytes: input.object.bytes,
             revision: 1,
           },
-          $set: { lastMutationAt: now },
+          $set: { lastMutationAt: now, purgeAt: null },
         },
         { session, runValidators: true },
       );
@@ -871,7 +618,7 @@ export class ProcessingUsageService {
           scope: input.scope,
           attemptId,
           requestId,
-          objectEtag: input.object.etag,
+          objectVersionId: input.object.versionId,
           estimatedBytes: input.object.bytes,
           periodKey: period.key,
           createdAt: now,
@@ -924,89 +671,6 @@ export class ProcessingUsageService {
     if (updated.modifiedCount !== 1) throw jobError('PROCESSING_UNAVAILABLE');
   }
 
-  /** Claim the job's existing retained-media receipt without counting an upload. */
-  async recordRetainedCachedMedia(
-    job: Pick<Job, '_id' | 'userId' | 'inputObject' | 'outputObject'>,
-    session: ClientSession,
-    now = new Date(),
-    policy?: EffectiveAccountPolicy,
-  ): Promise<void> {
-    this.assertTransaction(session);
-    const inputBytes = job.inputObject?.bytes;
-    const outputBytes = job.outputObject?.bytes;
-    if (
-      !Number.isSafeInteger(inputBytes) ||
-      !inputBytes ||
-      inputBytes < 1 ||
-      !Number.isSafeInteger(outputBytes) ||
-      !outputBytes ||
-      outputBytes < 1 ||
-      !Number.isSafeInteger(inputBytes + outputBytes)
-    )
-      throw new Error('Invalid retained cached media size');
-    const bytes = inputBytes + outputBytes;
-    const claimed = await this.jobs.updateOne(
-      {
-        _id: job._id,
-        userId: job.userId,
-        status: 'ready',
-        deletedAt: null,
-        retainedOutputAccountedAt: null,
-        retainedOutputReleasedAt: null,
-        'inputObject.key': job.inputObject!.key,
-        'inputObject.bytes': inputBytes,
-        'outputObject.key': job.outputObject!.key,
-        'outputObject.bytes': outputBytes,
-      },
-      {
-        $set: {
-          retainedOutputAccountedAt: now,
-          retainedInputBytes: inputBytes,
-        },
-      },
-      { session, runValidators: true },
-    );
-    if (claimed.modifiedCount !== 1) {
-      const existing = await this.jobs
-        .findById(job._id)
-        .session(session)
-        .lean();
-      if (
-        existing?.userId.equals(job.userId) &&
-        existing.status === 'ready' &&
-        !existing.deletedAt &&
-        existing.retainedOutputAccountedAt &&
-        !existing.retainedOutputReleasedAt &&
-        existing.retainedInputBytes === inputBytes &&
-        existing.inputObject?.key === job.inputObject!.key &&
-        existing.outputObject?.key === job.outputObject!.key &&
-        existing.outputObject.bytes === outputBytes
-      )
-        return;
-      throw jobError('JOB_STATE_CONFLICT');
-    }
-    const effective =
-      policy ?? (await this.policies.effective(job.userId, now, session));
-    const updated = await this.users.updateOne(
-      {
-        _id: job.userId,
-        status: 'active',
-        $expr: trusted({
-          $lte: [
-            {
-              $add: [{ $ifNull: ['$retainedOutputBytes', 0] }, bytes],
-            },
-            effective.values.maxRetainedOutputBytes,
-          ],
-        }),
-      },
-      { $inc: { retainedOutputBytes: bytes } },
-      { session, runValidators: true },
-    );
-    if (updated.modifiedCount !== 1)
-      throw jobError('RETAINED_STORAGE_LIMIT_REACHED');
-  }
-
   async releaseRetainedOutput(
     job: Pick<
       Job,
@@ -1014,7 +678,7 @@ export class ProcessingUsageService {
       | 'outputObject'
       | 'retainedOutputAccountedAt'
       | 'retainedOutputReleasedAt'
-    > & { retainedInputBytes?: number },
+    >,
     session: ClientSession,
   ) {
     this.assertTransaction(session);
@@ -1024,14 +688,12 @@ export class ProcessingUsageService {
       job.retainedOutputReleasedAt
     )
       return;
-    const retainedBytes =
-      job.outputObject.bytes + (job.retainedInputBytes ?? 0);
     const updated = await this.users.updateOne(
       {
         _id: job.userId,
-        retainedOutputBytes: trusted({ $gte: retainedBytes }),
+        retainedOutputBytes: trusted({ $gte: job.outputObject.bytes }),
       },
-      { $inc: { retainedOutputBytes: -retainedBytes } },
+      { $inc: { retainedOutputBytes: -job.outputObject.bytes } },
       { session, runValidators: true },
     );
     if (updated.modifiedCount !== 1)
@@ -1050,10 +712,22 @@ export class ProcessingUsageService {
     const delta = processingSeconds - reservation.processingSeconds;
     if (delta === 0) return;
     const periodId = usagePeriodId(job.userId, reservation.periodKey);
-    // An admitted file is processed in full even when its measured duration
-    // crosses the monthly limit. Future admissions see the adjusted total.
+    const filter: Record<string, unknown> = { _id: periodId };
+    if (delta > 0)
+      filter.$expr = {
+        $lte: [
+          {
+            $add: [
+              '$processingUsedSeconds',
+              '$processingReservedSeconds',
+              delta,
+            ],
+          },
+          reservation.acceptedLimitSeconds,
+        ],
+      };
     const updated = await this.periods.updateOne(
-      { _id: periodId },
+      filter,
       {
         $inc: { processingReservedSeconds: delta, revision: 1 },
         $set: { lastMutationAt: new Date() },
@@ -1066,11 +740,7 @@ export class ProcessingUsageService {
     await reservation.save({ session });
   }
 
-  async settleJob(
-    job: Pick<Job, '_id' | 'userId' | 'status'>,
-    session: ClientSession,
-    now = new Date(),
-  ) {
+  async settleJob(job: Job, session: ClientSession, now = new Date()) {
     this.assertTransaction(session);
     const reservation = await this.reservations
       .findById(job._id)
@@ -1126,50 +796,6 @@ export class ProcessingUsageService {
       );
   }
 
-  /** Restore expiry left unset by older transfer writers, without losing live holds. */
-  async restoreClosedPeriodExpiry(
-    periodId: string,
-    session: ClientSession,
-    now = new Date(),
-  ): Promise<boolean> {
-    this.assertTransaction(session);
-    const period = await this.periods
-      .findById(periodId)
-      .session(session)
-      .lean();
-    if (
-      !period ||
-      period.purgeAt !== null ||
-      period.processingReservationCount !== 0 ||
-      period.processingReservedSeconds !== 0 ||
-      period.periodKey >= utcMonthPeriod(now).key ||
-      !/^\d{4}-(0[1-9]|1[0-2])$/.test(period.periodKey)
-    )
-      return false;
-    if (
-      await this.reservations
-        .exists({
-          accountId: period.accountId,
-          periodKey: period.periodKey,
-          state: 'reserved',
-        })
-        .session(session)
-    )
-      return false;
-    const result = await this.periods.updateOne(
-      {
-        _id: period._id,
-        revision: period.revision,
-        purgeAt: null,
-        processingReservationCount: 0,
-        processingReservedSeconds: 0,
-      },
-      { $set: { purgeAt: this.periodForKey(period.periodKey).purgeAt } },
-      { session, runValidators: true },
-    );
-    return result.modifiedCount === 1;
-  }
-
   private async ensurePeriod(
     accountId: Types.ObjectId,
     periodId: string,
@@ -1184,6 +810,8 @@ export class ProcessingUsageService {
           _id: periodId,
           accountId,
           periodKey: period.key,
+          periodStart: period.start,
+          periodEnd: period.end,
           ...emptyCounters(),
           lastMutationAt: now,
           purgeAt: period.purgeAt,
@@ -1207,6 +835,8 @@ export class ProcessingUsageService {
           _id: dayId,
           accountId,
           dayKey: day.key,
+          dayStart: day.start,
+          dayEnd: day.end,
           uploadGrants: 0,
           revision: 0,
           lastMutationAt: now,
@@ -1228,6 +858,8 @@ export class ProcessingUsageService {
         $setOnInsert: {
           _id: period.key,
           periodKey: period.key,
+          periodStart: period.start,
+          periodEnd: period.end,
           estimatedOutboundBytes: 0,
           revision: 0,
           lastMutationAt: now,

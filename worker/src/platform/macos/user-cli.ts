@@ -1,36 +1,3 @@
-import { awaitUnpair } from "../shared/unpair.js";
-import {
-  hasDeletedMacRegistration,
-  resetDeletedMacRegistration,
-  loadMachineDeletionNotice,
-  readMacMachineIdentity,
-  assertMacUnpairReceiptReplay,
-  assertMacFreshEnrollmentAllowed,
-} from "./deleted-registration.js";
-import {
-  reconcileMacAppRuntimeReferences,
-  assertMacPreparedRuntimeUnused,
-  resolveMacAppExecutionLayout,
-} from "./app-installation-binding.js";
-import {
-  recoverMacAppMaintenance,
-  requiresMacAppMaintenance,
-  withMacAppMaintenance,
-  recoverMacAppPreparationFence,
-  withMacAppPreparationFence,
-} from "./app-control-maintenance.js";
-import { recoverMacAppActivation } from "./app-installation.js";
-import { reclaimIdlePersonalReservation } from "../../runtime/personal-admission.js";
-import { formatHealth } from "../shared/user-health.js";
-import { watchStatus, waitForReady } from "../shared/status-watch.js";
-export { waitForReady } from "../shared/status-watch.js";
-import { configureWorkerCapacity } from "../shared/worker-capacity.js";
-import {
-  cleanupWorkerStorage,
-  macWorkerStorageLayout,
-} from "../shared/storage-maintenance.js";
-import { dirname, join } from "node:path";
-import { resetRestartBudget } from "../../runtime/restart-budget.js";
 import { lstat, readFile, readlink, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
@@ -54,63 +21,56 @@ import {
   WorkerControlPlaneClient,
   type WorkerMachineStatus,
 } from "../../runtime/control-plane-client.js";
-import { readMaintenanceConnection } from "../../runtime/runtime-config.js";
+import { loadRuntimeConfig } from "../../runtime/runtime-config.js";
 import { readHiddenTerminalLine } from "./secret-prompt.js";
 import { WorkerEnrollmentError } from "../../enrollment/enrollment-client.js";
 import {
   installMacUserWorker,
-  inspectPendingMacUserEnrollment,
   readPendingMacUserEnrollmentCredential,
   recoverMacUserWorker,
-  resumeMacUserInstallation,
   resetPendingMacUserEnrollment,
   type MacUserInstallationResult,
   type MacUserRecoveryResult,
 } from "./user-installer.js";
 import {
   checkMacUserUpdate,
-  recoverInterruptedMacUpdate,
   updateMacUserWorker,
-  loadUpdateState,
   type MacUserUpdateCheck,
 } from "./user-updater.js";
 import {
   benchmarkMacUserFile,
   benchmarkMacUserWorker,
 } from "./user-benchmark.js";
-import { waitForLocalDrain } from "../shared/local-drain.js";
+import { waitForLocalDrain } from "./local-drain.js";
 import {
   loadLocalRuntimeStatus,
   writeLocalRuntimeStatus,
 } from "../../runtime/local-runtime-status.js";
 import { inspectMacUserHealth, type MacUserHealth } from "./user-health.js";
+import {
+  explainError,
+  investigateErrors,
+  investigateJob,
+} from "./investigation.js";
+import { queryPerformanceReport } from "./performance-report.js";
 import { withMacUserCommandLock } from "./command-lock.js";
 import {
   loadConfirmedUnpairReceipt,
   writeConfirmedUnpairReceipt,
-} from "../shared/unpair-receipt.js";
+} from "./unpair-receipt.js";
 import {
+  formatOperationalEvent,
+  createOperationalLogCursor,
+  clearMacUserLogs,
   inspectOperationalLogUsage,
-  maintainWorkerLogs,
+  maintainMacUserLogs,
   parseSince,
-} from "../shared/operational-logs.js";
-import {
-  isOperatorCommand,
-  runOperatorCommand,
-  type LogArguments,
-} from "../shared/operator-cli.js";
-import {
-  exactArguments,
-  extractBooleanFlag,
-  parseValueFlags,
-} from "../shared/cli-arguments.js";
-import {
-  formatActionResult,
-  formatDetailedResult,
-  appendDetails,
-  formatJson,
-  humanizeLabel,
-} from "../shared/cli-format.js";
+  readOperationalEvents,
+  readNewOperationalEvents,
+  readNewTextLog,
+  readTextLogTail,
+  type OperationalLogLevel,
+} from "./operational-logs.js";
 import {
   createMacDiagnosticBundle,
   type MacDiagnosticBundleResult,
@@ -129,7 +89,6 @@ interface MacUserHost {
 }
 
 export const MAC_USER_USAGE = `Usage:
-  mw --version [--json]
   mw install --label <name> [--group-id <id>] [--new-code] [--json]
   mw install [--json]  # recover a preserved paired installation
   mw status [--local] [--watch] [--json]
@@ -153,8 +112,6 @@ export const MAC_USER_USAGE = `Usage:
   mw diagnostics [--job <job-id>] [--since <1s-30d>]
                                [--output </absolute/path.zip>] [--json]
   mw doctor [--full] [--json]
-  mw cleanup [--dry-run | --apply] [--json]
-  mw capacity --workers <1|2> [--json]
   mw benchmark [--workers <1|2>] [--json]
   mw benchmark-file --input </absolute/song> [--recipe <kim-vocals-v2|kim-vocals-v2-trim>]
                                   [--warmup-runs <0-2>] [--runs <3-10>] [--group-size <1|2|4>]
@@ -170,18 +127,11 @@ interface LaunchAgentActions {
 }
 
 export interface MacUserCommandContext {
-  /** Private app facade option; never exposed as a CLI flag. */
-  appControl?: boolean;
-  onAppProgress?: (stage: string) => void;
-  beforeRuntimeRemoval?: () => Promise<void>;
-  beforeWorkerLoad?: () => Promise<void>;
   host?: { platform: NodeJS.Platform; arch: string; uid: number; home: string };
   layout?: MacUserLayout;
   launchAgent?: LaunchAgentActions;
   stdout?: (value: string) => void;
-  unpair?: (
-    force: boolean,
-  ) => Promise<{ confirmed: true; machineId: string; deleted?: true }>;
+  unpair?: (force: boolean) => Promise<{ confirmed: true; machineId: string }>;
   wait?: (milliseconds: number) => Promise<void>;
   unpairTimeoutMs?: number;
   drainTimeoutMs?: number;
@@ -192,20 +142,8 @@ export interface MacUserCommandContext {
     groupId?: string;
   }) => Promise<MacUserInstallationResult>;
   recover?: () => Promise<MacUserRecoveryResult>;
-  resumeInstallation?: () => Promise<MacUserInstallationResult | null>;
-  adopt?: () => Promise<Record<string, unknown>>;
-  checkUpdate?: (
-    source?: "app" | "catalog",
-  ) => Promise<
-    Pick<
-      MacUserUpdateCheck,
-      "currentVersion" | "availableVersion" | "sequence" | "updateAvailable"
-    >
-  >;
-  update?: (
-    force: boolean,
-    source?: "app" | "catalog",
-  ) => Promise<{
+  checkUpdate?: () => Promise<MacUserUpdateCheck>;
+  update?: (force: boolean) => Promise<{
     status: "current" | "updated";
     releaseVersion: string;
     sequence: number;
@@ -246,130 +184,15 @@ export async function runMacUserCommand(
     home: homedir(),
   };
   assertSupportedHost(host);
-  const layout = await resolveMacAppExecutionLayout(
-    context.layout ?? createMacUserLayout(host.home),
-  );
-  context = {
-    ...context,
-    beforeWorkerLoad:
-      context.beforeWorkerLoad ??
-      (async () => {
-        await reclaimIdlePersonalReservation(layout.stateRoot);
-        await assertMacPreparedRuntimeUnused(layout);
-      }),
-  };
+  const layout = context.layout ?? createMacUserLayout(host.home);
   if (!mutatesLocalState(command, arguments_))
     return await runUnlocked(command, arguments_, context, host, layout);
-  if (command === "install" || command === "recover")
-    await createMacUserDirectories(layout);
+  if (command === "install") await createMacUserDirectories(layout);
   else if (command === "unpair" || command === "uninstall")
     await requireManagedInstallation(layout);
   else await requireInstalled(layout);
-  return await withMacUserCommandLock(
-    layout.commandLockPath,
-    async () => {
-      const ownedService =
-        context.launchAgent ?? new MacLaunchAgentController(host.uid);
-      if (command === "unpair") {
-        const flags = parseUnpairArguments(arguments_);
-        if (flags.expectedMachineId !== undefined) {
-          await verifyDeletedUnpairTarget(
-            layout,
-            flags.expectedMachineId,
-            context.remoteStatus,
-          );
-          await recoverMacAppPreparationFence(layout);
-          return await withMacAppPreparationFence(layout, "recover", () =>
-            runUnlocked(command, arguments_, context, host, layout),
-          );
-        }
-      }
-      await recoverMacAppPreparationFence(layout);
-      if (command === "install") await assertMacFreshEnrollmentAllowed(layout);
-      const unpairReceipt = ["recover", "unpair"].includes(command)
-        ? await loadConfirmedUnpairReceipt(layout.unpairReceiptPath)
-        : null;
-      if (command === "unpair" && unpairReceipt)
-        await assertMacUnpairReceiptReplay(layout, unpairReceipt.machineId);
-      if (command === "recover" && unpairReceipt && !unpairReceipt.deleted)
-        throw new Error("Only backend-confirmed deleted machines can be reset");
-      if (command === "recover" && (await hasDeletedMacRegistration(layout)))
-        return await withMacAppPreparationFence(layout, "recover", () =>
-          runUnlocked(command, arguments_, context, host, layout),
-        );
-      if (await pathExists(join(layout.stateRoot, "app-activation.json")))
-        await withMacAppPreparationFence(layout, "recover", () =>
-          recoverMacAppActivation(
-            layout,
-            ownedService,
-            false,
-            context.beforeWorkerLoad,
-          ),
-        );
-      await recoverMacAppMaintenance(
-        layout,
-        ownedService,
-        context.onAppProgress,
-        context.beforeWorkerLoad,
-      );
-      if (command === "restart")
-        return await withMacAppPreparationFence(layout, "recover", () =>
-          runUnlocked(command, arguments_, context, host, layout),
-        );
-      if (command === "unpair" || command === "uninstall")
-        return await withMacAppPreparationFence(layout, "recover", () =>
-          runUnlocked(command, arguments_, context, host, layout),
-        );
-      if (
-        !context.appControl &&
-        (["install", "recover"].includes(command) ||
-          (command === "update" && !arguments_.includes("--check")) ||
-          requiresMacAppMaintenance(command, arguments_))
-      ) {
-        if (requiresMacAppMaintenance(command, arguments_)) {
-          const service = await ownedService.status();
-          if (service.loaded || service.running)
-            throw new Error(
-              "Drain and stop the worker before GPU or storage maintenance",
-            );
-        }
-        return await withMacAppPreparationFence(
-          layout,
-          command === "install"
-            ? "install"
-            : command === "update"
-              ? "update"
-              : "recover",
-          () => runUnlocked(command, arguments_, context, host, layout),
-        );
-      }
-      if (!context.appControl)
-        return await runUnlocked(command, arguments_, context, host, layout);
-      const service =
-        context.launchAgent ?? new MacLaunchAgentController(host.uid);
-      if (!requiresMacAppMaintenance(command, arguments_))
-        return await runUnlocked(command, arguments_, context, host, layout);
-      return await withMacAppMaintenance({
-        layout,
-        service,
-        stop: () =>
-          gracefulStop(layout, service, false, {
-            ...(context.wait === undefined ? {} : { wait: context.wait }),
-            ...(context.drainTimeoutMs === undefined
-              ? {}
-              : { timeoutMs: context.drainTimeoutMs }),
-          }),
-        operation: () =>
-          runUnlocked(command, arguments_, context, host, layout),
-        ...(context.onAppProgress === undefined
-          ? {}
-          : { progress: context.onAppProgress }),
-        ...(context.beforeWorkerLoad
-          ? { beforeRestore: context.beforeWorkerLoad }
-          : {}),
-      });
-    },
-    command,
+  return await withMacUserCommandLock(layout.commandLockPath, async () =>
+    runUnlocked(command, arguments_, context, host, layout),
   );
 }
 
@@ -384,102 +207,7 @@ async function runUnlocked(
     context.launchAgent ?? new MacLaunchAgentController(host.uid);
   const stdout = context.stdout ?? console.log;
 
-  if (isOperatorCommand(command))
-    return await runOperatorCommand(command, arguments_, layout, context);
-
   switch (command) {
-    case "adopt": {
-      exactArguments(arguments_, new Set(["--apply", "--json"]));
-      if (!arguments_.includes("--apply")) {
-        stdout(
-          formatStatus(
-            await readStatus(layout, launchAgent, undefined, {
-              localOnly: true,
-            }),
-            arguments_.includes("--json"),
-          ),
-        );
-        return 0;
-      }
-      if (!context.adopt)
-        throw new TypeError(
-          "App worker adoption requires the packaged app controller",
-        );
-      const result = await context.adopt();
-      stdout(formatActionResult(result, arguments_.includes("--json")));
-      return 0;
-    }
-    case "recover": {
-      exactArguments(arguments_, new Set(["--json"]));
-      const reset = await resetDeletedMacRegistration({
-        layout,
-        service: launchAgent,
-      });
-      if (reset) {
-        stdout(
-          formatActionResult(
-            { status: "ok", action: "recover", ...reset },
-            arguments_.includes("--json"),
-          ),
-        );
-        return 0;
-      }
-      await recoverSignedUpdate(layout, launchAgent, context.beforeWorkerLoad);
-      const resumed = await (
-        context.resumeInstallation ??
-        (() =>
-          resumeMacUserInstallation({
-            layout,
-            uid: host.uid,
-            launchAgent,
-            ...(context.beforeWorkerLoad
-              ? { beforeStart: context.beforeWorkerLoad }
-              : {}),
-          }))
-      )();
-      if (resumed !== null) {
-        stdout(
-          formatActionResult(
-            { status: "ok", action: "recover", ...resumed },
-            arguments_.includes("--json"),
-          ),
-        );
-        return 0;
-      }
-      await requireInstalled(layout);
-      if (await pathExists(layout.currentLink)) {
-        stdout(
-          formatActionResult(
-            {
-              status: "ok",
-              action: "recover",
-              outcome: "no-recovery-required",
-            },
-            arguments_.includes("--json"),
-          ),
-        );
-        return 0;
-      }
-      const result = await (
-        context.recover ??
-        (() =>
-          recoverMacUserWorker({
-            layout,
-            uid: host.uid,
-            launchAgent,
-            ...(context.beforeWorkerLoad
-              ? { beforeStart: context.beforeWorkerLoad }
-              : {}),
-          }))
-      )();
-      stdout(
-        formatActionResult(
-          { status: "ok", action: "recover", ...result },
-          arguments_.includes("--json"),
-        ),
-      );
-      return 0;
-    }
     case "install": {
       const newCodeFlag = extractBooleanFlag(arguments_, "--new-code");
       const jsonFlag = extractBooleanFlag(newCodeFlag.remaining, "--json");
@@ -487,27 +215,6 @@ async function runUnlocked(
         jsonFlag.remaining,
         new Set(["label", "group-id"]),
       );
-      const resumed = await (
-        context.resumeInstallation ??
-        (() =>
-          resumeMacUserInstallation({
-            layout,
-            uid: host.uid,
-            launchAgent,
-            ...(context.beforeWorkerLoad
-              ? { beforeStart: context.beforeWorkerLoad }
-              : {}),
-          }))
-      )();
-      if (resumed !== null) {
-        stdout(
-          formatActionResult(
-            { status: "ok", action: "recover", ...resumed },
-            jsonFlag.present,
-          ),
-        );
-        return 0;
-      }
       if (await isRegularFile(layout.configPath)) {
         if (await pathExists(layout.currentLink))
           throw new Error(
@@ -520,9 +227,6 @@ async function runUnlocked(
               layout,
               uid: host.uid,
               launchAgent,
-              ...(context.beforeWorkerLoad
-                ? { beforeStart: context.beforeWorkerLoad }
-                : {}),
             }))
         )();
         stdout(
@@ -542,8 +246,7 @@ async function runUnlocked(
         );
       const label = flags.get("label");
       if (label === undefined) throw new TypeError("install requires --label");
-      if (newCodeFlag.present)
-        await resetPendingMacUserEnrollment(layout, { launchAgent });
+      if (newCodeFlag.present) await resetPendingMacUserEnrollment(layout);
       const pendingCredential =
         await readPendingMacUserEnrollmentCredential(layout);
       const enrollmentCredential =
@@ -558,9 +261,6 @@ async function runUnlocked(
           await installMacUserWorker({
             layout,
             uid: host.uid,
-            ...(context.beforeWorkerLoad
-              ? { beforeQualification: context.beforeWorkerLoad }
-              : {}),
             enrollmentCredential: input.enrollmentCredential,
             label: input.label,
             ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
@@ -601,13 +301,7 @@ async function runUnlocked(
       const reader = () =>
         readStatus(layout, launchAgent, context.remoteStatus, { localOnly });
       if (arguments_.includes("--watch")) {
-        await watchStatus(
-          reader,
-          (status) => formatStatus(status, json),
-          stdout,
-          json,
-          context.wait,
-        );
+        await watchStatus(reader, stdout, json, context.wait);
         return 0;
       }
       const status = await reader();
@@ -616,23 +310,7 @@ async function runUnlocked(
     }
     case "start": {
       exactArguments(arguments_, new Set(["--wait-ready", "--json"]));
-      const result = await withMacAppPreparationFence(
-        layout,
-        "recover",
-        async () => {
-          await recoverSignedUpdate(
-            layout,
-            launchAgent,
-            context.beforeWorkerLoad,
-          );
-          return await start(
-            layout,
-            launchAgent,
-            context.preflight,
-            context.beforeWorkerLoad,
-          );
-        },
-      );
+      const result = await start(layout, launchAgent, context.preflight);
       let readiness: Awaited<ReturnType<typeof readStatus>> | null = null;
       if (arguments_.includes("--wait-ready")) {
         await waitForReady(
@@ -682,22 +360,13 @@ async function runUnlocked(
     }
     case "restart": {
       exactArguments(arguments_, new Set(["--force", "--json"]));
-      await recoverSignedUpdate(layout, launchAgent, context.beforeWorkerLoad);
       await gracefulStop(layout, launchAgent, arguments_.includes("--force"), {
         ...(context.wait === undefined ? {} : { wait: context.wait }),
         ...(context.drainTimeoutMs === undefined
           ? {}
           : { timeoutMs: context.drainTimeoutMs }),
       });
-      await resetRestartBudget(
-        join(dirname(layout.configPath), "restart-budget.json"),
-      );
-      await start(
-        layout,
-        launchAgent,
-        context.preflight,
-        context.beforeWorkerLoad,
-      );
+      await start(layout, launchAgent, context.preflight);
       stdout(
         formatActionResult(
           { status: "ok", action: "restart" },
@@ -727,7 +396,6 @@ async function runUnlocked(
       const drained = service.loaded
         ? await waitForLocalDrain({
             runtimeStatusPath: layout.runtimeStatusPath,
-            expectedRevision: state.revision,
             force: false,
             ...(context.wait === undefined ? {} : { wait: context.wait }),
             ...(context.drainTimeoutMs === undefined
@@ -750,7 +418,6 @@ async function runUnlocked(
     }
     case "resume": {
       exactArguments(arguments_, new Set(["--json"]));
-      await recoverInterruptedMacUpdate(layout, launchAgent);
       return await transition(
         layout,
         launchAgent,
@@ -760,24 +427,14 @@ async function runUnlocked(
       );
     }
     case "update": {
-      const check = extractBooleanFlag(arguments_, "--check");
-      const force = extractBooleanFlag(check.remaining, "--force");
-      const json = extractBooleanFlag(force.remaining, "--json");
-      const flags = parseValueFlags(
-        json.remaining,
-        new Set(context.appControl ? ["source"] : []),
-      );
-      const source = flags.get("source");
-      if (source !== undefined && source !== "app" && source !== "catalog")
-        throw new TypeError("Worker update source is invalid");
+      exactArguments(arguments_, new Set(["--check", "--force", "--json"]));
       if (arguments_.includes("--check") && arguments_.includes("--force"))
         throw new TypeError("update accepts either --check or --force");
       await requireInstalled(layout);
       if (arguments_.includes("--check")) {
-        const reader =
-          context.checkUpdate ?? (() => checkMacUserUpdate(layout));
-        const checked =
-          source === undefined ? await reader() : await reader(source);
+        const checked = await (
+          context.checkUpdate ?? (() => checkMacUserUpdate(layout))
+        )();
         stdout(
           formatActionResult(
             {
@@ -793,7 +450,7 @@ async function runUnlocked(
         );
         return 0;
       }
-      const result =
+      const result = await (
         context.update ??
         ((force: boolean) =>
           updateMacUserWorker({
@@ -801,27 +458,20 @@ async function runUnlocked(
             uid: host.uid,
             force,
             launchAgent,
-            ...(context.beforeWorkerLoad
-              ? { beforeQualification: context.beforeWorkerLoad }
-              : {}),
-          }));
-      const updated =
-        source === undefined
-          ? await result(arguments_.includes("--force"))
-          : await result(arguments_.includes("--force"), source);
+          }))
+      )(arguments_.includes("--force"));
       stdout(
         formatActionResult(
-          { action: "update", ...updated },
+          { action: "update", ...result },
           arguments_.includes("--json"),
         ),
       );
       return 0;
     }
     case "unpair": {
-      const flags = parseUnpairArguments(arguments_);
+      exactArguments(arguments_, new Set(["--force", "--json"]));
       const replay = await loadConfirmedUnpairReceipt(layout.unpairReceiptPath);
       if (replay !== null) {
-        await assertMacUnpairReceiptReplay(layout, replay.machineId);
         if ((await launchAgent.status()).loaded) await launchAgent.bootout();
         await rm(layout.credentialPath, { force: true });
         await rm(layout.configPath, { force: true });
@@ -833,7 +483,6 @@ async function runUnlocked(
               machineId: replay.machineId,
               confirmed: true,
               replayed: true,
-              ...(replay.deleted ? { deleted: true } : {}),
             },
             arguments_.includes("--json"),
           ),
@@ -841,14 +490,14 @@ async function runUnlocked(
         return 0;
       }
       await requireInstalled(layout);
-      const force = flags.force;
+      const force = arguments_.includes("--force");
       await setLocalLifecycleIntent(layout.lifecyclePath, "draining");
       if (force && (await launchAgent.status()).loaded)
         await launchAgent.bootout();
       const operation =
         context.unpair ??
         (async (forced: boolean) => {
-          const config = await readMaintenanceConnection(layout.configPath);
+          const config = await loadRuntimeConfig(layout.configPath);
           return await new WorkerControlPlaneClient({
             baseUrl: config.backendBaseUrl,
             credential: config.credential,
@@ -863,20 +512,10 @@ async function runUnlocked(
       });
       if (!confirmation.confirmed)
         throw new Error("Backend did not confirm worker unpair");
-      if (
-        flags.expectedMachineId !== undefined &&
-        (confirmation.machineId !== flags.expectedMachineId ||
-          confirmation.deleted !== true)
-      )
-        throw new Error(
-          "Backend did not confirm deletion of the expected machine",
-        );
       if ((await launchAgent.status()).loaded) await launchAgent.bootout();
       await writeConfirmedUnpairReceipt(
         layout.unpairReceiptPath,
         confirmation.machineId,
-        new Date(),
-        confirmation.deleted === true,
       );
       await rm(layout.credentialPath, { force: true });
       await rm(layout.configPath, { force: true });
@@ -887,7 +526,6 @@ async function runUnlocked(
             action: "unpair",
             machineId: confirmation.machineId,
             confirmed: true,
-            ...(confirmation.deleted ? { deleted: true } : {}),
           },
           arguments_.includes("--json"),
         ),
@@ -915,12 +553,8 @@ async function runUnlocked(
           : { timeoutMs: context.drainTimeoutMs }),
       });
       await rm(layout.plistPath, { force: true });
-      if (purge) {
-        await reclaimIdlePersonalReservation(layout.stateRoot);
-        await context.beforeRuntimeRemoval?.();
-        await reconcileMacAppRuntimeReferences(layout, true);
-        await rm(layout.installRoot, { recursive: true, force: true });
-      } else await rm(layout.currentLink, { force: true });
+      if (purge) await rm(layout.installRoot, { recursive: true, force: true });
+      else await rm(layout.currentLink, { force: true });
       stdout(
         formatActionResult(
           {
@@ -929,6 +563,103 @@ async function runUnlocked(
             preservedData: !purge,
           },
           arguments_.includes("--json"),
+        ),
+      );
+      return 0;
+    }
+    case "logs": {
+      const flags = parseLogArguments(arguments_);
+      if (flags.clear) {
+        const result = await clearMacUserLogs(layout);
+        stdout(
+          formatActionResult(
+            { status: "ok", action: "logs-cleared", ...result },
+            flags.json,
+          ),
+        );
+        return 0;
+      }
+      await maintainMacUserLogs(layout);
+      if (flags.follow) {
+        await (
+          context.followLogs ?? ((value) => followLogs(layout, value, stdout))
+        )(flags);
+        return 0;
+      }
+      stdout(await renderLogs(layout, flags));
+      return 0;
+    }
+    case "job": {
+      const [jobId, ...flags] = arguments_;
+      if (jobId === undefined) throw new TypeError("job requires a job ID");
+      exactArguments(flags, new Set(["--json"]));
+      const result = await investigateJob(layout, jobId);
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Job",
+          result,
+          flags.includes("--json"),
+        ),
+      );
+      return result.foundLocally ? 0 : 2;
+    }
+    case "errors": {
+      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const flags = parseValueFlags(
+        jsonFlag.remaining,
+        new Set(["since", "limit"]),
+      );
+      const since = parseSince(flags.get("since") ?? "7d");
+      const limit = Number(flags.get("limit") ?? "100");
+      const result = await investigateErrors(layout, since, limit);
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Errors",
+          result,
+          jsonFlag.present,
+        ),
+      );
+      return 0;
+    }
+    case "explain": {
+      const [code, ...rest] = arguments_;
+      if (code === undefined)
+        throw new TypeError("explain requires an error code");
+      const jsonFlag = extractBooleanFlag(rest, "--json");
+      const flags = parseValueFlags(jsonFlag.remaining, new Set(["since"]));
+      const result = await explainError(
+        layout,
+        code,
+        parseSince(flags.get("since") ?? "7d"),
+      );
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Error Explanation",
+          result,
+          jsonFlag.present,
+        ),
+      );
+      return 0;
+    }
+    case "perf": {
+      const jsonFlag = extractBooleanFlag(arguments_, "--json");
+      const flags = parseValueFlags(
+        jsonFlag.remaining,
+        new Set(["last", "since", "recipe"]),
+      );
+      const last = Number(flags.get("last") ?? "20");
+      const since = flags.get("since");
+      const recipeId = flags.get("recipe");
+      const result = await queryPerformanceReport(layout, {
+        last,
+        ...(since === undefined ? {} : { since: parseSince(since) }),
+        ...(recipeId === undefined ? {} : { recipeId }),
+      });
+      stdout(
+        formatDetailedResult(
+          "MusicMute Worker Performance",
+          result,
+          jsonFlag.present,
         ),
       );
       return 0;
@@ -990,55 +721,6 @@ async function runUnlocked(
       stdout(formatHealth(result, arguments_.includes("--json")));
       return result.healthy ? 0 : 1;
     }
-    case "cleanup": {
-      exactArguments(arguments_, new Set(["--json", "--dry-run", "--apply"]));
-      const apply = arguments_.includes("--apply");
-      if (apply && arguments_.includes("--dry-run"))
-        throw new TypeError("Choose cleanup --dry-run or cleanup --apply");
-      if (apply) {
-        const service = await launchAgent.status();
-        if (service.loaded || service.running)
-          throw new Error("Drain and stop the worker before applying cleanup");
-        await context.beforeWorkerLoad?.();
-      }
-      const result = await cleanupWorkerStorage({
-        // The source CLI owns this preparation sentinel under the command lock.
-        // Pending fences from another operation were rejected before dispatch.
-        layout: macWorkerStorageLayout(layout, {
-          ownsPreparationFence: apply && context.appControl !== true,
-        }),
-        apply,
-      });
-      if (apply && result.status !== "blocked") {
-        await reclaimIdlePersonalReservation(layout.stateRoot);
-        await context.beforeRuntimeRemoval?.();
-        await reconcileMacAppRuntimeReferences(layout);
-      }
-      stdout(formatActionResult({ ...result }, arguments_.includes("--json")));
-      return result.status === "ok" ? 0 : 1;
-    }
-    case "capacity": {
-      const jsonFlag = extractBooleanFlag(arguments_, "--json");
-      const flags = parseValueFlags(jsonFlag.remaining, new Set(["workers"]));
-      const workers = flags.get("workers");
-      if (workers !== "1" && workers !== "2")
-        throw new TypeError("capacity requires --workers 1 or 2");
-      await context.beforeWorkerLoad?.();
-      const result = await configureWorkerCapacity({
-        configPath: layout.configPath,
-        receiptPath: layout.capacityValidationPath,
-        workers: Number(workers) as 1 | 2,
-        requireStopped: async () => {
-          const service = await launchAgent.status();
-          if (service.loaded || service.running)
-            throw new Error(
-              "Drain and stop the worker before changing capacity",
-            );
-        },
-      });
-      stdout(formatActionResult(result, jsonFlag.present));
-      return 0;
-    }
     case "benchmark": {
       const jsonFlag = extractBooleanFlag(arguments_, "--json");
       const flags = parseValueFlags(jsonFlag.remaining, new Set(["workers"]));
@@ -1047,7 +729,6 @@ async function runUnlocked(
         throw new TypeError("Benchmark workers must be 1 or 2");
       const workers = Number(workersValue) as 1 | 2;
       await requireInstalled(layout);
-      await context.beforeWorkerLoad?.();
       const result = await (
         context.benchmark ??
         ((selectedWorkers) =>
@@ -1105,7 +786,6 @@ async function runUnlocked(
       if (![1, 2, 4].includes(groupSize))
         throw new TypeError("benchmark-file window group must be 1, 2, or 4");
       await requireInstalled(layout);
-      await context.beforeWorkerLoad?.();
       const result = await (
         context.benchmarkFile ??
         ((input) =>
@@ -1154,16 +834,84 @@ async function runUnlocked(
   }
 }
 
+async function watchStatus(
+  read: () => Promise<Awaited<ReturnType<typeof readStatus>>>,
+  stdout: (value: string) => void,
+  json: boolean,
+  wait?: (milliseconds: number) => Promise<void>,
+): Promise<void> {
+  let stopped = false;
+  let previous = "";
+  let wakeStop: (() => void) | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  const stop = () => {
+    stopped = true;
+    wakeStop?.();
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  try {
+    while (!stopped) {
+      const status = await read();
+      const rendered = formatStatus(status, json);
+      if (json || rendered !== previous) stdout(rendered);
+      previous = rendered;
+      if (stopped) break;
+      const pause = wait
+        ? wait(2_000)
+        : new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 2_000);
+          });
+      await Promise.race([
+        pause,
+        new Promise<void>((resolve) => {
+          wakeStop = resolve;
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      wakeStop = undefined;
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+  }
+}
+
+export async function waitForReady(
+  read: () => Promise<Awaited<ReturnType<typeof readStatus>>>,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  onPhase?: (status: Awaited<ReturnType<typeof readStatus>>) => void,
+  timeoutMs = 360_000,
+  now: () => number = Date.now,
+): Promise<Awaited<ReturnType<typeof readStatus>>> {
+  const deadline = now() + timeoutMs;
+  let previousPhase = "";
+  while (true) {
+    const status = await read();
+    if (status.readiness.phase !== previousPhase) {
+      onPhase?.(status);
+      previousPhase = status.readiness.phase;
+    }
+    if (status.readiness.modelReady) return status;
+    if (now() >= deadline)
+      throw new Error(
+        `Worker did not become model-ready within ${timeoutMs / 1_000} seconds: ${status.readiness.blockers.join(", ")}`,
+      );
+    await wait(Math.min(2_000, deadline - now()));
+  }
+}
+
 function mutatesLocalState(
   command: string,
   arguments_: readonly string[],
 ): boolean {
   if (command === "update" && arguments_.includes("--check")) return false;
   if (command === "logs" && arguments_.includes("--clear")) return true;
-  if (command === "adopt") return arguments_.includes("--apply");
   return new Set([
     "install",
-    "recover",
     "start",
     "stop",
     "restart",
@@ -1175,23 +923,51 @@ function mutatesLocalState(
     "uninstall",
     "benchmark",
     "benchmark-file",
-    "capacity",
     "diagnostics",
-    "cleanup",
   ]).has(command);
+}
+
+async function awaitUnpair(
+  operation: (
+    force: boolean,
+  ) => Promise<{ confirmed: true; machineId: string }>,
+  force: boolean,
+  options: {
+    wait?: (milliseconds: number) => Promise<void>;
+    timeoutMs?: number;
+  },
+): Promise<{ confirmed: true; machineId: string }> {
+  const wait =
+    options.wait ??
+    (async (milliseconds: number) =>
+      await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const timeoutMs = options.timeoutMs ?? 10 * 60_000;
+  const started = Date.now();
+  while (true) {
+    try {
+      return await operation(force);
+    } catch (error) {
+      if (
+        force ||
+        !(error instanceof ControlPlaneError) ||
+        error.code !== "WORKER_CONFLICT" ||
+        Date.now() - started >= timeoutMs
+      )
+        throw error;
+      await wait(Math.min(5_000, timeoutMs - (Date.now() - started)));
+    }
+  }
 }
 
 async function start(
   layout: MacUserLayout,
   launchAgent: LaunchAgentActions,
   preflight?: () => Promise<boolean>,
-  beforeWorkerLoad?: () => Promise<void>,
 ): Promise<"already-running" | "service-started"> {
   await requireInstalled(layout);
   const current = await launchAgent.status();
   if (current.running) return "already-running";
-  await maintainWorkerLogs(layout);
-  await beforeWorkerLoad?.();
+  await maintainMacUserLogs(layout);
   const healthy = await (
     preflight ??
     (async () =>
@@ -1205,33 +981,6 @@ async function start(
   if (current.loaded) await launchAgent.kickstart();
   else await launchAgent.bootstrap(layout.plistPath);
   return "service-started";
-}
-
-async function recoverSignedUpdate(
-  layout: MacUserLayout,
-  service: LaunchAgentActions,
-  beforeStart?: () => Promise<void>,
-): Promise<void> {
-  const state = await loadUpdateState(layout.updateStatePath);
-  if (
-    state.status !== "staged" &&
-    state.status !== "activating" &&
-    state.recovery === undefined
-  )
-    return;
-  const action = () =>
-    recoverInterruptedMacUpdate(
-      layout,
-      service,
-      "Interrupted update recovered",
-      false,
-      beforeStart,
-    );
-  if (await pathExists(join(layout.stateRoot, "app-preparation.json"))) {
-    await action();
-    return;
-  }
-  await withMacAppPreparationFence(layout, "recover", action);
 }
 
 async function transition(
@@ -1288,17 +1037,13 @@ async function gracefulStop(
 ): Promise<void> {
   await requireManagedInstallation(layout);
   const previous = await loadLocalLifecycle(layout.lifecyclePath);
-  const draining = await setLocalLifecycleIntent(
-    layout.lifecyclePath,
-    "draining",
-  );
+  await setLocalLifecycleIntent(layout.lifecyclePath, "draining");
   const service = await launchAgent.status();
   try {
     if (service.loaded) {
       if (service.running)
         await waitForLocalDrain({
           runtimeStatusPath: layout.runtimeStatusPath,
-          expectedRevision: draining.revision,
           force,
           ...(options.wait === undefined ? {} : { wait: options.wait }),
           ...(options.timeoutMs === undefined
@@ -1306,10 +1051,23 @@ async function gracefulStop(
             : { timeoutMs: options.timeoutMs }),
         });
       await launchAgent.bootout();
+      await waitForLaunchAgentUnload(launchAgent, options.wait);
     }
   } finally {
     await setLocalLifecycleIntent(layout.lifecyclePath, previous.intent);
   }
+}
+
+async function waitForLaunchAgentUnload(
+  launchAgent: LaunchAgentActions,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)),
+): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (!(await launchAgent.status()).loaded) return;
+    await wait(100);
+  }
+  throw new Error("MusicMute worker service did not unload");
 }
 
 async function readStatus(
@@ -1327,10 +1085,6 @@ async function readStatus(
     ? await loadLocalLifecycle(layout.lifecyclePath).catch(() => null)
     : null;
   const service = await launchAgent.status();
-  const pendingEnrollment = await inspectPendingMacUserEnrollment(
-    layout,
-    service,
-  );
   const runtime = installed
     ? await loadLocalRuntimeStatus(layout.runtimeStatusPath).catch(() => null)
     : null;
@@ -1345,7 +1099,6 @@ async function readStatus(
           state: null,
           checkedAt: null,
           errorCode: null,
-          httpStatus: null,
         };
   const logs = installed
     ? await inspectOperationalLogUsage(layout).catch(() => null)
@@ -1442,28 +1195,9 @@ async function readStatus(
       : localReady &&
         remote.state.status === "active" &&
         remote.state.claimsAllowed;
-  const identity = await readMacMachineIdentity(layout);
-  const receipt = await loadConfirmedUnpairReceipt(layout.unpairReceiptPath);
-  const notice = await loadMachineDeletionNotice(layout);
-  const confirmedDeletedReceipt =
-    receipt?.deleted === true &&
-    (receipt.machineId === identity.machineId ||
-      (!identity.present && !(await pathExists(layout.credentialPath))));
-  const deletionNotice =
-    notice &&
-    (notice.machineId === identity.machineId ||
-      (!identity.present &&
-        confirmedDeletedReceipt &&
-        notice.machineId === receipt.machineId))
-      ? notice
-      : null;
-  const registrationDeleted =
-    deletionNotice !== null || confirmedDeletedReceipt;
   return {
     schemaVersion: 2,
     installed,
-    pendingEnrollment,
-    machineId: identity.machineId,
     activeReleaseVersion,
     lifecycle: lifecycle?.intent ?? "unknown",
     service,
@@ -1495,12 +1229,6 @@ async function readStatus(
     logs,
     telemetry: { gpuMemoryBytes: null, note: "not-sampled" },
     update,
-    deletionNotice,
-    registrationDeleted,
-    confirmedDeletedReceipt,
-    deletedMachineId: confirmedDeletedReceipt
-      ? receipt.machineId
-      : (deletionNotice?.machineId ?? null),
     remote,
     readiness: {
       phase,
@@ -1544,60 +1272,6 @@ async function readActiveReleaseVersion(
   }
 }
 
-function parseUnpairArguments(arguments_: readonly string[]) {
-  const force = extractBooleanFlag(arguments_, "--force");
-  const json = extractBooleanFlag(force.remaining, "--json");
-  const deleted = extractBooleanFlag(json.remaining, "--deleted-only");
-  const values = parseValueFlags(
-    deleted.remaining,
-    new Set(["expected-machine-id"]),
-  );
-  const expectedMachineId = values.get("expected-machine-id");
-  if (
-    deleted.present !== (expectedMachineId !== undefined) ||
-    (deleted.present && force.present) ||
-    (expectedMachineId !== undefined &&
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-        expectedMachineId,
-      ))
-  )
-    throw new TypeError(
-      "Deleted unpair requires an exact machine target and --deleted-only",
-    );
-  return { force: force.present, expectedMachineId };
-}
-async function verifyDeletedUnpairTarget(
-  layout: MacUserLayout,
-  expectedMachineId: string,
-  remoteStatus?: () => Promise<WorkerMachineStatus>,
-): Promise<void> {
-  const receipt = await loadConfirmedUnpairReceipt(layout.unpairReceiptPath);
-  if (receipt) {
-    if (receipt.deleted !== true || receipt.machineId !== expectedMachineId)
-      throw new Error(
-        "Deleted unpair target does not match its confirmed receipt",
-      );
-    await assertMacUnpairReceiptReplay(layout, expectedMachineId);
-    return;
-  }
-  const identity = await readMacMachineIdentity(layout);
-  if (identity.machineId !== expectedMachineId)
-    throw new Error("Deleted unpair target does not match the current machine");
-  const runtime = await loadLocalRuntimeStatus(layout.runtimeStatusPath);
-  if (
-    runtime.activeAttemptIds.length !== 0 ||
-    (runtime.currentAttempts?.length ?? 0) !== 0
-  )
-    throw new Error("Deleted unpair requires zero active attempts");
-  const authority = await readRemoteStatus(layout, remoteStatus);
-  if (
-    authority.available ||
-    authority.errorCode !== "WORKER_MACHINE_DELETED" ||
-    authority.httpStatus !== 410
-  )
-    throw new Error("Backend did not confirm deletion of the current machine");
-}
-
 async function readRemoteStatus(
   layout: MacUserLayout,
   remoteStatus?: () => Promise<WorkerMachineStatus>,
@@ -1607,14 +1281,12 @@ async function readRemoteStatus(
       state: WorkerMachineStatus;
       checkedAt: string;
       errorCode: null;
-      httpStatus: 200;
     }
   | {
       available: false;
       state: null;
       checkedAt: string;
       errorCode: string;
-      httpStatus: number | null;
     }
 > {
   const controller = new AbortController();
@@ -1623,7 +1295,7 @@ async function readRemoteStatus(
     const request = (
       remoteStatus ??
       (async () => {
-        const config = await readMaintenanceConnection(layout.configPath);
+        const config = await loadRuntimeConfig(layout.configPath);
         return await new WorkerControlPlaneClient({
           baseUrl: config.backendBaseUrl,
           credential: config.credential,
@@ -1635,7 +1307,7 @@ async function readRemoteStatus(
       timer = setTimeout(() => {
         controller.abort();
         reject(new Error("Backend status timed out"));
-      }, 15_000);
+      }, 2_500);
     });
     const state = await Promise.race([request, timeout]);
     return {
@@ -1643,7 +1315,6 @@ async function readRemoteStatus(
       state,
       checkedAt: new Date().toISOString(),
       errorCode: null,
-      httpStatus: 200,
     };
   } catch (error) {
     return {
@@ -1652,7 +1323,6 @@ async function readRemoteStatus(
       checkedAt: new Date().toISOString(),
       errorCode:
         error instanceof ControlPlaneError ? error.code : "BACKEND_UNAVAILABLE",
-      httpStatus: error instanceof ControlPlaneError ? error.status : null,
     };
   } finally {
     if (timer) clearTimeout(timer);
@@ -1712,6 +1382,236 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+interface LogArguments {
+  lines: number;
+  json: boolean;
+  events: boolean;
+  errors: boolean;
+  follow: boolean;
+  clear: boolean;
+  attemptId?: string;
+  since?: number;
+  level?: OperationalLogLevel;
+}
+
+function parseLogArguments(arguments_: readonly string[]): LogArguments {
+  let lines = 100;
+  let json = false;
+  let events = false;
+  let errors = false;
+  let follow = false;
+  let clear = false;
+  let attemptId: string | undefined;
+  let since: number | undefined;
+  let level: OperationalLogLevel | undefined;
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const current = arguments_[index];
+    if (current === "--json") json = true;
+    else if (current === "--events") events = true;
+    else if (current === "--errors") errors = true;
+    else if (current === "--follow") follow = true;
+    else if (current === "--clear") clear = true;
+    else if (current === "--lines") {
+      const value = Number(arguments_[index + 1]);
+      if (!Number.isSafeInteger(value) || value < 1 || value > 1000)
+        throw new TypeError("Log line count must be between 1 and 1000");
+      lines = value;
+      index += 1;
+    } else if (current === "--attempt-id") {
+      const value = arguments_[index + 1];
+      if (!value || !/^[0-9a-f-]{36}$/iu.test(value))
+        throw new TypeError("--attempt-id must be a UUID");
+      attemptId = value;
+      index += 1;
+    } else if (current === "--since") {
+      const value = arguments_[index + 1];
+      if (!value) throw new TypeError("--since requires a duration");
+      since = parseSince(value);
+      index += 1;
+    } else if (current === "--level") {
+      const value = arguments_[index + 1];
+      if (!value || !["info", "warning", "error"].includes(value))
+        throw new TypeError("--level must be info, warning, or error");
+      level = value as OperationalLogLevel;
+      index += 1;
+    } else throw new TypeError(`Unknown logs argument: ${current}`);
+  }
+  if (events && errors)
+    throw new TypeError("logs accepts either --events or --errors");
+  if (
+    clear &&
+    (events ||
+      errors ||
+      follow ||
+      attemptId !== undefined ||
+      since !== undefined ||
+      level !== undefined ||
+      arguments_.includes("--lines"))
+  )
+    throw new TypeError("logs --clear cannot be combined with viewing options");
+  if (
+    (attemptId !== undefined || since !== undefined || level !== undefined) &&
+    !events &&
+    !errors
+  )
+    throw new TypeError("Log filters require --events or --errors");
+  return {
+    lines,
+    json,
+    events,
+    errors,
+    follow,
+    clear,
+    ...(attemptId === undefined ? {} : { attemptId }),
+    ...(since === undefined ? {} : { since }),
+    ...(level === undefined ? {} : { level }),
+  };
+}
+
+async function renderLogs(
+  layout: MacUserLayout,
+  flags: LogArguments,
+): Promise<string> {
+  if (flags.events || flags.errors) {
+    const events = await readOperationalEvents(layout, {
+      lines: flags.lines,
+      errorsOnly: flags.errors,
+      ...(flags.attemptId === undefined ? {} : { attemptId: flags.attemptId }),
+      ...(flags.since === undefined ? {} : { since: flags.since }),
+      ...(flags.level === undefined ? {} : { level: flags.level }),
+    });
+    const hasStructuredFilter =
+      flags.attemptId !== undefined ||
+      flags.since !== undefined ||
+      flags.level !== undefined;
+    const stderr =
+      flags.errors && !hasStructuredFilter
+        ? await readTextLogTail(layout.stderrPath, flags.lines)
+        : "";
+    if (flags.json)
+      return formatJson({ events, ...(stderr ? { stderr } : {}) });
+    const title = flags.errors ? "Worker errors" : "Worker events";
+    return [
+      `== ${title} ==`,
+      ...events.map(formatOperationalEvent),
+      ...(stderr ? ["", "== worker stderr ==", stderr] : []),
+    ].join("\n");
+  }
+  const logs = {
+    stdout: await readTextLogTail(layout.stdoutPath, flags.lines),
+    stderr: await readTextLogTail(layout.stderrPath, flags.lines),
+  };
+  return flags.json
+    ? formatJson(logs)
+    : `== worker stdout ==\n${logs.stdout}\n== worker stderr ==\n${logs.stderr}`;
+}
+
+async function followLogs(
+  layout: MacUserLayout,
+  flags: LogArguments,
+  stdout: (value: string) => void,
+): Promise<void> {
+  const eventCursor = createOperationalLogCursor();
+  const stdoutCursor = createOperationalLogCursor();
+  const stderrCursor = createOperationalLogCursor();
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  try {
+    while (!stopped) {
+      if (flags.events || flags.errors) {
+        const events = await readNewOperationalEvents(
+          layout,
+          {
+            lines: flags.lines,
+            errorsOnly: flags.errors,
+            ...(flags.attemptId === undefined
+              ? {}
+              : { attemptId: flags.attemptId }),
+            ...(flags.since === undefined ? {} : { since: flags.since }),
+            ...(flags.level === undefined ? {} : { level: flags.level }),
+          },
+          eventCursor,
+        );
+        for (const event of events)
+          stdout(
+            flags.json ? JSON.stringify(event) : formatOperationalEvent(event),
+          );
+        if (
+          flags.errors &&
+          flags.attemptId === undefined &&
+          flags.since === undefined &&
+          flags.level === undefined
+        ) {
+          const stderr = await readNewTextLog(layout.stderrPath, stderrCursor);
+          if (stderr)
+            stdout(
+              flags.json
+                ? JSON.stringify({ stream: "stderr", text: stderr })
+                : `== worker stderr ==\n${stderr}`,
+            );
+        }
+      } else {
+        const normal = await readNewTextLog(layout.stdoutPath, stdoutCursor);
+        const errors = await readNewTextLog(layout.stderrPath, stderrCursor);
+        if (normal)
+          stdout(
+            flags.json
+              ? JSON.stringify({ stream: "stdout", text: normal })
+              : `== worker stdout ==\n${normal}`,
+          );
+        if (errors)
+          stdout(
+            flags.json
+              ? JSON.stringify({ stream: "stderr", text: errors })
+              : `== worker stderr ==\n${errors}`,
+          );
+      }
+      await maintainMacUserLogs(layout);
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+  } finally {
+    process.removeListener("SIGINT", stop);
+    process.removeListener("SIGTERM", stop);
+  }
+}
+
+function extractBooleanFlag(
+  arguments_: readonly string[],
+  flag: string,
+): { present: boolean; remaining: string[] } {
+  const count = arguments_.filter((argument) => argument === flag).length;
+  if (count > 1) throw new TypeError(`Command flag ${flag} is duplicated`);
+  return {
+    present: count === 1,
+    remaining: arguments_.filter((argument) => argument !== flag),
+  };
+}
+
+function parseValueFlags(
+  arguments_: readonly string[],
+  allowed: ReadonlySet<string>,
+): ReadonlyMap<string, string> {
+  if (arguments_.length % 2 !== 0)
+    throw new TypeError("Command flag is missing a value");
+  const result = new Map<string, string>();
+  for (let index = 0; index < arguments_.length; index += 2) {
+    const flag = arguments_[index]!;
+    const value = arguments_[index + 1]!;
+    if (!flag.startsWith("--") || !allowed.has(flag.slice(2)))
+      throw new TypeError(`Unknown command flag: ${flag}`);
+    if (value.length < 1 || value.startsWith("--"))
+      throw new TypeError(`Command flag ${flag} has an invalid value`);
+    if (result.has(flag.slice(2)))
+      throw new TypeError(`Command flag ${flag} is duplicated`);
+    result.set(flag.slice(2), value);
+  }
+  return result;
+}
+
 function assertSupportedHost(host: {
   platform: NodeJS.Platform;
   arch: string;
@@ -1721,6 +1621,16 @@ function assertSupportedHost(host: {
     throw new TypeError("macOS user commands require Apple Silicon macOS");
   if (!Number.isSafeInteger(host.uid) || host.uid <= 0)
     throw new TypeError("macOS user commands must not run as root");
+}
+
+function exactArguments(
+  arguments_: readonly string[],
+  allowed: ReadonlySet<string>,
+): void {
+  if (new Set(arguments_).size !== arguments_.length)
+    throw new TypeError("Command arguments contain duplicates");
+  if (arguments_.some((argument) => !allowed.has(argument)))
+    throw new TypeError("Command contains an unknown argument");
 }
 
 function formatStatus(
@@ -1818,4 +1728,147 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function formatHealth(health: MacUserHealth, json: boolean): string {
+  if (json) return formatJson(health);
+  const passed = health.checks.filter((check) => check.ok).length;
+  const failed = health.checks.filter(
+    (check) =>
+      !check.ok && check.status !== "not-run" && check.status !== "warning",
+  ).length;
+  const skipped = health.checks.filter(
+    (check) => check.status === "not-run",
+  ).length;
+  const lines = [
+    "MusicMute Worker Doctor",
+    "",
+    `Overall: ${health.healthy ? "Healthy" : "Problems found"}`,
+    `Checks: ${passed} passed, ${failed} failed${skipped ? `, ${skipped} not run` : ""}`,
+    "",
+  ];
+  for (const check of health.checks) {
+    lines.push(
+      `[${check.status === "not-run" ? "NOT RUN" : check.ok ? "PASS" : "FAIL"}] ${humanizeLabel(check.name)}`,
+      `       ${check.path}`,
+    );
+    if (check.code) lines.push(`       ${check.code}: ${check.evidence ?? ""}`);
+    if (!check.ok && check.nextAction)
+      lines.push(`       Next: ${check.nextAction}`);
+  }
+  return lines.join("\n");
+}
+
+function formatActionResult(
+  value: Record<string, unknown>,
+  json: boolean,
+): string {
+  if (json) return formatJson(value);
+  const action =
+    typeof value.action === "string" ? humanizeLabel(value.action) : "Command";
+  const result =
+    value.status === "ok"
+      ? "Success"
+      : typeof value.status === "string"
+        ? humanizeLabel(value.status)
+        : "Success";
+  const lines = [`MusicMute Worker ${action}`, "", `Result: ${result}`];
+  appendDetails(
+    lines,
+    {
+      ...value,
+      ...(typeof value.outcome === "string"
+        ? { outcome: humanizeLabel(value.outcome) }
+        : {}),
+    },
+    0,
+    new Set(["action", "schemaVersion", "status"]),
+  );
+  return lines.join("\n");
+}
+
+function formatDetailedResult(
+  title: string,
+  value: unknown,
+  json: boolean,
+): string {
+  if (json) return formatJson(value);
+  const lines = [title, ""];
+  appendDetails(lines, value);
+  return lines.join("\n");
+}
+
+function appendDetails(
+  lines: string[],
+  value: unknown,
+  indent = 0,
+  omittedKeys: ReadonlySet<string> = new Set(),
+): void {
+  const padding = " ".repeat(indent);
+  if (!isRecord(value)) {
+    lines.push(`${padding}${formatScalar(value)}`);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (omittedKeys.has(key)) continue;
+    const label = humanizeLabel(key);
+    if (isRecord(child)) {
+      lines.push(`${padding}${label}:`);
+      appendDetails(lines, child, indent + 2);
+    } else if (Array.isArray(child)) {
+      lines.push(`${padding}${label}:`);
+      if (child.length === 0) lines.push(`${padding}  None`);
+      else {
+        for (const item of child) {
+          if (isRecord(item)) {
+            lines.push(`${padding}  -`);
+            appendDetails(lines, item, indent + 4);
+          } else lines.push(`${padding}  - ${formatScalar(item)}`);
+        }
+      }
+    } else lines.push(`${padding}${label}: ${formatScalar(child)}`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function formatScalar(value: unknown): string {
+  if (value === null || value === undefined) return "Not available";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "string" || typeof value === "number")
+    return String(value);
+  return formatJson(value);
+}
+
+function formatJson(value: unknown): string {
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined)
+    throw new TypeError("Command result is not serializable");
+  return encoded;
+}
+
+function humanizeLabel(value: string): string {
+  const acronyms: Readonly<Record<string, string>> = {
+    api: "API",
+    cpu: "CPU",
+    ffmpeg: "FFmpeg",
+    ffprobe: "FFprobe",
+    gpu: "GPU",
+    id: "ID",
+    pid: "PID",
+    sha256: "SHA-256",
+    url: "URL",
+  };
+  return value
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .split(/[\s_-]+/u)
+    .filter(Boolean)
+    .map((word) =>
+      acronyms[word.toLowerCase()] === undefined
+        ? `${word.charAt(0).toUpperCase()}${word.slice(1)}`
+        : acronyms[word.toLowerCase()]!,
+    )
+    .join(" ");
 }

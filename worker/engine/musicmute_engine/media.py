@@ -8,10 +8,8 @@ import json
 import math
 import os
 import subprocess
-import sys
 import threading
 import wave
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -201,31 +199,15 @@ def validate_mp3_metadata(path: Path, ffprobe: Path) -> AudioInfo:
     info = probe_audio(path, ffprobe)
     if info.sample_rate != SAMPLE_RATE or info.channels != CHANNELS:
         raise MediaProcessingError("Output audio format is invalid")
-    _mp3_output_bytes(path)
+    size = path.stat().st_size
+    if size <= 0 or size > MAX_OUTPUT_BYTES:
+        raise MediaProcessingError("Output size is outside worker limits")
     return info
 
 
 def validate_mp3(path: Path, ffprobe: Path) -> tuple[AudioInfo, MediaIdentity]:
-    _assert_local_file(path)
-    # Bound the hash before starting it. Metadata probing and the complete
-    # checksum read are independent; neither result is usable until both finish.
-    _mp3_output_bytes(path)
-    with ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="output-integrity"
-    ) as executor:
-        checksum = executor.submit(sha256_base64, path)
-        info = validate_mp3_metadata(path, ffprobe)
-        identity = MediaIdentity(_mp3_output_bytes(path), checksum.result())
-    # Executor shutdown also waits for the hash if the probe raises, so attempt
-    # cleanup cannot race a reader that still owns the output file on Windows.
-    return info, identity
-
-
-def _mp3_output_bytes(path: Path) -> int:
-    size = path.stat().st_size
-    if size <= 0 or size > MAX_OUTPUT_BYTES:
-        raise MediaProcessingError("Output size is outside worker limits")
-    return size
+    info = validate_mp3_metadata(path, ffprobe)
+    return info, MediaIdentity(path.stat().st_size, sha256_base64(path))
 
 
 def decoded_audio_samples(path: Path) -> int:
@@ -349,7 +331,6 @@ def _run(
             stderr=subprocess.PIPE if capture_output else subprocess.DEVNULL,
             shell=False,
             env=_subprocess_environment(),
-            creationflags=0x00000008 if sys.platform == "win32" else 0,
         )
         captured = [bytearray(), bytearray()]
         overflow = threading.Event()

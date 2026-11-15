@@ -85,6 +85,13 @@ ClientErrorSchema.index(
   { unique: true, name: 'client_errors_owner_event_unique' },
 );
 ClientErrorSchema.index(
-  { receivedAt: 1 },
-  { expireAfterSeconds: 30 * 24 * 60 * 60, name: 'client_errors_expiry' },
+  { userId: 1, operationId: 1, receivedAt: -1 },
+  { name: 'client_errors_owner_operation' },
+);
+ClientErrorSchema.index(
+  { userId: 1, jobId: 1, receivedAt: -1 },
+  {
+    name: 'client_errors_owner_job',
+    partialFilterExpression: { jobId: { $type: 'objectId' } },
+  },
 );

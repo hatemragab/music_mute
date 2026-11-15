@@ -1,10 +1,5 @@
-import {
-  MAX_AUDIO_DURATION_SECONDS,
-  MAX_PREPARED_AUDIO_BYTES,
-} from '../media-limits.js';
 import { Transform, Type } from 'class-transformer';
 import {
-  IsBoolean,
   IsDefined,
   IsIn,
   IsInt,
@@ -28,12 +23,15 @@ import {
   type InputSource,
 } from '../job.types.js';
 import { isSha256 } from '../job-state.js';
-import { AUDIO_NAME_PATTERN } from '../job-metadata.js';
+import {
+  AUDIO_NAME_PATTERN,
+  YOUTUBE_SOURCE_URL_PATTERN,
+} from '../job-metadata.js';
 
 export class InputDeclarationDto implements InputDeclaration {
   @IsIn(Object.keys(AUDIO_TYPES)) extension!: keyof typeof AUDIO_TYPES;
   @IsString() @IsIn(Object.values(AUDIO_TYPES)) contentType!: string;
-  @IsInt() @Min(1) @Max(MAX_PREPARED_AUDIO_BYTES) bytes!: number;
+  @IsInt() @Min(1) @Max(50_000_000) bytes!: number;
   @ValidateBy({
     name: 'audioDuration',
     validator: {
@@ -41,7 +39,7 @@ export class InputDeclarationDto implements InputDeclaration {
         typeof value === 'number' &&
         Number.isFinite(value) &&
         value > 0 &&
-        value <= MAX_AUDIO_DURATION_SECONDS,
+        value <= 1_200,
     },
   })
   durationSeconds!: number;
@@ -50,10 +48,6 @@ export class InputDeclarationDto implements InputDeclaration {
 }
 
 export class CreateJobDto {
-  @ValidateIf((_object, value: unknown) => value !== undefined)
-  @IsBoolean()
-  trimEnabled?: boolean;
-
   @IsDefined()
   @IsIn([2])
   policyVersion!: 2;
@@ -61,7 +55,7 @@ export class CreateJobDto {
   @IsIn([PREPARATION_PROFILE_ID])
   preparationProfileId!: string;
   @IsDefined()
-  @IsIn(['audio_file', 'video_file'])
+  @IsIn(['audio_file', 'video_file', 'youtube'])
   source!: InputSource;
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.toLowerCase() : value,
@@ -85,8 +79,17 @@ export class CreateJobDto {
   sourceTitle?: string;
 
   @ValidateIf((_object, value: unknown) => value !== undefined)
-  @IsIn(['file'])
-  sourceKind?: 'file';
+  @IsIn(['url', 'file'])
+  sourceKind?: 'url' | 'file';
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(64)
+  @Matches(YOUTUBE_SOURCE_URL_PATTERN)
+  sourceUrl?: string;
 
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsISO8601({ strict: true })

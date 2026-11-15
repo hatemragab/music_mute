@@ -1,16 +1,14 @@
 {
-  "description": "Observed synthetic responses from the compiled Play-only AppModule workflow with real isolated MongoDB and Redis; Firebase identity and processed-media storage use doubles. UUIDs, document IDs, timestamps and one-time keys are normalized. Historical direct APK rows remain readable, while APK upload and download routes reject requests. These are examples, not credentials or live service proof.",
+  "description": "Observed synthetic responses from the compiled AppModule workflow with real isolated MongoDB and Redis; Firebase identity, S3 and APK verification use doubles. UUIDs, document IDs, timestamps and one-time keys are normalized. These are examples, not credentials or live service proof.",
   "responses": [
     {
       "method": "GET",
       "path": "/admin/session",
       "response": {
         "uid": "owner-fixture",
-        "verified_email": "owner-fixture@example.invalid",
+        "verifiedEmail": "owner-fixture@example.invalid",
         "role": "owner",
         "permissions": [
-          "notifications.read",
-          "notifications.send",
           "overview.read",
           "jobs.read",
           "jobs.manage",
@@ -18,7 +16,6 @@
           "users.processing.manage",
           "users.restrictions.manage",
           "users.account-recovery.manage",
-          "users.worker-registration.manage",
           "abuse.read",
           "media.read",
           "releases.read",
@@ -35,9 +32,9 @@
           "workers.logs.read",
           "admin.access.manage"
         ],
-        "access_revision": 0,
-        "auth_time_sec": 1791458863,
-        "server_time": "2026-01-01T00:00:00.000Z"
+        "accessRevision": 0,
+        "authTimeSec": 1789079284,
+        "serverTime": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -45,12 +42,12 @@
       "path": "/admin/access",
       "response": {
         "uid": "support-fixture",
-        "verified_email": "support-fixture@example.invalid",
+        "verifiedEmail": "support-fixture@example.invalid",
         "role": "support",
         "active": true,
         "revision": 0,
-        "created_at": "2026-01-01T00:00:00.000Z",
-        "updated_at": "2026-01-01T00:00:00.000Z"
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -58,7 +55,7 @@
       "path": "/admin/session",
       "response": {
         "uid": "support-fixture",
-        "verified_email": "support-fixture@example.invalid",
+        "verifiedEmail": "support-fixture@example.invalid",
         "role": "support",
         "permissions": [
           "overview.read",
@@ -68,7 +65,6 @@
           "users.processing.manage",
           "users.restrictions.manage",
           "users.account-recovery.manage",
-          "users.worker-registration.manage",
           "abuse.read",
           "media.read",
           "settings.read",
@@ -76,27 +72,52 @@
           "workers.read",
           "workers.logs.read"
         ],
-        "access_revision": 0,
-        "auth_time_sec": 1791458863,
-        "server_time": "2026-01-01T00:00:00.000Z"
+        "accessRevision": 0,
+        "authTimeSec": 1789079284,
+        "serverTime": "2026-01-01T00:00:00.000Z"
       }
     },
     {
       "method": "PUT",
       "path": "/admin/users/000000000000000000000001/restriction",
       "response": {
-        "id": "000000000000000000000001",
-        "account_id": "000000000000000000000001",
+        "id": "000000000000000000000060",
+        "accountId": "000000000000000000000001",
         "status": "active",
-        "reason_code": "manual_review",
+        "reasonCode": "manual_review",
         "note": "Owned dashboard integration fixture",
-        "starts_at": "2026-01-01T00:00:00.000Z",
-        "expires_at": null,
-        "created_by": "support-fixture",
-        "updated_by": "support-fixture",
-        "updated_at": "2026-01-01T00:00:00.000Z",
-        "revision": 1,
-        "cancelled_jobs": 1
+        "startsAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "createdBy": "support-fixture",
+        "updatedBy": "support-fixture",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "revision": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users/000000000000000000000001/restriction",
+      "response": {
+        "id": "000000000000000000000060",
+        "accountId": "000000000000000000000001",
+        "status": "active",
+        "reasonCode": "manual_review",
+        "note": "Owned dashboard integration fixture",
+        "startsAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "createdBy": "support-fixture",
+        "updatedBy": "support-fixture",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "revision": 1
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/admin/abuse-events",
+      "response": {
+        "items": [],
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -104,9 +125,9 @@
       "path": "/admin/jobs/000000000000000000000001/media-grants",
       "response": {
         "url": "https://example.invalid/fixture-signed-grant",
-        "expires_at": "2026-01-01T00:00:00.000Z",
+        "expiresAt": "2026-01-01T00:00:00.000Z",
         "bytes": 42,
-        "content_type": "audio/mpeg",
+        "contentType": "audio/mpeg",
         "filename": "input-000000000000000000000001.mp3"
       }
     },
@@ -115,65 +136,58 @@
       "path": "/admin/jobs/000000000000000000000001",
       "response": {
         "id": "000000000000000000000001",
-        "user_id": "000000000000000000000001",
-        "status": "cancelled",
-        "created_at": "2026-01-01T00:00:00.000Z",
-        "queued_at": "2026-01-01T00:00:00.000Z",
-        "started_at": null,
-        "finished_at": "2026-01-01T00:00:00.000Z",
-        "elapsed_seconds": 0,
-        "queue_position": null,
-        "revision": 2,
-        "last_error": null,
-        "display_name": null,
-        "source_url": null,
-        "retry_of_job_id": null,
-        "server_stage_timings": null,
-        "stage_timings": [
+        "userId": "000000000000000000000001",
+        "status": "queued",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "queuedAt": "2026-01-01T00:00:00.000Z",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+        "finishedAt": null,
+        "elapsedSeconds": 0,
+        "queuePosition": 1,
+        "revision": 3,
+        "lastError": null,
+        "displayName": null,
+        "retryOfJobId": null,
+        "stageTimings": [
           {
             "stage": "upload",
-            "started_at": "2026-01-01T00:00:00.000Z",
-            "finished_at": null,
-            "duration_seconds": null
+            "startedAt": "2026-01-01T00:00:00.000Z",
+            "finishedAt": null,
+            "durationSeconds": null
           },
           {
             "stage": "queued",
-            "started_at": "2026-01-01T00:00:00.000Z",
-            "finished_at": null,
-            "duration_seconds": null
+            "startedAt": "2026-01-01T00:00:00.000Z",
+            "finishedAt": "2026-01-01T00:00:00.000Z",
+            "durationSeconds": 0.012
           },
           {
             "stage": "validating",
-            "started_at": null,
-            "finished_at": null,
-            "duration_seconds": null
+            "startedAt": "2026-01-01T00:00:00.000Z",
+            "finishedAt": null,
+            "durationSeconds": null
           },
           {
             "stage": "processing",
-            "started_at": null,
-            "finished_at": null,
-            "duration_seconds": 0
+            "startedAt": null,
+            "finishedAt": null,
+            "durationSeconds": 0
           },
           {
             "stage": "uploading_result",
-            "started_at": null,
-            "finished_at": "2026-01-01T00:00:00.000Z",
-            "duration_seconds": null
+            "startedAt": null,
+            "finishedAt": null,
+            "durationSeconds": null
           }
         ],
-        "worker_stage_timings": [],
-        "source": "audio_file",
-        "declared_bytes": 42,
-        "measured_bytes": 42,
-        "policy_version": 1,
-        "declared_duration_seconds": 1,
-        "measured_duration_seconds": null,
+        "declaredDurationSeconds": 1,
+        "measuredDurationSeconds": null,
         "media": {
-          "input_available": true,
-          "result_available": false
+          "inputAvailable": true,
+          "resultAvailable": false
         },
-        "user_email": "user@example.invalid",
-        "user_display_name": "Fixture user"
+        "userEmail": "user@example.invalid",
+        "userDisplayName": "Fixture user"
       }
     },
     {
@@ -182,21 +196,48 @@
       "response": {
         "id": "000000000000000000000001",
         "platform": "android",
-        "source": "google_play",
-        "version_name": "1.0.0",
-        "build_number": 2,
-        "changelog_en": "Fixture release notes",
-        "store_url": "https://play.google.com/store/apps/details?id=com.example.fixture",
+        "source": "direct_apk",
+        "versionName": "1.0.0",
+        "buildNumber": 1,
+        "changelogEn": "Fixture release notes",
+        "storeUrl": null,
         "state": "draft",
-        "artifact_state": null,
+        "artifactState": null,
         "revision": 0,
-        "created_at": "2026-01-01T00:00:00.000Z",
-        "published_at": null,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "publishedAt": null,
         "bytes": null,
-        "sha256_hex": null,
-        "signer_sha256_hex": null,
-        "rejection_code": null,
-        "published_by": null
+        "sha256Hex": null,
+        "signerSha256Hex": null,
+        "rejectionCode": null,
+        "publishedBy": null
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/admin/releases/000000000000000000000001/uploads",
+      "response": {
+        "uploadId": "000000000000000000000001",
+        "grant": {
+          "method": "PUT",
+          "url": "https://example.invalid/fixture-signed-grant",
+          "expiresAt": "2026-01-01T00:00:00.000Z",
+          "headers": {
+            "Content-Type": "application/vnd.android.package-archive",
+            "x-amz-checksum-sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "If-None-Match": "*"
+          }
+        },
+        "expectedBytes": 32,
+        "expectedSha256": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/admin/releases/000000000000000000000001/uploads/000000000000000000000001/complete",
+      "response": {
+        "artifactState": "verified",
+        "checkedAt": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -205,21 +246,21 @@
       "response": {
         "id": "000000000000000000000001",
         "platform": "android",
-        "source": "google_play",
-        "version_name": "1.0.0",
-        "build_number": 2,
-        "changelog_en": "Fixture release notes",
-        "store_url": "https://play.google.com/store/apps/details?id=com.example.fixture",
+        "source": "direct_apk",
+        "versionName": "1.0.0",
+        "buildNumber": 1,
+        "changelogEn": "Fixture release notes",
+        "storeUrl": null,
         "state": "draft",
-        "artifact_state": null,
-        "revision": 0,
-        "created_at": "2026-01-01T00:00:00.000Z",
-        "published_at": null,
-        "bytes": null,
-        "sha256_hex": null,
-        "signer_sha256_hex": null,
-        "rejection_code": null,
-        "published_by": null
+        "artifactState": "verified",
+        "revision": 3,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "publishedAt": null,
+        "bytes": 32,
+        "sha256Hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
+        "signerSha256Hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
+        "rejectionCode": null,
+        "publishedBy": null
       }
     },
     {
@@ -228,95 +269,95 @@
       "response": {
         "revision": 0,
         "android": {
-          "minimum_build": null,
-          "source": "google_play",
-          "direct_release_id": null,
-          "store_release_id": null
+          "minimumBuild": null,
+          "source": "direct_apk",
+          "directReleaseId": null,
+          "storeReleaseId": null
         },
         "ios": {
-          "minimum_build": null,
-          "store_release_id": null
+          "minimumBuild": null,
+          "storeReleaseId": null
         }
       }
     },
     {
       "method": "POST",
-      "path": "/admin/releases/000000000000000000000001/publications",
+      "path": "/admin/releases/000000000000000000000001/publish",
       "response": {
         "release": {
           "id": "000000000000000000000001",
           "platform": "android",
-          "source": "google_play",
-          "version_name": "1.0.0",
-          "build_number": 2,
-          "changelog_en": "Fixture release notes",
-          "store_url": "https://play.google.com/store/apps/details?id=com.example.fixture",
+          "source": "direct_apk",
+          "versionName": "1.0.0",
+          "buildNumber": 1,
+          "changelogEn": "Fixture release notes",
+          "storeUrl": null,
           "state": "published",
-          "artifact_state": null,
-          "revision": 1,
-          "created_at": "2026-01-01T00:00:00.000Z",
-          "published_at": "2026-01-01T00:00:00.000Z",
-          "bytes": null,
-          "sha256_hex": null,
-          "signer_sha256_hex": null,
-          "rejection_code": null,
-          "published_by": "owner-fixture"
+          "artifactState": "verified",
+          "revision": 4,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "publishedAt": "2026-01-01T00:00:00.000Z",
+          "bytes": 32,
+          "sha256Hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
+          "signerSha256Hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
+          "rejectionCode": null,
+          "publishedBy": "owner-fixture"
         },
-        "policy_revision": 1,
-        "operation_id": "00000000-0000-4000-8000-000000000001"
+        "policyRevision": 1,
+        "operationId": "00000000-0000-4000-8000-000000000001"
       }
     },
     {
       "method": "POST",
-      "path": "/admin/releases/000000000000000000000001/withdrawals",
+      "path": "/admin/releases/000000000000000000000001/withdraw",
       "response": {
         "release": {
           "id": "000000000000000000000001",
           "platform": "android",
-          "source": "google_play",
-          "version_name": "1.0.0",
-          "build_number": 2,
-          "changelog_en": "Fixture release notes",
-          "store_url": "https://play.google.com/store/apps/details?id=com.example.fixture",
+          "source": "direct_apk",
+          "versionName": "1.0.0",
+          "buildNumber": 1,
+          "changelogEn": "Fixture release notes",
+          "storeUrl": null,
           "state": "withdrawn",
-          "artifact_state": null,
-          "revision": 2,
-          "created_at": "2026-01-01T00:00:00.000Z",
-          "published_at": "2026-01-01T00:00:00.000Z",
-          "bytes": null,
-          "sha256_hex": null,
-          "signer_sha256_hex": null,
-          "rejection_code": null,
-          "published_by": "owner-fixture"
+          "artifactState": "verified",
+          "revision": 5,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "publishedAt": "2026-01-01T00:00:00.000Z",
+          "bytes": 32,
+          "sha256Hex": "000000000000000000000001000000000000000000000001aaaaaaaaaaaaaaaa",
+          "signerSha256Hex": "000000000000000000000001000000000000000000000001bbbbbbbbbbbbbbbb",
+          "rejectionCode": null,
+          "publishedBy": "owner-fixture"
         },
-        "policy_revision": 2,
-        "operation_id": "00000000-0000-4000-8000-000000000001"
+        "policyRevision": 2,
+        "operationId": "00000000-0000-4000-8000-000000000001"
       }
     },
     {
       "method": "GET",
       "path": "/admin/overview",
       "response": {
-        "as_of": "2026-01-01T00:00:00.000Z",
+        "asOf": "2026-01-01T00:00:00.000Z",
         "from": "2026-01-01T00:00:00.000Z",
         "to": "2026-01-01T00:00:00.000Z",
         "counts": {
           "submitted": 1,
-          "processing_active_users": 1,
+          "processingActiveUsers": 1,
           "completed": 0,
           "failed": 0,
-          "cancelled": 1
+          "cancelled": 0
         },
         "queue": {
-          "waiting": 0,
+          "waiting": 1,
           "processing": 0,
-          "oldest_wait_seconds": null
+          "oldestWaitSeconds": 0.23
         },
         "timings": {
-          "mean_queue_wait_seconds": null,
-          "mean_processing_seconds": null,
-          "sample_count": {
-            "queue_wait": 0,
+          "meanQueueWaitSeconds": 0.012,
+          "meanProcessingSeconds": null,
+          "sampleCount": {
+            "queueWait": 1,
             "processing": 0
           }
         },
@@ -333,14 +374,14 @@
             "submitted": 1,
             "completed": 0,
             "failed": 0,
-            "cancelled": 1
+            "cancelled": 0
           }
         ],
-        "release_summary": {
+        "releaseSummary": {
           "draft": 0,
-          "published": 1,
+          "published": 0,
           "withdrawn": 1,
-          "rejected_artifacts": 0
+          "rejectedArtifacts": 0
         }
       }
     },
@@ -351,25 +392,25 @@
         "items": [
           {
             "uid": "owner-fixture",
-            "verified_email": "owner-fixture@example.invalid",
+            "verifiedEmail": "owner-fixture@example.invalid",
             "role": "owner",
             "active": true,
             "revision": 0,
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "updated_at": "2026-01-01T00:00:00.000Z"
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
           },
           {
             "uid": "support-fixture",
-            "verified_email": "support-fixture@example.invalid",
+            "verifiedEmail": "support-fixture@example.invalid",
             "role": "support",
             "active": true,
             "revision": 0,
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "updated_at": "2026-01-01T00:00:00.000Z"
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
           }
         ],
-        "next_cursor": null,
-        "as_of": "2026-01-01T00:00:00.000Z"
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -379,24 +420,23 @@
         "items": [
           {
             "id": "000000000000000000000001",
-            "user_id": "000000000000000000000001",
-            "status": "cancelled",
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "queued_at": "2026-01-01T00:00:00.000Z",
-            "started_at": null,
-            "finished_at": "2026-01-01T00:00:00.000Z",
-            "elapsed_seconds": 0,
-            "queue_position": null,
-            "revision": 2,
-            "last_error": null,
-            "display_name": null,
-            "source_url": null,
-            "user_email": "user@example.invalid",
-            "user_display_name": "Fixture user"
+            "userId": "000000000000000000000001",
+            "status": "queued",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "queuedAt": "2026-01-01T00:00:00.000Z",
+            "startedAt": "2026-01-01T00:00:00.000Z",
+            "finishedAt": null,
+            "elapsedSeconds": 0,
+            "queuePosition": 1,
+            "revision": 3,
+            "lastError": null,
+            "displayName": null,
+            "userEmail": "user@example.invalid",
+            "userDisplayName": "Fixture user"
           }
         ],
-        "next_cursor": null,
-        "as_of": "2026-01-01T00:00:00.000Z"
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -407,24 +447,15 @@
           {
             "id": "000000000000000000000001",
             "email": "user@example.invalid",
-            "display_name": "Fixture user",
+            "displayName": "Fixture user",
             "status": "active",
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "updated_at": "2026-01-01T00:00:00.000Z",
-            "revision": 0
-          },
-          {
-            "id": "000000000000000000000001",
-            "email": "secondary@example.invalid",
-            "display_name": "Secondary fixture user",
-            "status": "active",
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "updated_at": "2026-01-01T00:00:00.000Z",
-            "revision": 0
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z",
+            "revision": 1
           }
         ],
-        "next_cursor": null,
-        "as_of": "2026-01-01T00:00:00.000Z"
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -436,33 +467,19 @@
             "id": "000000000000000000000001",
             "platform": "android",
             "source": "direct_apk",
-            "version_name": "0.9.0",
-            "build_number": 1,
-            "changelog_en": "Historical retired direct APK",
-            "store_url": null,
-            "state": "published",
-            "artifact_state": "verified",
-            "revision": 0,
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "published_at": null
-          },
-          {
-            "id": "000000000000000000000001",
-            "platform": "android",
-            "source": "google_play",
-            "version_name": "1.0.0",
-            "build_number": 2,
-            "changelog_en": "Fixture release notes",
-            "store_url": "https://play.google.com/store/apps/details?id=com.example.fixture",
+            "versionName": "1.0.0",
+            "buildNumber": 1,
+            "changelogEn": "Fixture release notes",
+            "storeUrl": null,
             "state": "withdrawn",
-            "artifact_state": null,
-            "revision": 2,
-            "created_at": "2026-01-01T00:00:00.000Z",
-            "published_at": "2026-01-01T00:00:00.000Z"
+            "artifactState": "verified",
+            "revision": 5,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "publishedAt": "2026-01-01T00:00:00.000Z"
           }
         ],
-        "next_cursor": null,
-        "as_of": "2026-01-01T00:00:00.000Z"
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -471,31 +488,28 @@
       "response": {
         "plan": "standard",
         "revision": 0,
-        "accept_new_jobs": true,
-        "link_import_enabled": false,
-        "link_import_disabled_countries": [],
-        "link_import_forced_off": true,
-        "maintenance_message_en": "",
-        "maintenance_message_ar": null,
+        "acceptNewJobs": true,
+        "maintenanceMessageEn": "",
+        "maintenanceMessageAr": null,
         "values": {
-          "monthly_processing_seconds": 36000,
-          "max_duration_seconds": 1800,
-          "max_prepared_audio_bytes": 100000000,
-          "daily_upload_grants": 100,
-          "monthly_upload_grants": 1000,
-          "monthly_confirmed_upload_bytes": 5000000000,
-          "max_waiting_jobs": 20,
-          "max_processing_jobs": 1,
-          "max_infrastructure_attempts": 4,
-          "max_client_input_attempts": 5,
-          "monthly_download_grants": 1000,
-          "monthly_estimated_download_bytes": 50000000000,
-          "max_retained_output_bytes": 5000000000,
-          "signed_url_ttl_seconds": 600,
-          "monthly_service_outbound_bytes": 500000000000,
-          "deletion_grace_hours": 360
+          "monthlyProcessingSeconds": 7200,
+          "maxDurationSeconds": 1200,
+          "maxPreparedAudioBytes": 50000000,
+          "dailyUploadGrants": 30,
+          "monthlyUploadGrants": 200,
+          "monthlyConfirmedUploadBytes": 1000000000,
+          "maxWaitingJobs": 3,
+          "maxProcessingJobs": 1,
+          "maxInfrastructureAttempts": 3,
+          "maxClientInputAttempts": 5,
+          "monthlyDownloadGrants": 150,
+          "monthlyEstimatedDownloadBytes": 10000000000,
+          "maxRetainedOutputBytes": 1000000000,
+          "signedUrlTtlSeconds": 600,
+          "monthlyServiceOutboundBytes": 80000000000,
+          "deletionGraceHours": 360
         },
-        "enforced_features": [
+        "enforcedFeatures": [
           "processing_minutes",
           "media_limits",
           "upload_limits",
@@ -503,8 +517,8 @@
           "retained_storage",
           "service_outbound"
         ],
-        "updated_by": "system",
-        "updated_at": "2026-01-01T00:00:00.000Z"
+        "updatedBy": "system",
+        "updatedAt": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -512,34 +526,34 @@
       "path": "/admin/health",
       "response": {
         "status": "healthy",
-        "as_of": "2026-01-01T00:00:00.000Z",
+        "asOf": "2026-01-01T00:00:00.000Z",
         "components": [
           {
             "name": "api",
             "status": "healthy",
-            "checked_at": "2026-01-01T00:00:00.000Z",
+            "checkedAt": "2026-01-01T00:00:00.000Z",
             "code": null
           },
           {
             "name": "mongodb",
             "status": "healthy",
-            "checked_at": "2026-01-01T00:00:00.000Z",
+            "checkedAt": "2026-01-01T00:00:00.000Z",
             "code": null
           },
           {
             "name": "redis",
             "status": "healthy",
-            "checked_at": "2026-01-01T00:00:00.000Z",
+            "checkedAt": "2026-01-01T00:00:00.000Z",
             "code": null
           },
           {
             "name": "storage",
             "status": "healthy",
-            "checked_at": "2026-01-01T00:00:00.000Z",
+            "checkedAt": "2026-01-01T00:00:00.000Z",
             "code": null
           }
         ],
-        "active_alert_count": 0
+        "activeAlertCount": 0
       }
     },
     {
@@ -547,8 +561,8 @@
       "path": "/admin/alerts",
       "response": {
         "items": [],
-        "next_cursor": null,
-        "as_of": "2026-01-01T00:00:00.000Z"
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     },
     {
@@ -557,17 +571,15 @@
       "response": {
         "id": "000000000000000000000001",
         "email": "user@example.invalid",
-        "display_name": "Fixture user",
+        "displayName": "Fixture user",
         "status": "active",
-        "created_at": "2026-01-01T00:00:00.000Z",
-        "updated_at": "2026-01-01T00:00:00.000Z",
-        "revision": 0,
-        "worker_registration_allowed": false,
-        "providers": [],
-        "processing_counts": {
-          "cancelled": 1
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "revision": 1,
+        "processingCounts": {
+          "queued": 1
         },
-        "recent_job_ids": ["000000000000000000000001"],
+        "recentJobIds": ["000000000000000000000001"],
         "deletion": null
       }
     },
@@ -575,9 +587,9 @@
       "method": "GET",
       "path": "/admin/operations/00000000-0000-4000-8000-000000000001",
       "response": {
-        "operation_id": "00000000-0000-4000-8000-000000000001",
+        "operationId": "00000000-0000-4000-8000-000000000001",
         "status": "succeeded",
-        "resource_id": "support-fixture",
+        "resourceId": "support-fixture",
         "revision": 0
       }
     },
@@ -588,104 +600,143 @@
         "items": [
           {
             "id": "000000000000000000000001",
-            "actor_uid": "owner-fixture",
+            "actorUid": "owner-fixture",
             "action": "exports.jobs",
-            "resource_type": "export",
-            "resource_id": "00000000-0000-4000-8000-000000000001",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "resourceType": "export",
+            "resourceId": "00000000-0000-4000-8000-000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": null,
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": null,
-            "next_revision": null,
+            "previousRevision": null,
+            "nextRevision": null,
             "outcome": "succeeded",
-            "export_metadata": {
+            "exportMetadata": {
               "dataset": "jobs",
               "from": "2026-01-01T00:00:00.000Z",
               "to": "2026-01-01T00:00:00.000Z",
-              "row_count": 1
+              "rowCount": 1
             }
           },
           {
             "id": "000000000000000000000001",
-            "actor_uid": "owner-fixture",
+            "actorUid": "owner-fixture",
             "action": "releases.withdraw",
-            "resource_type": "release",
-            "resource_id": "000000000000000000000001",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "resourceType": "release",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": 1,
-            "next_revision": 2,
+            "previousRevision": 1,
+            "nextRevision": 2,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actor_uid": "owner-fixture",
+            "actorUid": "owner-fixture",
             "action": "releases.publish",
-            "resource_type": "release",
-            "resource_id": "000000000000000000000001",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "resourceType": "release",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": 0,
-            "next_revision": 1,
+            "previousRevision": 0,
+            "nextRevision": 1,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actor_uid": "owner-fixture",
+            "actorUid": "owner-fixture",
+            "action": "releases.upload.verified",
+            "resourceType": "release_upload",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
+            "reason": null,
+            "at": "2026-01-01T00:00:00.000Z",
+            "previousRevision": 2,
+            "nextRevision": 3,
+            "outcome": "succeeded"
+          },
+          {
+            "id": "000000000000000000000001",
+            "actorUid": "owner-fixture",
+            "action": "releases.upload.complete",
+            "resourceType": "release_upload",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
+            "reason": null,
+            "at": "2026-01-01T00:00:00.000Z",
+            "previousRevision": 1,
+            "nextRevision": 2,
+            "outcome": "succeeded"
+          },
+          {
+            "id": "000000000000000000000001",
+            "actorUid": "owner-fixture",
+            "action": "releases.upload.reserve",
+            "resourceType": "release_upload",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
+            "reason": null,
+            "at": "2026-01-01T00:00:00.000Z",
+            "previousRevision": 0,
+            "nextRevision": 1,
+            "outcome": "succeeded"
+          },
+          {
+            "id": "000000000000000000000001",
+            "actorUid": "owner-fixture",
             "action": "releases.create",
-            "resource_type": "release",
-            "resource_id": "000000000000000000000001",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "resourceType": "release",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": null,
-            "next_revision": 0,
+            "previousRevision": null,
+            "nextRevision": 0,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actor_uid": "support-fixture",
+            "actorUid": "support-fixture",
             "action": "media.input.play.grant",
-            "resource_type": "job",
-            "resource_id": "000000000000000000000001",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "resourceType": "job",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": null,
-            "next_revision": null,
+            "previousRevision": null,
+            "nextRevision": null,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actor_uid": "support-fixture",
-            "action": "users.restriction.apply",
-            "resource_type": "account_restriction",
-            "resource_id": "000000000000000000000001",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "actorUid": "support-fixture",
+            "action": "users.processing.suspend",
+            "resourceType": "user",
+            "resourceId": "000000000000000000000001",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": 0,
-            "next_revision": 1,
+            "previousRevision": 0,
+            "nextRevision": 1,
             "outcome": "succeeded"
           },
           {
             "id": "000000000000000000000001",
-            "actor_uid": "owner-fixture",
+            "actorUid": "owner-fixture",
             "action": "admin.access.create",
-            "resource_type": "admin_access",
-            "resource_id": "support-fixture",
-            "operation_id": "00000000-0000-4000-8000-000000000001",
+            "resourceType": "admin_access",
+            "resourceId": "support-fixture",
+            "operationId": "00000000-0000-4000-8000-000000000001",
             "reason": "Owned dashboard integration fixture",
             "at": "2026-01-01T00:00:00.000Z",
-            "previous_revision": null,
-            "next_revision": 0,
+            "previousRevision": null,
+            "nextRevision": 0,
             "outcome": "succeeded"
           }
         ],
-        "next_cursor": null,
-        "as_of": "2026-01-01T00:00:00.000Z"
+        "nextCursor": null,
+        "asOf": "2026-01-01T00:00:00.000Z"
       }
     }
   ]

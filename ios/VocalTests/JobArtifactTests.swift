@@ -22,43 +22,14 @@ import XCTest
     try? FileManager.default.removeItem(at: root)
   }
 
-  func testComparisonMapsTrimmedAudioAndPreservesUntrimmedTime() throws {
-    var job = processingJob(id: jobId, status: "ready")
-    job.trimEnabled = false
-    XCTAssertEqual(try comparisonPosition(12, toOriginal: true, job: job), 12)
-    job.trimEnabled = true
-    XCTAssertThrowsError(try comparisonPosition(12, toOriginal: true, job: job))
-    job.comparisonRanges = [[0, 441000], [882000, 1_323_000]]
-    XCTAssertEqual(try comparisonPosition(12, toOriginal: true, job: job), 22)
-    XCTAssertEqual(try comparisonPosition(22, toOriginal: false, job: job), 12)
-    XCTAssertEqual(try comparisonPosition(15, toOriginal: false, job: job), 10)
-  }
-
-  private func repository(original: Bool = false) -> JobArtifactRepository {
+  private func repository() -> JobArtifactRepository {
     JobArtifactRepository(
       api: api, root: root, sessionProvider: { [weak self] in self?.fence }, transport: transfer,
-      original: original,
       validate: { file in
         guard try Data(contentsOf: file) == Data("fixture-mp3".utf8) else {
           throw JobArtifactFailure.invalidOutput
         }
       })
-  }
-
-  func testOriginalExportUsesCachedFileAndMetadataAfterOfflineRelaunch() async throws {
-    api.expectedArtifact = "input"
-    let first = try await repository(original: true).preparedOutput(
-      jobId: jobId, displayName: "Song")
-    XCTAssertEqual(first.pathExtension, "mp3")
-    XCTAssertEqual(api.detailCalls, 1)
-    XCTAssertEqual(api.downloadCalls, 1)
-    api.allowNetwork = false
-    let second = try await repository(original: true).preparedOutput(
-      jobId: jobId, displayName: "Song")
-    XCTAssertEqual(first, second)
-    XCTAssertEqual(api.detailCalls, 1)
-    XCTAssertEqual(api.downloadCalls, 1)
-    XCTAssertEqual(transfer.calls, 1)
   }
 
   func testReadyStateDoesNotDownloadAndExplicitActionsReuseValidatedCache() async throws {
@@ -70,7 +41,6 @@ import XCTest
     XCTAssertEqual(first, second)
     XCTAssertEqual(transfer.calls, 1)
     XCTAssertEqual(api.downloadCalls, 1)
-    XCTAssertEqual(api.detailCalls, 0)
     XCTAssertEqual(try Data(contentsOf: first), Data("fixture-mp3".utf8))
     XCTAssertTrue(
       try first.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
@@ -104,7 +74,7 @@ import XCTest
     }
     _ = try await repository.ensureOutput(jobId: jobId)
     XCTAssertEqual(transfer.calls, 2)
-    XCTAssertEqual(api.detailCalls, 0)
+    XCTAssertEqual(api.detailCalls, 2)
     XCTAssertEqual(api.downloadCalls, 2)
     XCTAssertNotEqual(api.requestIDs[0], api.requestIDs[1])
   }
@@ -123,8 +93,7 @@ import XCTest
       XCTAssertEqual(error as? JobArtifactFailure, .unavailable)
     }
     XCTAssertEqual(transfer.calls, 1)
-    XCTAssertEqual(api.downloadCalls, 2)
-    XCTAssertEqual(api.detailCalls, 0)
+    XCTAssertEqual(api.downloadCalls, 1)
   }
 
   func testRepeatedForbiddenResponseHasBoundedRenewal() async throws {
@@ -257,14 +226,11 @@ import XCTest
 
 @MainActor private final class ArtifactJobsFixture: JobsAPI {
   var status = "ready"
-  var allowNetwork = true
-  var expectedArtifact = "output"
   var detailCalls = 0
   var downloadCalls = 0
   var requestIDs: [UUID] = []
   var grantExpiry = Date().addingTimeInterval(60)
   func detail(id: String) async throws -> Job {
-    guard allowNetwork else { throw AuthFailure.offline }
     detailCalls += 1
     return processingJob(id: id, status: status)
   }
@@ -272,13 +238,9 @@ import XCTest
     try await download(id: id, artifact: artifact, requestId: UUID())
   }
   func download(id: String, artifact: String, requestId: UUID) async throws -> DownloadGrant {
-    guard allowNetwork else { throw AuthFailure.offline }
-    XCTAssertEqual(artifact, expectedArtifact)
+    XCTAssertEqual(artifact, "output")
     downloadCalls += 1
     requestIDs.append(requestId)
-    if artifact == "output", status != "ready" {
-      throw JobsFailure.conflict(code: "JOB_STATE_CONFLICT")
-    }
     return DownloadGrant(
       url: URL(string: "https://storage.fixture.invalid/output?attempt=\(downloadCalls)")!,
       expiresAt: grantExpiry)

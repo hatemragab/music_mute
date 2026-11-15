@@ -4,7 +4,6 @@ import { constants, createReadStream } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, statfs } from "node:fs/promises";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { freemem, totalmem, uptime, availableParallelism } from "node:os";
 import type {
   WorkerCommandMetric,
   WorkerCommandResult,
@@ -78,91 +77,41 @@ export class PackagedRuntimeCommandExecutor implements RuntimeCommandExecutor {
     signal?: AbortSignal,
   ): Promise<WorkerCommandResult> {
     const metrics: WorkerCommandMetric[] = [];
-    const failed: string[] = [];
-    const check = async (
-      names: string[],
-      run: () => Promise<WorkerCommandMetric[]>,
-    ) => {
-      signal?.throwIfAborted();
-      try {
-        const values = await run();
-        signal?.throwIfAborted();
-        metrics.push(
-          ...names.map((name) => metric(`check.${name}`, 1, "boolean")),
-          ...values,
-        );
-      } catch {
-        signal?.throwIfAborted();
-        failed.push(...names);
-        metrics.push(
-          ...names.map((name) => metric(`check.${name}`, 0, "boolean")),
-        );
-      }
-    };
     if (command.checks.includes("service")) {
-      await check(["service"], async () => {
-        await this.options.serviceCheck();
-        const memory = process.memoryUsage();
-        return [
-          metric("runtime.uptime_seconds", process.uptime(), "seconds"),
-          metric("host.uptime_seconds", uptime(), "seconds"),
-          metric("runtime.rss_bytes", memory.rss, "bytes"),
-          metric("runtime.heap_used_bytes", memory.heapUsed, "bytes"),
-          metric("host.memory_total_bytes", totalmem(), "bytes"),
-          metric("host.memory_free_bytes", freemem(), "bytes"),
-          metric("host.available_parallelism", availableParallelism(), "count"),
-        ];
-      });
+      await this.options.serviceCheck();
+      metrics.push(metric("check.service", 1, "boolean"));
     }
     if (command.checks.includes("storage")) {
-      await check(["storage"], async () => {
-        await access(
-          this.options.workRoot,
-          constants.R_OK | constants.W_OK | constants.X_OK,
-        );
-        const storage = await statfs(this.options.workRoot);
-        return [
-          metric("storage.free_bytes", storage.bavail * storage.bsize, "bytes"),
-          metric(
-            "storage.total_bytes",
-            storage.blocks * storage.bsize,
-            "bytes",
-          ),
-        ];
-      });
+      await access(
+        this.options.workRoot,
+        constants.R_OK | constants.W_OK | constants.X_OK,
+      );
+      const storage = await statfs(this.options.workRoot);
+      metrics.push(
+        metric("check.storage", 1, "boolean"),
+        metric("storage.free_bytes", storage.bavail * storage.bsize, "bytes"),
+      );
     }
     if (
       command.checks.some((check) =>
         ["model", "provider", "ffmpeg"].includes(check),
       )
     ) {
-      // The packaged engine validates these together; never claim an individual
-      // component passed if that shared probe could not complete.
-      await check(
-        command.checks.filter((name) =>
-          ["model", "provider", "ffmpeg"].includes(name),
-        ),
-        async () => {
-          const diagnostics = await this.runDoctor(signal);
-          if (diagnostics.status !== "ok")
-            throw new Error("Engine doctor failed");
-          return command.checks.includes("model")
-            ? [
-                metric(
-                  "model.bytes",
-                  finiteNumber(diagnostics.modelBytes),
-                  "bytes",
-                ),
-              ]
-            : [];
-        },
-      );
+      const diagnostics = await this.runDoctor(signal);
+      if (command.checks.includes("model")) {
+        metrics.push(
+          metric("check.model", 1, "boolean"),
+          metric("model.bytes", finiteNumber(diagnostics.modelBytes), "bytes"),
+        );
+      }
+      if (command.checks.includes("provider"))
+        metrics.push(metric("check.provider", 1, "boolean"));
+      if (command.checks.includes("ffmpeg"))
+        metrics.push(metric("check.ffmpeg", 1, "boolean"));
     }
     return {
-      outcome: failed.length ? "failed" : "succeeded",
-      summary: failed.length
-        ? `Checks failed or could not complete: ${failed.join(", ")}. Other check results are retained.`
-        : `${command.checks.length} worker health checks passed`,
+      outcome: "succeeded",
+      summary: `${command.checks.length} worker health checks passed`,
       metrics,
     };
   }

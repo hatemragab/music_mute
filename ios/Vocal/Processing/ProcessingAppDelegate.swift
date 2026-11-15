@@ -18,6 +18,11 @@ final class ProcessingAppDelegate: NSObject, UIApplicationDelegate {
     handleEventsForBackgroundURLSession identifier: String,
     completionHandler: @escaping () -> Void
   ) {
+    if BackgroundSourceTransferCoordinator.shared.handleBackgroundEvents(
+      identifier: identifier, completionHandler: completionHandler)
+    {
+      return
+    }
     if !BackgroundTransferCoordinator.shared.handleBackgroundEvents(
       identifier: identifier, completionHandler: completionHandler)
     {

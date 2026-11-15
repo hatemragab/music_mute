@@ -1,7 +1,7 @@
 # MusicMute
 
-Native Kotlin Android app with local audio/video uploads and server-side URL imports.
-Local files enter a durable review before cloud processing. Source audio stays private and
+Native Kotlin Android app that turns a complete pasted YouTube URL or selected
+local audio/video file into a durable local review before cloud processing. Source audio stays private and
 the processed library retrieves voice-only MP3 results only when requested.
 
 Application ID and namespace: `com.hatem.musicmute`. Minimum SDK 26; compile/target
@@ -14,35 +14,16 @@ Install JDK 17 and Android SDK platform 36. Configure `JAVA_HOME` and
 `ANDROID_HOME`, then open this `android/` folder in Android Studio or run:
 
 ```sh
-./gradlew :app:assemblePlayDebug :app:lintPlayDebug :app:testPlayDebugUnitTest
+./gradlew :app:assembleDirectDebug :app:assemblePlayDebug \
+  :app:lintDirectDebug :app:lintPlayDebug \
+  :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest
 ```
 
 The checked-in Gradle 8.13 wrapper verifies its distribution checksum. The APK is
-`app/build/outputs/apk/play/debug/app-play-debug.apk`. Production distribution
-uses the Play release App Bundle.
+`app/build/outputs/apk/direct/debug/app-direct-debug.apk` for direct distribution
+and `app/build/outputs/apk/play/debug/app-play-debug.apk` for Play distribution.
 Reports are in `app/build/reports/`.
 Machine-specific configuration and build output are ignored.
-
-Realtime is owned by the authenticated Activity session, not a navigation tab.
-Home, Library, Player and Settings share the same foreground connection; history
-subscriptions survive tab switches. Reselecting the active tab does not navigate
-or refresh. Backgrounding the Activity or signing out closes the connection.
-Rejected sessions stay stopped until a new session is bound.
-
-The native link-import UI starts hidden and follows `link_import_visible` from
-`GET /processing-policy?schema_version=2` on each foreground/session open, followed
-by the existing owner `policy` snapshots on the same socket. Signed-in checkout
-uses the account token so global, country and selected-user hiding share the same
-resolved visibility. Guest and per-owner payloads are cached separately in
-installation-private no-backup storage for offline reopen. Switching accounts
-restores only the matching cache; an uncached owner starts hidden. Missing
-fields remain compatible with older media-limit responses and mean hidden. Home
-keeps its file picker; link selection, paste/submit, rights confirmation, and the
-launcher link shortcut are presented only when visible. Signed-out opens use the
-public guest checkout; the policy socket remains authenticated. Android disables the
-previous static shortcut on upgrade; a user-pinned copy can only be removed by
-that user. Visibility changes do not
-cancel work or restrict history, retries, uploads, downloads, or API calls.
 
 The production `app/google-services.json` is also local-only and ignored. Download
 it before Debug or Release builds using the repository-root Firebase command in
@@ -66,18 +47,12 @@ in no-backup storage. A previously bootstrapped user may enter local features
 offline; a new sign-in must complete backend registration. Account processing inputs, results, pending reviews, and source downloads are UID scoped.
 
 Debug and Release use `https://api.music-mute.com` by default. Override the public
-API **origin** with `-PauthApiUrl=https://your-api.example`.
+API **origin** (without `/api/v1`) with `-PauthApiUrl=https://your-api.example`.
 For local Debug development, override with `-PauthApiUrl=http://127.0.0.1:3000`
 and forward the port from the connected device with
 `adb -s <serial> reverse tcp:3000 tcp:3000`. Debug cleartext is limited to loopback
 and the Android emulator host. Release rejects an absent or unsafe origin and has
 no emulator auth.
-
-The app uses root-mounted API routes such as `POST /auth/sessions` and
-`GET /jobs`, without a version prefix. Request and response JSON and query
-names are snake_case on the wire; the Kotlin models remain idiomatic through
-the HTTP adapter. See the [API client contract](../docs/api/client-contract.md)
-for authentication, pagination, errors, and the breaking deployment cutover.
 
 The Firebase client configuration includes a web OAuth client ID. The Debug
 certificate from this development machine was registered in Firebase on
@@ -89,9 +64,9 @@ registered before its Debug APK can use Google sign-in.
 
 `node android/e2e/server.mjs` starts disposable MongoDB, Redis, Firebase Auth
 Emulator, and the compiled backend, then prints the owned ports. Build with
-`./gradlew :app:assemblePlayAuthE2e`, forward device ports `48080` and `49099` to the
+`./gradlew :app:assembleDirectAuthE2e`, forward device ports `48080` and `49099` to the
 printed API and Auth Emulator ports, and install
-`app/build/outputs/apk/play/authE2e/app-play-authE2e.apk` on the connected device. The separate
+`app/build/outputs/apk/direct/authE2e/app-direct-authE2e.apk` on the connected device. The separate
 `com.hatem.musicmute.authtest` package preserves the normal app's data.
 
 This variant uses only the `demo-musicmute` project and a picker for two synthetic
@@ -114,10 +89,11 @@ directory. Its `storeFile=upload-keystore.jks` path is resolved relative to the
 be backed up securely together. Do not regenerate this key for routine builds.
 
 ```sh
-./gradlew :app:bundlePlayRelease
+./gradlew :app:assembleDirectRelease :app:bundlePlayRelease
 ```
 
-Output: `app/build/outputs/bundle/playRelease/app-play-release.aab`. Missing signing credentials
+Outputs: `app/build/outputs/apk/direct/release/app-direct-release.apk` and
+`app/build/outputs/bundle/playRelease/app-play-release.aab`. Missing signing credentials
 cause release signing validation to fail; releases do not use the debug key.
 Debug builds continue to use the normal Android debug certificate.
 
@@ -140,34 +116,29 @@ simulator or device for runtime proof.
 
 ## App updates
 
-Android uses the `play` distribution flavor. The dashboard records the version
-name and version code already available to the intended audience in Play Console;
-it never uploads an Android app file. The app installs updates with Google Play
-In-App Updates. Required updates use the immediate Play flow and accept any
-Play-offered version code meeting `minimumBuild`. Optional updates require the
-selected latest target and use the flexible flow when available, with immediate
-as the fallback. For installed build 10, minimum 12, target 15, Play-offered build
-14 is sufficient to run the required update. Admission stays blocked until the
-actual installed build changes; build 14 then has only an optional update to 15.
-
-The Activity owns the update launcher binding and releases it and the install
-listener when destroyed. Policy changes update pending Play checks before a flow
-starts, so a superseded optional decision cannot install below a newer required
-minimum. Foreground recovery resumes interrupted immediate flows and restores
-flexible download progress. A qualified downloaded update retains **Restart to
-update** across optional deferral and transient Play-check, completion, or store
-launch failures. A higher minimum or optional target invalidates an older
-ineligible download. MusicMute does not restart playback or install before the
-restart action. Unavailable updates offer a
-retry and **Open Google Play** at the validated package listing. There is no APK
-download, self-install permission, or direct distribution variant.
-
-For Google Play submission, follow [the release guide](../docs/google-play-release.md)
-and [the English/Arabic listing pack](play-listing/README.md). After building, run
-`JAVA_HOME=$(/usr/libexec/java_home -v 17) python3 scripts/check-play-release.py`
-from this directory. This establishes local bundle packaging only. Live production
-checks, Play Console declarations, and Play-installed device checks require their
-separate authorized release workflow.
+Android has separate `direct` and `play` distribution variants with the same
+production application ID and signing configuration. Version `0.1.3` is build 4.
+The direct variant uses the built-in version dialog, download service, progress
+callbacks, FileProvider and installer-intent helper from
+[azhon/AppUpdate 4.3.6](https://github.com/azhon/AppUpdate) (Apache-2.0).
+`AppUpdateDownloadClient` supplies the backend version/changelog and required
+update decision. Its `AppUpdateHttpManager` adapter retains the bounded platform
+HTTPS stream with default certificate/host verification and rejects redirects;
+the library's default HTTP implementation is never selected. Verification runs
+off the main thread and must succeed before the library receives `Done`, because
+the library can expose a completed APK in a notification even when progress
+notifications are disabled. Automatic library installation is disabled.
+Before Android's installer is opened, MusicMute obtains a fresh public download
+grant and independently verifies the complete APK size and SHA-256, package ID,
+higher build number, and signing-certificate SHA-256. The
+`REQUEST_INSTALL_PACKAGES` permission and narrowly scoped azhon provider exist
+only in the direct variant; the service and dialog activity are non-exported.
+The Activity-bound adapter releases the library singleton/listeners when an
+attempt ends, and retries obtain a new grant. The Compose gate still blocks
+required updates and handles localized errors, permission recovery, and optional
+download progress after the library dismisses its dialog. The Play variant has no self-install permission or
+direct APK dependency; its current safe fallback opens the verified MusicMute
+Play listing.
 
 The app checks policy at launch, after reconnect, when a foreground check is due,
 and every 15 minutes while foregrounded. Optional updates can be deferred for 24
@@ -176,57 +147,48 @@ UI, back navigation, playback, imports, local downloads/uploads, and notificatio
 actions. Local inputs and cloud job IDs are retained; activating the gate never
 cancels or deletes an existing cloud job.
 
-The public backend policy route requires the production runtime flag
-`APP_UPDATES_ENABLED=true`; changing an example file does not change a running
-deployment. Raise the minimum only after the required Play build is available to
-every affected audience. Play account ownership, package/signing identity, and a
-higher version code must be verified with a real Play-installed app before release
-readiness is claimed. Local JVM and bundle checks do not establish those gates.
+The public backend policy and download-grant routes require the production
+runtime flag `APP_UPDATES_ENABLED=true`; changing the example file alone does not
+change a running deployment. Build 2 predates this in-app updater, so it cannot be
+retrofitted with the dialog. Build 4 is the reviewed bootstrap distributed
+through the existing update page; subsequent higher builds can then use the
+in-app prompt and verified download flow.
 
-## Link acquisition
+## Download quality
 
-URL imports use `POST /media-imports`. A private SaaS adapter returns audio to
-NestJS for validation, temporary-file cleanup and private R2 upload. Android
-receives neither vendor credentials nor delivery URLs. See
-[provider architecture](../video_providers/README.md).
+The app uses [youtubedl-android 0.18.1](https://github.com/yausername/youtubedl-android)
+to execute yt-dlp **on Android**. The supplied Fiftee branch URL returned 404
+publicly; it is not a downloader dependency. This implementation follows the
+previously agreed youtubedl-android integration.
 
-Library songs, the full player, mini player and playback queue accept the nullable
-`thumbnail_url` returned with the normal job HTTP and realtime snapshots. Its
-original public YouTube image URL is retained in the existing account-scoped
-local catalog; no metadata lookup or guessed image URL is added. These rounded
-artwork cards share the bounded public-image
-transport and small memory cache. The player keeps its existing note artwork
-while loading or when a thumbnail is unavailable; Library rows keep their note
-icon and availability badge. Live metadata is matched by owner and job, so a song
-change clears the previous artwork and later thumbnail updates remain visible.
-Missing, invalid, offline, expired or undecodable thumbnails retain each surface's
-existing placeholder. Only reviewed HTTPS `i.ytimg.com` JPEG/WebP paths and bounded
-`sqp`/`rs` parameters are accepted; image requests carry no MusicMute authentication or
-installation headers. Thumbnail availability does not affect audio playback.
+The selection is `bestaudio[protocol=https][abr<=160]/bestaudio[protocol=https]`:
+the best available audio-only stream at or below 160 kbps when yt-dlp reports one,
+with an audio-only fallback
+delivered directly over HTTPS. There is no combined video fallback and no HLS
+conversion path. `--no-playlist` limits each request to one video, and
+`--fixup never` disables automatic repairs. No `-x`, audio-format, audio-quality,
+recode, or remux operation is requested. FFmpeg is not included.
+
+The downloaded library copy retains its original container and codec, commonly
+WebM/Opus or M4A/AAC. For cloud processing, the app first uses Android's track
+bitrate and falls back to yt-dlp's selected-format bitrate when Android does not
+report one. Audio over 160 kbps or with unknown bitrate is encoded once to AAC/M4A
+at 160 kbps before upload. It is not converted to MP3 on the phone. Downloaded
+audio is inspected and hashed during staging without another full mobile decode;
+the worker validates and decodes the complete input before separation. Picked
+phone media retains full mobile decode validation. See the upstream
+[yt-dlp format selection documentation](https://github.com/yt-dlp/yt-dlp#format-selection).
+If a direct audio-only format is unavailable, the app reports a failure without an automatic extraction retry.
 
 ## App behavior
 
-- **Server URL imports:** Home accepts public media links using its bundled site catalog,
-  including a pasted or Android-shared text link. After rights confirmation the app
-  sends only the canonical URL and a durable request ID to `POST /media-imports`.
-  It never downloads or reuploads that source. Per-account import state survives
-  process recreation; uncertain submissions reuse their request ID. The app follows
-  authenticated import snapshots, then opens the existing job and result experience after
-  `submitted`. Failed imports and account/provider limits are shown separately.
-  Failed service-availability imports offer **Try again** beside Delete. The explicit
-  action keeps the original rights-confirmed URL and trim choice. A known
-  failed execution receives one new request ID; uncertain admission resumes the saved
-  identity. Duplicate taps cannot create additional attempts. A fresh admission uses
-  the server's current recipe and access checks. Invalid inputs and policy failures
-  remain removable without a retry action; the app adds no automatic paid retry.
-  A bundled verified-site catalog rejects unsupported sites and link shapes locally,
-  including restored submissions, before any import request. The backend still
-  verifies audio-only availability, private/live media and playlists. See the
-  [shared site policy](../docs/url-imports/supported-sites.md).
 - **Home:** Import audio is primary. Selecting a supported file creates a local,
   validated review showing filename, size and duration. A rights checkbox and
   explicit Remove music action are required before cloud processing. Cancelling
   the review deletes its staged private copy without creating a cloud job.
+- **YouTube:** A visible secondary option requires explicit download confirmation
+  with rights guidance. Pasting, keyboard Done and focus changes never start a
+  download. Finished downloads enter a separate cloud-processing review.
 - **Processed audio:** one persistent list merges local transfer state and backend
   jobs. Cards show the preserved name, actual stage, elapsed time, and measured
   byte progress. Ready voice output supports Play, Download, Save, Share, Rename,
@@ -235,39 +197,111 @@ installation headers. Thumbnail availability does not affect audio playback.
   location. It copies the original bytes to that destination. Cancelling the
   picker leaves the history file unchanged. Save failures are shown explicitly;
   an interrupted provider write may leave an incomplete destination copy.
-- **Cancellation/retry:** local preparation/upload and cloud jobs retain their existing
-  cancellation and retry behavior. Server imports expose bounded retryable failures.
+- **Cancellation/retry:** cancellation stops the native process and removes only
+  that attempt's partial files. Retry creates a fresh work ID and directory, so
+  a stopping attempt cannot erase a retry. Exact repeated URLs reuse active jobs
+  or existing complete files. Different URL spellings can produce separate entries.
 - **Settings:** persistent system/light/dark theme and system/English/Arabic
   language. Arabic layouts use RTL; URL fields stay LTR.
 - **Multiple tasks:** one local pipeline runs at a time; additional
   accepted tasks wait durably and remain independently cancellable.
 
-WorkManager queues local preparation and upload transfers when offline and runs them as
-ordinary scheduled background work without a data-sync foreground service. Android may
-reschedule work after constraints change or the process stops; retryable interrupted
-state is reconciled with history. System scheduling, battery restrictions, and force-stop
-behavior still apply; uninterrupted background completion is not guaranteed.
+WorkManager queues source and upload transfers when offline and runs real local
+transfers with silent foreground progress notifications when allowed. Notification
+permission is optional on Android 13+. Android may reschedule work after constraints
+change or the process stops; retryable interrupted state is reconciled with history.
+System scheduling, foreground-service time limits, battery restrictions, and
+force-stop behavior still apply; uninterrupted completion is not guaranteed.
 
 ## Storage and integration boundaries
 
-`processing/` owns local preparation, signed R2 uploads, durable account-scoped
-jobs, server import polling, and result caches. `playback/` uses Media3 and a
-private MediaSessionService. Local source files and user-exported copies remain
-under user control. Playback/export downloads only completed server results.
+- `download/AudioDownloader` isolates the native download engine.
+  `AudioDownloadPolicy` owns the original-audio selection.
+- `DownloadRepository`, `AudioDownloadWorker`, and `HistoryStore` own scheduling,
+  cancellation, durable metadata, and app-private audio files under
+  `files/audio_downloads/<work-id>/`. No broad storage permission is requested.
+- Metadata retains only needed fields; yt-dlp's temporary info JSON is removed
+  after completion because it can contain expiring stream URLs.
+- `AudioExport` and the document picker copy completed files to user-selected
+  storage. App-private files are removed by Android on uninstall/clear-data;
+  independently saved copies remain at their chosen destination.
+- `playback/` uses Media3 ExoPlayer and a private MediaSessionService.
+- `processing/` owns typed job contracts, immutable input validation, durable
+  WorkManager uploads, UID-scoped metadata/results, cancel/retry reconciliation,
+  and optional notification registration. `ProcessingViewModel` connects these
+  components to the Processing history and detail screens.
 
-Release builds enable R8 code optimization and resource shrinking. All existing
-ABIs remain supported. Device URL acquisition and its bundled runtime are removed.
-Use the server import form for URLs. User audio files are not deleted.
+The native package includes Python and QuickJS for extraction and YouTube JavaScript
+handling. Legacy JNI packaging enables extraction of executables. All four upstream
+ABIs are packaged; the universal debug APK is about 85 MB. ARM64 executable ELF
+segments were inspected for 16 KB alignment; this is packaging evidence, not a run
+on every Android version or page-size configuration.
 
-Sentry uses the Android core SDK for Java/Kotlin crash and ANR reporting. The
-Sentry NDK integration and session replay modules are not packaged.
+Downloads start with the installed yt-dlp extractor. A unique daily WorkManager
+job checks GitHub only on unmetered networking with adequate battery and storage.
+Network fetch and SHA-256 verification happen outside the downloader mutex;
+activation and the local version probe are serialized with downloads and retain
+rollback/recovery. No GitHub request runs in the user download path. Update checks
+back off persistently (24 hours after success, 6 hours after failure).
+
+Metadata extraction writes a bounded, private info JSON, validates duration/live
+and long-job policy, and reuses that metadata for transfer. The source webpage URL
+is removed before `--load-info-json` to prevent yt-dlp's automatic re-extraction
+fallback. Temporary signed stream links are never logged and are removed with the
+attempt metadata. A private yt-dlp cache reuses player/signature work. QuickJS is
+configured by the native package; no cookies, forced client identities, proxy
+rotation, or remote challenge-script fetching is added.
+
+Downloads remain serialized with a persistent 5-second gap. HTTP 429, session-limit
+messages, HTTP 403, and sign-in refusals stop automatic retries and set a device-wide
+15-minute cooldown (an application policy, not a YouTube guarantee). Native retries
+are zero; ordinary transient transport errors retain the bounded worker backoff.
+A new queued request waits before taking a foreground service or local pipeline slot.
+
+For debug runs, filter logcat with `adb -s <serial> logcat -s YoutubeSource:I`.
+The last 100 allowlisted events also live in the debug app's no-backup
+`youtube-diagnostics.log`, readable with `adb -s <serial> exec-out run-as
+com.hatem.musicmute cat no_backup/youtube-diagnostics.log`. Events include stage,
+outcome, elapsed milliseconds, extractor version, bytes, refusal category, and
+recognized JS/PO-token/format hints. They contain no URLs, titles, account IDs,
+native stderr, or stack traces. A 403 alone does not establish an IP ban.
+Unit tests and offline fixture transfers do not prove live YouTube availability.
+A separate connected CPH2573 debug check on 2026-09-24 observed the verified
+background upgrade from 2025.11.12 to 2026.08.19 and a successful 4,405,162-byte
+YouTube source download: 7.1 seconds for metadata and 4.9 seconds for transfer
+(12.1 seconds total). No refusal or JS/PO-token hint was recorded for that attempt.
+This is one successful sample, not a before/after speed benchmark or a guarantee
+against future YouTube refusals.
+Review upstream native packaging, extractor changes, and GPL-3.0 obligations
+before distributing the app. No release/publication has been performed.
+
+Processing flow:
+
+1. Import an owned/licensed local audio file, or explicitly confirm a secondary YouTube download.
+2. Prepare and validate local immutable bytes; retain the review across process recreation.
+3. Confirm rights and select Remove music to upload to private signed S3 storage and track the backend job.
+4. Explicitly Play, Download, Save, or Share the ready voice-only MP3. Output is cached privately per account.
+
+Prepared input must be nonempty and is accepted up to the inclusive backend-owned
+limits of 50,000,000 bytes and 1,200 seconds.
+Cancellation waits for backend acknowledgement; worker interruption remains visible
+until recovery. Failed-job retry creates a new queue entry. Signing out stops private
+playback and fences stale work; ordinary sign-out retains input/output files. Accepted account deletion purges UID-scoped private data and cancels work. Original provider files and user-exported copies are preserved.
+Push permission is optional and notification taps re-fetch authenticated job detail.
+See the [processing task record](../docs/tasks/mobile-audio-processing.md) for validation
+and the separate live backend/S3/Z440/push proof requirements.
+
+No YouTube URL is sent to a backend for server-side downloading. Client-side
+downloading changes the originating IP; it cannot guarantee YouTube availability,
+account eligibility, or bypass unavailable/private videos.
 
 ## Validation
 
 The Gradle validation command above covers JVM tests, lint, and APK assembly.
 The 2026-09-09 auth run passed Debug/Release/AuthE2e assembly, lint (no errors,
-24 warnings), and all 43 JVM tests, including 11 focused auth cases.
-That dated local result does not establish current device or live OAuth behavior.
+24 warnings), and all 43 JVM tests, including 11 focused auth cases. See the
+[mobile auth validation report](../docs/validation/mobile-auth-2026-09-09.md) for
+connected-device results, emulator limits, and outstanding live OAuth checks.
 `git diff --check` passed.
 Tests include URL validation, demo progression/cancel/retry, preference persistence,
 audio-only request options, output validation, path confinement, persistent history,
@@ -296,22 +330,20 @@ No commit, push, publishing, deployment, or restoration was performed.
 
 ## Account deletion and release configuration
 
-`DELETE /users/me` uses a freshly reauthenticated bearer and no body.
+`DELETE /api/v1/users/me` uses a freshly reauthenticated bearer and no body.
 Only HTTP 202 with a nonempty request ID and `status: accepted` is treated as
 acceptance. `REAUTHENTICATION_REQUIRED` remains recoverable without automatic
 sign-out. A minimal no-backup journal records a requested or accepted deletion;
 an uncertain response is never treated as completed deletion. Accepted local
 cleanup retries after restart if filesystem cleanup fails.
 
-The checked-in release defaults use `https://api.music-mute.com/privacy`,
-`https://api.music-mute.com/delete-account`, and
-`https://api.music-mute.com/support`. Override them only with
-`-PprivacyUrl=https://...`, `-PdeletionUrl=https://...`, and
-`-PsupportUrl=https://...` for another verified deployment. Values are mandatory
-and validated during configuration (HTTPS, no credentials, query, or fragment);
-links appear in Account and on the signed-out screen. A built-in URL does not
-prove the backend is deployed or the support mailbox is monitored, so verify all
-public pages before uploading the bundle.
+Set public HTTPS page URLs using `-PprivacyUrl=https://...` and
+`-PdeletionUrl=https://...` after real pages are available. These optional values
+are validated during configuration (no credentials, query or fragment); configured
+links appear both in Account and on the signed-out screen. Empty values omit
+links. A verified public deletion route, developer identity, monitored contact,
+retention commitments and deployed backend are release blockers until supplied
+and independently verified. No URLs or deletion deadlines are invented.
 
 Android device/UI testing remains outside the authorized device scope. JVM tests,
 lint and APK assembly do not prove provider reauthentication, document pickers,
@@ -320,12 +352,9 @@ background cancellation, playback cleanup, or real-account deletion on a device.
 The 2026-09-10 account-deletion/owned-audio implementation passed
 `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease`: 153
 JVM tests in 28 suites, no failures; lint reported no errors and 38 warnings.
-That 2026-09-10 validation covered the manifest at that checkpoint. The current
-merged Play manifest declares `mediaPlayback` for audio, explicitly removes
-WorkManager's foreground service, and does not request
-`FOREGROUND_SERVICE_DATA_SYNC` or broad storage permission. Reinspect the merged
-manifest for every release; local source/build evidence is not Android runtime
-proof, production deletion proof, or Play approval.
+Release manifest inspection retained `dataSync` for transfers and `mediaPlayback`
+for audio, with no broad storage permission. This is local build/source evidence,
+not Android runtime proof, production deletion proof, or Play approval.
 
 Review follow-up also passed `:app:lintRelease :app:testReleaseUnitTest :app:bundleRelease`.
 The deletion request bounds token acquisition plus HTTP to 20 seconds; accepted
@@ -341,7 +370,7 @@ picker. No broad photo/storage permission is requested. Documents are persisted 
 owner-scoped URI references and prepared by unique WorkManager work; a lost provider
 grant requests reselection. Existing rights confirmation remains required. Local
 work is serialized, cancellable, and distinguished as inspecting, preparing, source
-download, and upload; waiting for a remote worker does not keep local WorkManager work
+download, and upload; waiting for a remote worker does not keep this foreground work
 alive. Android force-stop/background restrictions still apply.
 
 `ProcessingMediaPolicy` reads schema 2 and the `audio-cap-aac-lc-160-v1` profile.
@@ -378,7 +407,7 @@ removed from the title. Native AAC conversion uses the decoder's actual PCM samp
 rate (including Opus sources that declare 24 kHz but decode at 48 kHz).
 
 An opt-in device regression runner is available in `src/androidTest`. Build with
-`:app:assemblePlayDebugAndroidTest` and pass `-e sourceUri <granted-uri>` to
+`:app:assembleDirectDebugAndroidTest` and pass `-e sourceUri <granted-uri>` to
 `com.hatem.musicmute.test/com.hatem.musicmute.processing.MediaPreparationTestRunner`.
 It checks audio-only output, standard limits, and preserved duration, then removes
 its own temporary output. It does not submit a processing job or run a benchmark.
@@ -391,6 +420,15 @@ and completion markers recover after process death; only confirmed post-upload
 states delete that temporary input. Original media and independently saved library
 files remain intact. No video is uploaded or reconstructed; output remains cleaned
 audio retrieved on demand.
+
+YouTube URLs with playlist context, live/upcoming metadata, or unknown duration are
+rejected before downloading audio. The installed extractor performs a minimal bounded
+metadata projection alongside temporary private metadata for the transfer. Downloaded bytes are guarded by yt-dlp max-filesize, a fixed
+64 KiB buffer, actual progress/disk observation, and a hard process watchdog; absent
+content length does not remove the cap.
+Native extractor/fragment retries are disabled and partial attempt files are
+removed. Background extractor maintenance is independent of the source-operation
+deadline. Live YouTube availability requires a separate device check.
 
 Owner-only usage is refreshed before intake and periodically on the home screen.
 It separates used, reserved, refunded, and remaining audio minutes for the current
@@ -413,225 +451,3 @@ multiple audio tracks still require selected-track extraction. WAV/lossless,
 oversized, high-rate or unbounded inputs use the existing bounded native AAC/M4A
 preparation path, subject to decoder support. No raw WAV is uploaded. Prepared
 uploads retain the policy size cap (at most 50 MB), duration checks and checksum.
-
-## Server link import (2026-09-25)
-
-The Import link/share flow accepts public YouTube, Facebook and other provider
-URLs. Site support and audio-only availability are determined by the backend;
-Android sends only the URL and polls the durable import before opening its job.
-Device-side URL acquisition has been removed. Build
-with `-PauthApiUrl=https://api.music-mute.com` for production backend testing.
-
-## Realtime processing
-
-Processing updates use authenticated raw WebSocket snapshots with automatic
-reconnection. See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
-and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
-HTTP remains responsible for authentication, commands and file transfers.
-
-### Home job history storage
-
-Home job history is held in memory and loaded from WebSocket snapshots; it is
-not restored from disk. A confirmed upload stays off Home until a live snapshot
-includes that job. When the snapshot says the job is ready, failed, or cancelled,
-only that local operation record is removed. Completed library tracks, preferences,
-and unfinished import or upload recovery records remain on device. Switching tabs
-continues using the shared live session rather than restarting the connection.
-
-## Current jobs and Library (2026-09-28)
-
-Job cards share the compact Console glow layout on Home and the processing list:
-source/date metadata, two full-width title lines, a dark recessed status console,
-and a tinted Studio pulse footer. CLI-style stage text has a grey base with a moving
-highlight in the stage color; voice separation adds a small animated audio icon.
-Live queue position and reconnect/capacity explanations stay inside the footer.
-Errors use the same reserved space with Retry/Delete beside each other; Details
-opens the full explanation. Every state retains the same 208dp default height for
-the same width and text-size setting. Accessibility font scaling increases the
-shared text slots together. Motion stops in the background, when system animations
-are disabled, and for paused/terminal states.
-
-Active work stages use measured transfer/worker progress when available, otherwise
-a per-stage visual estimate marked `~NN%`. Estimates start at 8%, advance only while
-foreground motion is enabled, and stop below completion at 94%. They reset when the
-task or stage changes and use local visual pacing, without altering authoritative
-server elapsed durations or suggesting an ETA. Queued/waiting, unavailable-worker,
-error and terminal states never receive estimated percentages or a filled queue
-progress bar. All updates continue using the existing WebSocket snapshots.
-
-Populated English/Arabic, 320dp and large-text Compose previews are in
-`ui/home/JobCardPreviews.kt`. JVM tests, lint and assembly verify source/build
-behavior. A connected-device install/launch verifies startup; it does not by itself
-verify every populated card state or a real processing flow.
-
-Home and the processing list hide terminal cloud jobs (`ready`, `failed`,
-`cancelled`); unfinished local reviews and recoverable local imports stay
-accessible. Confirmed uploads stay off Home until the live snapshot names them.
-A terminal snapshot removes the local operation record and does not delete the
-server job, library audio, or administrator history. Creation date and time are
-shown on Home job cards.
-
-Library has explicit cursor-based Load more with loading/error feedback. Native
-Library storage preserves previously discovered completed audio; browser Library
-requests `status=ready`, retains loaded pages, and bounds live subscriptions to
-the newest page plus nine tail pages. See
-[release evidence](../docs/client-current-jobs-release-2026-09-28.md) for validation
-and distribution status.
-
-## System playback cards and island-style surfaces
-
-Failed link imports, including rejected admissions, offer **Delete** on Home.
-Removal clears the account-scoped local recovery record and survives restart.
-It does not retry acquisition or delete an associated cloud job. Failed imports
-without a job expire locally after seven days; cleanup runs when the account opens
-or another link is submitted. Older records start that retention window on their
-first open after upgrading. Active imports and submitted-job recovery are preserved.
-Server import records already have a seven-day TTL; administrator job history remains.
-
-Playback uses Media3's media session and standard media notification. The card
-supplies the track title, localized Original audio / Voice only label, MusicMute
-artwork and the existing transport controls. Tapping it opens Player (after the
-normal authentication/update gates), where speed, queue and other player options
-remain available. No overlay or accessibility permission is needed.
-
-The operating system/manufacturer chooses whether to display a media island,
-lock-screen card or notification, and which controls fit. This is media-session
-integration, not a guarantee of a custom island on every Android phone. Android's
-[Live Updates](https://developer.android.com/develop/ui/views/notifications/live-update)
-do not accept MediaStyle or custom RemoteViews, so playback does not request
-promoted Live Updates. Processing notifications remain separate.
-
-Playback notifications use a channel with launcher badges disabled. The channel
-ID avoids the library default already saved with badges enabled, while carrying
-forward legacy importance, sound, vibration, light, lock-screen and group
-preferences. Google Play owns update delivery; MusicMute has no update-download
-notification channel. Processing outcomes retain their existing alert channel
-and badge preferences.
-The opt-in instrumentation runner accepts `-e check notificationBadges` to check
-the saved channel policy; OEM launcher behavior still needs an explicitly
-authorized Android device.
-
-Local checks: `:app:testPlayDebugUnitTest`, `:app:lintPlayDebug`,
-`:app:assemblePlayDebug` and `:app:compilePlayDebugAndroidTestKotlin`.
-The existing opt-in instrumentation runner also accepts `-e check playbackCard`
-to verify metadata, bitmap decoding and distinct tap PendingIntents. That check
-requires an explicitly authorized Android device; compiling it does not execute
-it. OEM island appearance and cold/warm tap navigation need device validation.
-
-## Playback queue editing
-
-Library's **Show starred** checkbox combines with search and every tab. **Most
-played** shows listened tracks ranked by their play counts; other tabs also offer
-that sort. Stars and listening counts stay in this device's account-scoped,
-no-backup Library metadata and are never sent to the API. A successful selected
-track/queue start and each repeat or range-loop restart add one play. Preparation,
-failed starts, pause/resume, ordinary seeks, and original/voice comparison do not.
-Older Library records start with zero plays, and snapshot refreshes preserve
-local counts. Playback still follows the currently displayed Library order.
-
-The Up next screen supports long-press drag handles with edge scrolling and
-per-track Play next, Move up, Move down and Remove actions. Move actions also
-appear in accessibility controls. Reordering uses track identities and the real
-playback traversal order, including shuffle and repeat-all wrapping; it turns
-shuffle off so playback follows the chosen order. The current audio is not
-restarted by queue edits. The existing account-scoped checkpoint saves the order.
-
-Play next moves an existing queued track after the current audio, enables
-auto-next and exits repeat one. It keeps playback paused if already paused.
-Clear asks for confirmation and removes every queued track except the current
-one. Queue removal keeps Library entries and downloaded files. English and
-Arabic labels explain why repeat one or disabled auto-next leaves Up next empty.
-
-Local queue regressions are in `QueueEditingTest`, `QueueDisplayTest` and
-`PlaybackQueueTest`. Android gesture, accessibility and uninterrupted playback
-runtime checks still require an explicitly authorized Android device.
-
-## Listening features
-
-The [plan](tasks/listening-features/PLAN.md),
-[task checklist](tasks/listening-features/TASKS.md) and
-[validation record](tasks/listening-features/VALIDATION.md) track this feature branch.
-
-- Add MusicMute from the launcher widget picker. Resize the playback widget to
-  reveal Import audio. Tap the title/artwork to open Player. Play/pause and Next
-  use the existing media service; widget updates are event-driven, with no polling.
-- Long-press the app icon for Import audio, Import link and Library. Shared single
-  `audio/*` content URIs are copied into bounded owner-private storage and enter
-  the existing review/rights-confirmation flow. They never auto-submit to cloud.
-- MediaLibraryService exposes completed, visible, current-account tracks for
-  Android system media clients and resumption. The current source does not
-  advertise Android Auto. External media IDs are resolved against the account
-  library; external URIs are never played.
-  Authentication/update restoration is awaited before returning resume media.
-  Initial restoration alone does not prepare, download or autoplay the queue.
-- Player displays cached real waveform peaks for the selected original/voice
-  source, with the normal accessible seek slider and retry fallback. Decoding
-  runs off the UI thread, streams PCM and stops on cancellation or a 120-second
-  watchdog. Waveforms are limited to sources of at most three hours.
-- Listening tools offers optional Skip silence, 15/30/60-minute sleep timers,
-  end-of-track stopping, and an optional final five-second fade for timed stops.
-  Skip silence preserves short pauses (at least one second for mono/stereo audio)
-  and quiet speech. Longer near-silent gaps retain half their middle section,
-  with natural padding and up to two seconds kept per gap. Retained audio keeps
-  its volume. This only changes playback; saved/exported files are unaffected.
-  Timers and loops live in the playback service and continue while backgrounded.
-  They reset with the playback service/account; they are not reboot alarms.
-- Bookmarks persist per account, job and original/voice timeline (100 per source,
-  80-character notes). The A–B range loops until cleared or the source changes.
-  Choosing end-of-track sleep clears a passage loop so the track can finish.
-- Share a selected Voice only passage as PCM WAV: 0.5 seconds to five minutes,
-  at most 64 MB. This is a local export, not an extra server job. Only temporary
-  read grants are shared. Cancel closes/deletes an incomplete export. Old clips
-  are pruned on subsequent exports; all listening cache files clear on sign-out.
-  Unsupported PCM encodings or decoder failures show retryable UI feedback.
-
-No overlays, accessibility-service permission, new runtime permissions or new
-package dependencies were added. Widgets and system resumption are controlled by
-Android and its host; device/host testing remains required before release.
-
-## Private local diagnostics
-
-The shared account/jobs/update/push HTTP client, raw WebSocket, file transfers,
-installation/processing stores and process lifecycle have opt-in structured
-[Vector/Logdy diagnostics](../tools/local-logging/README.md). `BuildConfig.DEBUG`
-is a mandatory gate; release builds ignore all local logging settings. No key is
-compiled into an APK. Normal production error monitoring remains separate.
-
-After installing a Debug build and starting the root collector, an explicitly
-authorized Android target can be configured from the repository root with:
-
-```sh
-python3 android/scripts/configure-local-logging.py --serial <explicit-adb-serial> --reverse
-```
-
-This helper reads private `keys.android` from `.runtime/local-logging/keys.json`
-and writes `files/local-logging.json` through `adb run-as` and stdin, with mode 0600.
-It never prints the key, installs/restarts apps or selects a device automatically.
-Close/reopen the app manually to read changed settings. `--no-payloads`,
-`--console`, `--disable`, and `--package com.hatem.musicmute.authtest` are separate
-controls. Endpoint validation accepts only
-`http://127.0.0.1:19740/ingest/android`; `--reverse` explicitly forwards that device
-loopback port to the Mac. The repository's current device-testing authorization
-permits only the named iOS simulator, so no Android device/UI verification was
-performed for this integration.
-
-The private JSON settings contain `enabled`, `payloads`, `console`, `endpoint`
-and `key`. The helper enables collector/payload capture and leaves console off
-unless requested. Release cannot activate this collector even with that file.
-HTTP debug UUID request IDs correlate with valid backend response IDs; immutable
-coroutine context captures the initiating UID and operation trace across dispatch,
-awaits and auth retries. A random process instance scopes local socket IDs.
-Realtime send records indicate client-transport acceptance only; reception and
-application processing are separate records. File transfers capture metadata and
-omit binary streams and signed URLs. Storage hooks observe existing accesses.
-
-Records are redacted before queue, console or network output; JSON/base64-JSON,
-credential keys, bearer/JWT/private-key patterns, signed URL queries and connection
-strings are covered. Payloads are limited to 16 KiB, events to 32 KiB, with bounded
-strings/arrays/depth and explicit omissions. Arbitrary error messages/stacks are
-omitted. The sender holds at most 128 pending events plus one active request and
-prefers warnings/errors during pressure. Failed attempts are counted/discarded,
-with no retry spool. `LocalDiagnostics.status()` and event `collector` metadata
-expose pending/sent/failed/dropped counters. Uncaught errors are best-effort and
-forward to Android's existing handler; process death may precede delivery. Root
-retention, viewer and read-only MCP privacy/limitations apply.

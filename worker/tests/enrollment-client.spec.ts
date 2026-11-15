@@ -4,11 +4,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { execFile as execFileCallback } from "node:child_process";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import {
-  canonicalUpdateMetadata,
-  type UpdateMetadata,
-} from "../src/platform/shared/update-metadata.js";
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
@@ -26,15 +22,9 @@ import {
   runEnrollmentCommand,
   runInstallationPreparationCommand,
 } from "../src/enrollment/cli.js";
-import {
-  assertInstallationReport,
-  WorkerEnrollmentClient,
-  type WorkerEnrollmentError,
-  type WorkerInstallationReport,
-} from "../src/enrollment/enrollment-client.js";
+import { WorkerEnrollmentClient } from "../src/enrollment/enrollment-client.js";
 import { readInstallationArtifactsReceipt } from "../src/enrollment/installation-receipt.js";
 import { writeMacReleaseManifest } from "../src/platform/macos/release-manifest.js";
-import { fromWireCase, toWireCase } from "../src/runtime/wire-case.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -52,95 +42,12 @@ afterEach(async () => {
 });
 
 describe("worker enrollment client", () => {
-  it("requires the API origin without a route prefix", () => {
-    expect(
-      () =>
-        new WorkerEnrollmentClient({
-          baseUrl: "https://workers.example.invalid/old-prefix",
-        }),
-    ).toThrow("API origin");
-  });
-
-  it("surfaces a rate limit whose Retry-After exceeds the retry ceiling", async () => {
-    const fetchMock = vi.fn(async () =>
-      problem("WORKER_RATE_LIMITED", 429, { "Retry-After": "60" }),
-    );
-    const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1",
-      allowInsecureLoopback: true,
-      fetch: fetchMock as unknown as typeof fetch,
-      maxAttempts: 3,
-    });
-
-    await expect(
-      client.exchange(
-        enrollmentCredential,
-        "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
-      ),
-    ).rejects.toMatchObject({
-      code: "WORKER_RATE_LIMITED",
-      status: 429,
-      retryable: true,
-      retryAfterMs: 60_000,
-    } satisfies Partial<WorkerEnrollmentError>);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not decode legacy JSON errors as problem details", async () => {
-    const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1",
-      allowInsecureLoopback: true,
-      fetch: vi.fn(async () =>
-        json({ code: "WORKER_FORBIDDEN", message: "legacy" }, 403),
-      ) as unknown as typeof fetch,
-      maxAttempts: 1,
-    });
-
-    await expect(
-      client.exchange(
-        enrollmentCredential,
-        "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
-      ),
-    ).rejects.toMatchObject({ code: "HTTP_403", status: 403 });
-  });
-
-  it("retries enrollment after a short Retry-After", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        problem("WORKER_RATE_LIMITED", 429, { "Retry-After": "0" }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          installationId,
-          phase: "restricted",
-          expiresAt: "2026-09-19T20:00:00.000Z",
-          credential: installationCredential,
-          replayed: true,
-        }),
-      );
-    const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1",
-      allowInsecureLoopback: true,
-      fetch: fetchMock as unknown as typeof fetch,
-      maxAttempts: 2,
-    });
-
-    await expect(
-      client.exchange(
-        enrollmentCredential,
-        "32410a14-e85a-4a1d-bb99-61fa54b07eaa",
-      ),
-    ).resolves.toMatchObject({ installationId });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
   it("retries a transient exchange with the same request body", async () => {
     const bodies: string[] = [];
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       bodies.push(String(init?.body));
       if (bodies.length === 1)
-        return problem("WORKER_DEPENDENCY_UNAVAILABLE", 503);
+        return json({ code: "WORKER_DEPENDENCY_UNAVAILABLE" }, 503);
       return json({
         installationId,
         phase: "restricted",
@@ -150,7 +57,7 @@ describe("worker enrollment client", () => {
       });
     });
     const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1",
+      baseUrl: "http://127.0.0.1/api/v1",
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
       maxAttempts: 2,
@@ -162,9 +69,7 @@ describe("worker enrollment client", () => {
     ).resolves.toMatchObject({ installationId, replayed: true });
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toBe(bodies[1]);
-    expect(JSON.parse(bodies[0]!) as unknown).toEqual({
-      request_id: requestId,
-    });
+    expect(JSON.parse(bodies[0]!) as unknown).toEqual({ requestId });
   });
 
   it("requests and strictly validates installation artifact grants", async () => {
@@ -185,7 +90,7 @@ describe("worker enrollment client", () => {
       },
     );
     const client = new WorkerEnrollmentClient({
-      baseUrl: "http://127.0.0.1",
+      baseUrl: "http://127.0.0.1/api/v1",
       allowInsecureLoopback: true,
       fetch: fetchMock as unknown as typeof fetch,
     });
@@ -195,93 +100,11 @@ describe("worker enrollment client", () => {
     ).resolves.toEqual(artifactManifest("darwin-arm64"));
     expect(requests).toEqual([
       {
-        url: `http://127.0.0.1/worker/installations/${installationId}/artifacts`,
+        url: `http://127.0.0.1/api/v1/worker/v1/installations/${installationId}/artifacts`,
         authorization: `Bearer ${installationCredential}`,
         body: { platform: "darwin-arm64" },
       },
     ]);
-  });
-
-  it("requests and binds consumer artifacts without falling back to the service profile", async () => {
-    const manifest = {
-      ...artifactManifest("windows-amd64"),
-      installationProfile: "windows-user",
-    };
-    const fetchMock = vi.fn(
-      async (_input: Parameters<typeof fetch>[0], _init?: RequestInit) =>
-        json(manifest),
-    );
-    const client = new WorkerEnrollmentClient({
-      baseUrl: "https://workers.example.invalid",
-      fetch: fetchMock as typeof fetch,
-      maxAttempts: 1,
-    });
-    await expect(
-      client.artifacts(
-        installationId,
-        installationCredential,
-        "windows-amd64",
-        undefined,
-        "windows-user",
-      ),
-    ).resolves.toEqual(manifest);
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
-      platform: "windows-amd64",
-      installation_profile: "windows-user",
-    });
-    await expect(
-      client.artifacts(installationId, installationCredential, "windows-amd64"),
-    ).rejects.toThrow("profile changed");
-    fetchMock.mockImplementation(async () =>
-      json(artifactManifest("windows-amd64")),
-    );
-    await expect(
-      client.artifacts(
-        installationId,
-        installationCredential,
-        "windows-amd64",
-        undefined,
-        "windows-user",
-      ),
-    ).rejects.toThrow("profile changed");
-    await expect(
-      client.artifacts(
-        installationId,
-        installationCredential,
-        "darwin-arm64",
-        undefined,
-        "windows-user",
-      ),
-    ).rejects.toThrow("profile is invalid");
-  });
-
-  it("accepts future fields in enrollment responses while validating required artifact fields", async () => {
-    const manifest = artifactManifest("darwin-arm64");
-    const client = new WorkerEnrollmentClient({
-      baseUrl: "https://workers.example.invalid",
-      fetch: (async () =>
-        json({
-          ...manifest,
-          future_field: "new server field",
-          release: { ...manifest.release, future_field: true },
-          model: { ...manifest.model, future_field: { nested_value: 1 } },
-          fixture: { ...manifest.fixture, future_field: null },
-        })) as typeof fetch,
-      maxAttempts: 1,
-    });
-
-    await expect(
-      client.artifacts(installationId, installationCredential, "darwin-arm64"),
-    ).resolves.toEqual(manifest);
-  });
-
-  it("keeps installation report request fields exact", () => {
-    expect(() =>
-      assertInstallationReport({
-        ...report(),
-        futureField: true,
-      } as unknown as WorkerInstallationReport),
-    ).toThrow("unknown field");
   });
 
   it.each([
@@ -289,6 +112,11 @@ describe("worker enrollment client", () => {
       "a changed platform",
       { ...artifactManifest("darwin-arm64"), platform: "windows-amd64" },
       "platform changed",
+    ],
+    [
+      "an unknown field",
+      { ...artifactManifest("darwin-arm64"), internalKey: "private" },
+      "unknown field",
     ],
     [
       "an insecure artifact URL",
@@ -314,7 +142,7 @@ describe("worker enrollment client", () => {
     ],
   ])("rejects artifact responses with %s", async (_name, response, message) => {
     const client = new WorkerEnrollmentClient({
-      baseUrl: "https://workers.example.invalid",
+      baseUrl: "https://workers.example.invalid/api/v1",
       fetch: (async () => json(response)) as typeof fetch,
       maxAttempts: 1,
     });
@@ -331,11 +159,11 @@ describe("worker enrollment client", () => {
     const confirmRequestId = "92e0a366-6f0c-475f-84ce-e0cd5a0c919f";
     const requests: Array<{ url: string; body: unknown }> = [];
     const client = new WorkerEnrollmentClient({
-      baseUrl: "https://workers.example.invalid",
+      baseUrl: "https://workers.example.invalid/api/v1",
       fetch: (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         requests.push({ url, body: JSON.parse(String(init?.body)) as unknown });
-        if (url.endsWith("/qualification-output-grants"))
+        if (url.endsWith("/grant"))
           return json({
             requestId: grantRequestId,
             reservation: {
@@ -349,7 +177,6 @@ describe("worker enrollment client", () => {
               headers: {
                 "Content-Type": "audio/mpeg",
                 "x-amz-checksum-sha256": checksum,
-                "x-amz-meta-sha256": checksum,
                 "If-None-Match": "*",
               },
               expiresAt: "2099-09-20T12:00:00.000Z",
@@ -378,7 +205,7 @@ describe("worker enrollment client", () => {
         installationId,
         installationCredential,
         confirmRequestId,
-        '"version-1"',
+        "version-1",
       ),
     ).resolves.toEqual({
       requestId: confirmRequestId,
@@ -386,333 +213,254 @@ describe("worker enrollment client", () => {
       replayed: false,
     });
     expect(requests.map((request) => request.body)).toEqual([
-      { request_id: grantRequestId, bytes: 1234, sha256: outputDigest },
-      { request_id: confirmRequestId, etag: '"version-1"' },
+      { requestId: grantRequestId, bytes: 1234, sha256: outputDigest },
+      { requestId: confirmRequestId, versionId: "version-1" },
     ]);
   });
 
-  it.each([false, true])(
-    "replays enrollment with an uncertain activation response: %s",
-    async (loseActivationResponse) => {
-      const root = await mkdtemp(join(tmpdir(), "musicmute-enrollment-"));
-      roots.push(root);
-      const output = join(root, "protected");
-      await mkdir(output, { mode: 0o700 });
-      await chmod(output, 0o700);
-      const enrollmentFile = join(root, "enrollment.credential");
-      await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
-        mode: 0o600,
-      });
-      await chmod(enrollmentFile, 0o600);
-      const reportFile = join(root, "report.json");
-      await writeFile(reportFile, JSON.stringify(report()), { mode: 0o600 });
-      if (process.platform === "win32") {
-        await execFile(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-EncodedCommand",
-            Buffer.from(
-              `$ErrorActionPreference='Stop'
-foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "''")}','${enrollmentFile.replaceAll("'", "''")}')) {
-  $Acl=Get-Acl -LiteralPath $Entry
-  $Acl.SetAccessRuleProtection($true,$false)
-  foreach ($Rule in @($Acl.Access)) { $Acl.RemoveAccessRuleSpecific($Rule) }
-  $Admin=New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')
-  $Acl.SetOwner($Admin)
-  $Acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($Admin,'FullControl','Allow')))
-  Set-Acl -LiteralPath $Entry -AclObject $Acl
-}`,
-              "utf16le",
-            ).toString("base64"),
-          ],
-          { timeout: 15_000, maxBuffer: 16_384 },
-        );
-      }
-      const requests: Array<{
-        path: string;
-        authorization: string | undefined;
-        body: Record<string, unknown>;
-      }> = [];
-      let activated = false;
-      let activationResponseLost = false;
-      const server = createServer((request, response) => {
-        void handleRequest(
-          request,
-          response,
-          requests,
-          () => activated,
-          () => {
-            activated = true;
-          },
-          () => {
-            if (!loseActivationResponse || activationResponseLost) return false;
-            activationResponseLost = true;
-            return true;
-          },
-        );
-      });
-      await new Promise<void>((resolve) =>
-        server.listen(0, "127.0.0.1", resolve),
-      );
-      const address = server.address();
-      if (address === null || typeof address === "string")
-        throw new Error("Test server address is unavailable");
-      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-      const arguments_ = [
-        "--backend-url",
-        `http://127.0.0.1:${address.port}`,
-        "--enrollment-file",
-        enrollmentFile,
-        "--report",
-        reportFile,
-        "--output",
-        output,
-        "--allow-insecure-loopback",
-        "true",
-      ];
-      try {
-        if (loseActivationResponse)
-          await expect(runEnrollmentCommand(arguments_)).rejects.toThrow();
-        else await runEnrollmentCommand(arguments_);
-        await runEnrollmentCommand(arguments_);
-      } finally {
-        await new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve())),
-        );
-      }
-
-      expect(requests.map((request) => request.path)).toEqual([
-        "/worker/installations",
-        `/worker/installations/${installationId}/reports`,
-        `/worker/installations/${installationId}/activations`,
-        `/worker/installations/${installationId}/activations`,
-      ]);
-      expect(requests[0]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
-      expect(
-        [requests[1], requests[2], requests[3]].every(
-          (request) =>
-            request?.authorization === `Bearer ${installationCredential}`,
-        ),
-      ).toBe(true);
-      expect(requests[2]?.body.requestId).toBe(requests[3]?.body.requestId);
-      const machineCredential = (
-        await readFile(join(output, "machine.credential"), "utf8")
-      ).trim();
-      expect(machineCredential).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-      const credentialDigest = createHash("sha256")
-        .update(machineCredential)
-        .digest("hex");
-      expect(requests[2]?.body.credentialDigest).toBe(credentialDigest);
-      expect(requests[3]?.body.credentialDigest).toBe(credentialDigest);
-      expect(
-        JSON.parse(await readFile(join(output, "machine.json"), "utf8")),
-      ).toMatchObject({ machineId, credentialRevision: 1 });
-      if (process.platform !== "win32") {
-        expect(
-          (await stat(join(output, "machine.credential"))).mode & 0o777,
-        ).toBe(0o600);
-        expect(
-          (await stat(join(output, ".enrollment-state.json"))).mode & 0o777,
-        ).toBe(0o600);
-      }
-      expect(log.mock.calls.flat().join(" ")).not.toContain(machineCredential);
-      expect(log.mock.calls.flat().join(" ")).not.toContain(
-        installationCredential,
-      );
-    },
-  );
-
-  it.skipIf(process.platform !== "darwin")(
-    "resumes approved installation artifacts after the invitation expires",
-    async () => {
-      const root = await mkdtemp(join(tmpdir(), "musicmute-preparation-"));
-      roots.push(root);
-      const output = join(root, "protected");
-      await mkdir(output, { mode: 0o700 });
-      await chmod(output, 0o700);
-      const enrollmentFile = join(root, "enrollment.credential");
-      await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
-        mode: 0o600,
-      });
-      await chmod(enrollmentFile, 0o600);
-      const payloads = {
-        release: await createMacReleaseArchive(root),
-        model: Buffer.from("approved model"),
-        fixture: Buffer.from("approved fixture"),
-      };
-      const signing = generateKeyPairSync("ed25519");
-      const publicKeys = {
-        fixture: signing.publicKey
-          .export({ type: "spki", format: "pem" })
-          .toString(),
-      };
-      const artifactRequests = new Map<string, number>();
-      const exchangeBodies: unknown[] = [];
-      const server = createServer((request, response) => {
-        void (async () => {
-          if (request.method === "GET") {
-            const name = new URL(
-              request.url ?? "/",
-              "http://127.0.0.1",
-            ).pathname.slice(1) as keyof typeof payloads;
-            const payload = payloads[name];
-            if (payload === undefined) {
-              response.writeHead(404).end();
-              return;
-            }
-            artifactRequests.set(name, (artifactRequests.get(name) ?? 0) + 1);
-            const contentType =
-              name === "release"
-                ? "application/gzip"
-                : name === "model"
-                  ? "application/octet-stream"
-                  : "audio/wav";
-            response.writeHead(200, {
-              "Content-Length": payload.length,
-              "Content-Type": contentType,
-            });
-            response.end(payload);
-            return;
-          }
-          const body = JSON.parse(await readBody(request)) as unknown;
-          if (request.url === "/worker/installations") {
-            if (exchangeBodies.length > 0) {
-              response
-                .writeHead(410, {
-                  "Content-Type": "application/problem+json",
-                })
-                .end(JSON.stringify({ code: "WORKER_EXPIRED" }));
-              return;
-            }
-            exchangeBodies.push(body);
-            send(response, {
-              installationId,
-              phase: "restricted",
-              expiresAt: "2099-09-20T12:00:00.000Z",
-              credential: installationCredential,
-              replayed: exchangeBodies.length > 1,
-            });
-            return;
-          }
-          if (request.url?.endsWith("/artifacts")) {
-            const address = server.address();
-            if (address === null || typeof address === "string")
-              throw new Error("Test server address is unavailable");
-            const manifest = localArtifactManifest(
-              `http://127.0.0.1:${address.port}`,
-              payloads,
-            );
-            const metadata: UpdateMetadata = {
-              schemaVersion: 1,
-              sequence: 1,
-              platform: "darwin-arm64",
-              releaseVersion: manifest.release.version,
-              publishedAt: new Date(Date.now() - 1000).toISOString(),
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              release: {
-                filename: manifest.release.filename,
-                bytes: manifest.release.bytes,
-                sha256: manifest.release.sha256,
-                contentType: "application/gzip",
-              },
-            };
-            send(response, {
-              ...manifest,
-              release: {
-                ...manifest.release,
-                signed: {
-                  keyId: "fixture",
-                  metadata,
-                  signature: sign(
-                    null,
-                    Buffer.from(canonicalUpdateMetadata(metadata)),
-                    signing.privateKey,
-                  ).toString("base64url"),
-                },
-              },
-            });
-            return;
-          }
-          response.writeHead(404).end();
-        })().catch(() => response.writeHead(500).end());
-      });
-      await new Promise<void>((resolve) =>
-        server.listen(0, "127.0.0.1", resolve),
-      );
-      const address = server.address();
-      if (address === null || typeof address === "string")
-        throw new Error("Test server address is unavailable");
-      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-      const arguments_ = [
-        "--backend-url",
-        `http://127.0.0.1:${address.port}`,
-        "--enrollment-file",
-        enrollmentFile,
-        "--platform",
-        "darwin-arm64",
-        "--output",
-        output,
-        "--allow-insecure-loopback",
-        "true",
-      ];
-      try {
-        await runInstallationPreparationCommand(arguments_, { publicKeys });
-        await runInstallationPreparationCommand(arguments_, { publicKeys });
-      } finally {
-        await new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve())),
-        );
-      }
-
-      expect(exchangeBodies).toHaveLength(1);
-      expect(Object.fromEntries(artifactRequests)).toEqual({
-        release: 1,
-        model: 1,
-        fixture: 1,
-      });
-      const localManifest = JSON.parse(
-        await readFile(join(output, "installation-artifacts.json"), "utf8"),
-      ) as Record<string, unknown>;
-      expect(localManifest).toMatchObject({
-        schemaVersion: 1,
-        installationId,
-        platform: "darwin-arm64",
-        releaseVersion: "0.1.1",
-        release: {
-          releaseRoot: join(output, "installation-artifacts", "release-0.1.1"),
+  it("runs and safely replays the complete restricted enrollment sequence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "musicmute-enrollment-"));
+    roots.push(root);
+    const output = join(root, "protected");
+    await mkdir(output, { mode: 0o700 });
+    await chmod(output, 0o700);
+    const enrollmentFile = join(root, "enrollment.credential");
+    await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
+      mode: 0o600,
+    });
+    await chmod(enrollmentFile, 0o600);
+    const reportFile = join(root, "report.json");
+    await writeFile(reportFile, JSON.stringify(report()), { mode: 0o600 });
+    const requests: Array<{
+      path: string;
+      authorization: string | undefined;
+      body: Record<string, unknown>;
+    }> = [];
+    let activated = false;
+    const server = createServer((request, response) => {
+      void handleRequest(
+        request,
+        response,
+        requests,
+        () => activated,
+        () => {
+          activated = true;
         },
-      });
-      await expect(
-        stat(
-          join(
-            output,
-            "installation-artifacts",
-            "release-0.1.1",
-            "release-manifest.json",
-          ),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("Test server address is unavailable");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const arguments_ = [
+      "--backend-url",
+      `http://127.0.0.1:${address.port}/api/v1`,
+      "--enrollment-file",
+      enrollmentFile,
+      "--report",
+      reportFile,
+      "--output",
+      output,
+      "--allow-insecure-loopback",
+      "true",
+    ];
+    try {
+      await runEnrollmentCommand(arguments_);
+      await runEnrollmentCommand(arguments_);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+
+    expect(requests.map((request) => request.path)).toEqual([
+      "/api/v1/worker/v1/installations",
+      `/api/v1/worker/v1/installations/${installationId}/report`,
+      `/api/v1/worker/v1/installations/${installationId}/activate`,
+      "/api/v1/worker/v1/installations",
+      `/api/v1/worker/v1/installations/${installationId}/activate`,
+    ]);
+    expect(requests[0]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
+    expect(requests[3]?.authorization).toBe(`Bearer ${enrollmentCredential}`);
+    expect(
+      [requests[1], requests[2], requests[4]].every(
+        (request) =>
+          request?.authorization === `Bearer ${installationCredential}`,
+      ),
+    ).toBe(true);
+    expect(requests[0]?.body.requestId).toBe(requests[3]?.body.requestId);
+    expect(requests[2]?.body.requestId).toBe(requests[4]?.body.requestId);
+    const machineCredential = (
+      await readFile(join(output, "machine.credential"), "utf8")
+    ).trim();
+    expect(machineCredential).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    const credentialDigest = createHash("sha256")
+      .update(machineCredential)
+      .digest("hex");
+    expect(requests[2]?.body.credentialDigest).toBe(credentialDigest);
+    expect(requests[4]?.body.credentialDigest).toBe(credentialDigest);
+    expect(
+      JSON.parse(await readFile(join(output, "machine.json"), "utf8")),
+    ).toMatchObject({ machineId, credentialRevision: 1 });
+    if (process.platform !== "win32") {
+      expect(
+        (await stat(join(output, "machine.credential"))).mode & 0o777,
+      ).toBe(0o600);
+      expect(
+        (await stat(join(output, ".enrollment-state.json"))).mode & 0o777,
+      ).toBe(0o600);
+    }
+    expect(log.mock.calls.flat().join(" ")).not.toContain(machineCredential);
+    expect(log.mock.calls.flat().join(" ")).not.toContain(
+      installationCredential,
+    );
+  });
+
+  it("prepares and safely reuses the approved installation artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "musicmute-preparation-"));
+    roots.push(root);
+    const output = join(root, "protected");
+    await mkdir(output, { mode: 0o700 });
+    await chmod(output, 0o700);
+    const enrollmentFile = join(root, "enrollment.credential");
+    await writeFile(enrollmentFile, `${enrollmentCredential}\n`, {
+      mode: 0o600,
+    });
+    await chmod(enrollmentFile, 0o600);
+    const payloads = {
+      release: await createMacReleaseArchive(root),
+      model: Buffer.from("approved model"),
+      fixture: Buffer.from("approved fixture"),
+    };
+    const artifactRequests = new Map<string, number>();
+    const exchangeBodies: unknown[] = [];
+    const server = createServer((request, response) => {
+      void (async () => {
+        if (request.method === "GET") {
+          const name = new URL(
+            request.url ?? "/",
+            "http://127.0.0.1",
+          ).pathname.slice(1) as keyof typeof payloads;
+          const payload = payloads[name];
+          if (payload === undefined) {
+            response.writeHead(404).end();
+            return;
+          }
+          artifactRequests.set(name, (artifactRequests.get(name) ?? 0) + 1);
+          const contentType =
+            name === "release"
+              ? "application/gzip"
+              : name === "model"
+                ? "application/octet-stream"
+                : "audio/wav";
+          response.writeHead(200, {
+            "Content-Length": payload.length,
+            "Content-Type": contentType,
+          });
+          response.end(payload);
+          return;
+        }
+        const body = JSON.parse(await readBody(request)) as unknown;
+        if (request.url === "/api/v1/worker/v1/installations") {
+          exchangeBodies.push(body);
+          send(response, {
+            installationId,
+            phase: "restricted",
+            expiresAt: "2099-09-20T12:00:00.000Z",
+            credential: installationCredential,
+            replayed: exchangeBodies.length > 1,
+          });
+          return;
+        }
+        if (request.url?.endsWith("/artifacts")) {
+          const address = server.address();
+          if (address === null || typeof address === "string")
+            throw new Error("Test server address is unavailable");
+          send(
+            response,
+            localArtifactManifest(`http://127.0.0.1:${address.port}`, payloads),
+          );
+          return;
+        }
+        response.writeHead(404).end();
+      })().catch(() => response.writeHead(500).end());
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (address === null || typeof address === "string")
+      throw new Error("Test server address is unavailable");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const arguments_ = [
+      "--backend-url",
+      `http://127.0.0.1:${address.port}/api/v1`,
+      "--enrollment-file",
+      enrollmentFile,
+      "--platform",
+      "darwin-arm64",
+      "--output",
+      output,
+      "--allow-insecure-loopback",
+      "true",
+    ];
+    try {
+      await runInstallationPreparationCommand(arguments_);
+      await runInstallationPreparationCommand(arguments_);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+
+    expect(exchangeBodies).toHaveLength(2);
+    expect(exchangeBodies[0]).toEqual(exchangeBodies[1]);
+    expect(Object.fromEntries(artifactRequests)).toEqual({
+      release: 1,
+      model: 1,
+      fixture: 1,
+    });
+    const localManifest = JSON.parse(
+      await readFile(join(output, "installation-artifacts.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(localManifest).toMatchObject({
+      schemaVersion: 1,
+      installationId,
+      platform: "darwin-arm64",
+      releaseVersion: "0.1.1",
+      release: {
+        releaseRoot: join(output, "installation-artifacts", "release-0.1.1"),
+      },
+    });
+    await expect(
+      stat(
+        join(
+          output,
+          "installation-artifacts",
+          "release-0.1.1",
+          "release-manifest.json",
         ),
-      ).resolves.toBeDefined();
-      const verifiedReceipt = await readInstallationArtifactsReceipt(output);
-      expect(verifiedReceipt).toMatchObject({
-        installationId,
-        platform: "darwin-arm64",
-        releaseVersion: "0.1.1",
-      });
-      await writeFile(verifiedReceipt.model.path, "changed", { mode: 0o600 });
-      await expect(readInstallationArtifactsReceipt(output)).rejects.toThrow(
-        "Prepared installation artifact",
-      );
-      expect(JSON.stringify(localManifest)).not.toContain("signature");
-      expect(JSON.stringify(localManifest)).not.toContain(
-        installationCredential,
-      );
-      expect(log.mock.calls.flat().join(" ")).not.toContain(
-        installationCredential,
-      );
-    },
-  );
+      ),
+    ).resolves.toBeDefined();
+    const verifiedReceipt = await readInstallationArtifactsReceipt(output);
+    expect(verifiedReceipt).toMatchObject({
+      installationId,
+      platform: "darwin-arm64",
+      releaseVersion: "0.1.1",
+    });
+    await writeFile(verifiedReceipt.model.path, "changed", { mode: 0o600 });
+    await expect(readInstallationArtifactsReceipt(output)).rejects.toThrow(
+      "Prepared installation artifact",
+    );
+    expect(JSON.stringify(localManifest)).not.toContain("signature");
+    expect(JSON.stringify(localManifest)).not.toContain(installationCredential);
+    expect(log.mock.calls.flat().join(" ")).not.toContain(
+      installationCredential,
+    );
+  });
 
   it("rejects prebuilt reports outside explicit loopback testing", async () => {
     const root = await mkdtemp(join(tmpdir(), "musicmute-enrollment-"));
@@ -731,7 +479,7 @@ foreach ($Entry in @('${root.replaceAll("'", "''")}','${output.replaceAll("'", "
     await expect(
       runEnrollmentCommand([
         "--backend-url",
-        "https://workers.example.test",
+        "https://workers.example.test/api/v1",
         "--enrollment-file",
         enrollmentFile,
         "--report",
@@ -753,19 +501,15 @@ async function handleRequest(
   }>,
   isActivated: () => boolean,
   markActivated: () => void,
-  loseActivationResponse: () => boolean,
 ): Promise<void> {
   try {
-    const body = fromWireCase(JSON.parse(await readBody(request))) as Record<
-      string,
-      unknown
-    >;
+    const body = JSON.parse(await readBody(request)) as Record<string, unknown>;
     requests.push({
       path: request.url ?? "",
       authorization: request.headers.authorization,
       body,
     });
-    if (request.url === "/worker/installations") {
+    if (request.url === "/api/v1/worker/v1/installations") {
       send(response, {
         installationId,
         phase: isActivated() ? "activated" : "restricted",
@@ -775,7 +519,7 @@ async function handleRequest(
       });
       return;
     }
-    if (request.url?.endsWith("/reports")) {
+    if (request.url?.endsWith("/report")) {
       send(response, {
         installationId,
         phase: "reported",
@@ -785,14 +529,8 @@ async function handleRequest(
       });
       return;
     }
-    if (request.url?.endsWith("/activations")) {
+    if (request.url?.endsWith("/activate")) {
       markActivated();
-      if (loseActivationResponse()) {
-        response
-          .writeHead(200, { "Content-Type": "application/json" })
-          .end("{");
-        return;
-      }
       send(response, {
         machineId,
         status: "active",
@@ -818,37 +556,14 @@ function readBody(request: IncomingMessage): Promise<string> {
 
 function send(response: ServerResponse, value: unknown): void {
   response.writeHead(200, { "Content-Type": "application/json" });
-  response.end(JSON.stringify(toWireCase(value)));
+  response.end(JSON.stringify(value));
 }
 
-function json(
-  value: unknown,
-  status = 200,
-  headers?: Record<string, string>,
-): Response {
-  return new Response(JSON.stringify(toWireCase(value)), {
+function json(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json" },
   });
-}
-
-function problem(
-  code: string,
-  status: number,
-  headers?: Record<string, string>,
-): Response {
-  return json(
-    {
-      type: "about:blank",
-      title: status === 429 ? "Too Many Requests" : "Service Unavailable",
-      status,
-      detail: "The request cannot be completed yet.",
-      code,
-      request_id: "request-1",
-    },
-    status,
-    { "Content-Type": "application/problem+json; charset=utf-8", ...headers },
-  );
 }
 
 function report() {

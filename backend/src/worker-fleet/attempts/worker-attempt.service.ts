@@ -1,7 +1,4 @@
-import { validComparisonRanges } from '../../jobs/comparison-ranges.js';
-import { measureTransferOperation } from './transfer-timing.js';
-import { withAttemptMeasurements } from '../../jobs/job-stage-timing.js';
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { isUUID } from 'class-validator';
 import {
@@ -17,8 +14,6 @@ import { NotificationOutbox } from '../../notifications/notification-outbox.sche
 import { ProcessingUsageService } from '../../processing-usage/processing-usage.service.js';
 import { StorageCleanupService } from '../../storage/storage-cleanup.service.js';
 import { StorageTransfersService } from '../../storage/storage-transfers.service.js';
-import { SharedMediaService } from '../../shared-media/shared-media.service.js';
-import { JobRenditionService } from './job-rendition.service.js';
 import { AccountAccessService } from '../../users/account-access.service.js';
 import type { WorkerPrincipal } from '../auth/worker-auth.types.js';
 import {
@@ -51,8 +46,6 @@ export class WorkerAttemptService {
     private readonly cleanup: StorageCleanupService,
     private readonly accountAccess: AccountAccessService,
     private readonly usage: ProcessingUsageService,
-    @Optional() private readonly sharedMedia?: SharedMediaService,
-    @Optional() private readonly renditions?: JobRenditionService,
   ) {}
 
   private get outbox() {
@@ -66,6 +59,8 @@ export class WorkerAttemptService {
   ) {
     const first = await this.loadCurrent(principal, attemptId, dto);
     if (!first.job.inputObject)
+      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
+    if (!(await this.storage.isPinnedObjectAvailable(first.job.inputObject)))
       throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     const session = await this.connection.startSession();
     let entitlement: { expiresAt: Date };
@@ -151,12 +146,6 @@ export class WorkerAttemptService {
       },
       {
         $set: {
-          stageTimingAttempts: withAttemptMeasurements(
-            current.job,
-            attemptId,
-            current.attempt.attemptNumber,
-            dto.executionTimings,
-          ),
           workerProgress: {
             attemptId,
             sequence: dto.sequence,
@@ -195,21 +184,11 @@ export class WorkerAttemptService {
     attemptId: string,
     dto: WorkerOutputGrantDto,
   ) {
-    return measureTransferOperation('output_grant', attemptId, () =>
-      this.issueOutputGrant(principal, attemptId, dto),
-    );
-  }
-
-  private async issueOutputGrant(
-    principal: WorkerPrincipal,
-    attemptId: string,
-    dto: WorkerOutputGrantDto,
-  ) {
     const first = await this.loadCurrent(principal, attemptId, dto);
     const reservation = this.outputReservation(first.job, first.attempt, dto);
     this.assertReservation(first.attempt.outputReservation, reservation);
     if (first.attempt.outputReservation) {
-      const object = await this.storage.findUploadedObject(reservation);
+      const object = await this.storage.findUploadedVersion(reservation);
       if (object) {
         await this.accountAccess.assertActive(first.job.userId);
         return {
@@ -227,79 +206,67 @@ export class WorkerAttemptService {
         };
       }
     }
-    const grant = await measureTransferOperation(
-      'output_grant_signing',
-      attemptId,
-      () =>
-        this.storage.createWorkerOutputGrant(
-          reservation,
-          first.attempt.deadlineAt,
-        ),
+    const grant = await this.storage.createWorkerOutputGrant(
+      reservation,
+      first.attempt.deadlineAt,
     );
     const grantExpiresAt = new Date(grant.expiresAt);
     const session = await this.connection.startSession();
     try {
-      await measureTransferOperation(
-        'output_grant_transaction',
-        attemptId,
-        () =>
-          session.withTransaction(async () => {
-            const { attempt, job } = await this.loadCurrent(
-              principal,
-              attemptId,
-              dto,
-              session,
-            );
-            this.assertReservation(attempt.outputReservation, reservation);
-            await this.accountAccess.assertActive(job.userId, session);
-            await this.usage.reconcileMeasured(
-              job,
-              dto.measuredDurationSeconds,
-              session,
-            );
-            const attemptFence = await this.attempts.updateOne(
-              { _id: attempt._id, revision: attempt.revision },
-              {
-                $set: {
-                  state: 'uploading',
-                  stage: 'uploading',
-                  outputReservation: { ...reservation, grantExpiresAt },
-                },
-                $inc: { revision: 1 },
-              },
-              { session, runValidators: true },
-            );
-            if (attemptFence.modifiedCount !== 1)
-              throw workerError('WORKER_CONFLICT');
-            const now = new Date();
-            const jobFence = await this.jobs.updateOne(
-              this.jobOwnershipFilter(job, attempt, now),
-              {
-                $set: {
-                  status: 'uploading_result',
-                  measuredDurationSeconds: dto.measuredDurationSeconds,
-                  processingFinishedAt: job.processingFinishedAt ?? now,
-                  uploadingResultAt: job.uploadingResultAt ?? now,
-                },
-                $inc: { revision: 1 },
-              },
-              { session, runValidators: true },
-            );
-            if (jobFence.modifiedCount !== 1)
-              throw workerError('WORKER_CONFLICT');
-            await this.cleanup.schedule(
-              {
-                key: reservation.key,
-                ownerUserId: job.userId,
-                reason: 'AUDIO_OUTPUT_ORPHANED',
-                nextAt: attempt.deadlineAt,
-                // R2 is unversioned: wait for expired grants and in-flight PUTs before key deletion.
-                settleUntil: new Date(attempt.deadlineAt.getTime() + 3_600_000),
-              },
-              session,
-            );
-          }),
-      );
+      await session.withTransaction(async () => {
+        const { attempt, job } = await this.loadCurrent(
+          principal,
+          attemptId,
+          dto,
+          session,
+        );
+        this.assertReservation(attempt.outputReservation, reservation);
+        await this.accountAccess.assertActive(job.userId, session);
+        await this.usage.reconcileMeasured(
+          job,
+          dto.measuredDurationSeconds,
+          session,
+        );
+        const attemptFence = await this.attempts.updateOne(
+          { _id: attempt._id, revision: attempt.revision },
+          {
+            $set: {
+              state: 'uploading',
+              stage: 'uploading',
+              outputReservation: { ...reservation, grantExpiresAt },
+            },
+            $inc: { revision: 1 },
+          },
+          { session, runValidators: true },
+        );
+        if (attemptFence.modifiedCount !== 1)
+          throw workerError('WORKER_CONFLICT');
+        const now = new Date();
+        const jobFence = await this.jobs.updateOne(
+          this.jobOwnershipFilter(job, attempt, now),
+          {
+            $set: {
+              status: 'uploading_result',
+              measuredDurationSeconds: dto.measuredDurationSeconds,
+              processingFinishedAt: job.processingFinishedAt ?? now,
+              uploadingResultAt: job.uploadingResultAt ?? now,
+            },
+            $inc: { revision: 1 },
+          },
+          { session, runValidators: true },
+        );
+        if (jobFence.modifiedCount !== 1) throw workerError('WORKER_CONFLICT');
+        await this.cleanup.schedule(
+          {
+            key: reservation.key,
+            ownerUserId: job.userId,
+            reason: 'AUDIO_OUTPUT_ORPHANED',
+            nextAt: attempt.deadlineAt,
+            settleUntil: new Date(attempt.deadlineAt.getTime() + 300_000),
+          },
+          session,
+        );
+      });
     } finally {
       await session.endSession();
     }
@@ -323,215 +290,101 @@ export class WorkerAttemptService {
     attemptId: string,
     dto: CompleteWorkerAttemptDto,
   ) {
-    return measureTransferOperation('completion', attemptId, () =>
-      this.completeMeasured(principal, attemptId, dto),
-    );
-  }
-
-  private async completeMeasured(
-    principal: WorkerPrincipal,
-    attemptId: string,
-    dto: CompleteWorkerAttemptDto,
-  ) {
-    const completionStarted = performance.now();
     const first = await this.loadAttemptAndJob(principal, attemptId, dto);
     this.assertRecipe(first.job, dto);
     if (first.attempt.state === 'succeeded')
       return this.presentCompletion(first.attempt, dto, true);
-    const needsRendition = Boolean(
-      first.job.sharedResultKey &&
-      first.job.requestedTrimEnabled === true &&
-      first.job.recipeSnapshot?.trimEnabled === false,
-    );
-    if (needsRendition && !this.renditions)
-      throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
     this.assertCurrent(first.attempt, first.job, new Date());
-    if (first.job.sharedResultKey) {
-      if (!this.sharedMedia) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-      await this.accountAccess.assertActive(first.job.userId);
-    }
     const reservation = first.attempt.outputReservation;
     if (!reservation) throw workerError('WORKER_CONFLICT');
-    const object = await measureTransferOperation(
-      'completion_storage_verification',
-      attemptId,
-      () => this.storage.verifyUploadedObject(reservation, dto.etag),
+    const object = await this.storage.verifyUploadedVersion(
+      reservation,
+      dto.versionId,
     );
-    let sharedObject = object;
-    if (first.job.sharedResultKey) {
-      const publishing = await this.loadCurrent(principal, attemptId, dto);
-      this.assertRecipe(publishing.job, dto);
-      this.assertReservation(publishing.attempt.outputReservation, reservation);
-      if (!sameReservationObject(reservation, object))
-        throw workerError('WORKER_CONFLICT');
-      await this.accountAccess.assertActive(publishing.job.userId);
-      try {
-        sharedObject = await this.sharedMedia!.publishOutput(
-          publishing.job,
-          object,
-        );
-      } catch {
-        throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-      }
-    }
     const session = await this.connection.startSession();
     try {
-      const result = await measureTransferOperation(
-        'completion_transaction',
-        attemptId,
-        () =>
-          session.withTransaction(async () => {
-            const current = await this.loadAttemptAndJob(
-              principal,
-              attemptId,
-              dto,
-              session,
-            );
-            this.assertRecipe(current.job, dto);
-            if (current.attempt.state === 'succeeded')
-              return this.presentCompletion(current.attempt, dto, true);
-            const now = new Date();
-            this.assertCurrent(current.attempt, current.job, now);
-            this.assertReservation(
-              current.attempt.outputReservation,
-              reservation,
-            );
-            if (!sameReservationObject(reservation, object))
-              throw workerError('WORKER_CONFLICT');
-            await this.accountAccess.assertActive(current.job.userId, session);
-            const attemptFence = await this.attempts.updateOne(
-              {
-                _id: current.attempt._id,
-                revision: current.attempt.revision,
-                state: trusted({ $in: ACTIVE_ATTEMPTS }),
-              },
-              {
-                $set: {
-                  state: 'succeeded',
-                  stage: 'finalizing',
-                  outputObject: object,
-                  terminalCode: null,
-                  failureClass: null,
-                  terminalSummary: null,
-                  finishedAt: now,
-                  leaseExpiresAt: now,
-                  processingStageTimings: dto.stageTimings,
+      const result = await session.withTransaction(async () => {
+        const current = await this.loadAttemptAndJob(
+          principal,
+          attemptId,
+          dto,
+          session,
+        );
+        this.assertRecipe(current.job, dto);
+        if (current.attempt.state === 'succeeded')
+          return this.presentCompletion(current.attempt, dto, true);
+        const now = new Date();
+        this.assertCurrent(current.attempt, current.job, now);
+        this.assertReservation(current.attempt.outputReservation, reservation);
+        if (!sameReservationObject(reservation, object))
+          throw workerError('WORKER_CONFLICT');
+        await this.accountAccess.assertActive(current.job.userId, session);
+        const attemptFence = await this.attempts.updateOne(
+          {
+            _id: current.attempt._id,
+            revision: current.attempt.revision,
+            state: trusted({ $in: ACTIVE_ATTEMPTS }),
+          },
+          {
+            $set: {
+              state: 'succeeded',
+              stage: 'finalizing',
+              outputObject: object,
+              terminalCode: null,
+              failureClass: null,
+              terminalSummary: null,
+              finishedAt: now,
+              leaseExpiresAt: now,
+              processingStageTimings: dto.stageTimings,
+            },
+            $inc: { revision: 1 },
+          },
+          { session, runValidators: true },
+        );
+        if (attemptFence.modifiedCount !== 1)
+          throw workerError('WORKER_CONFLICT');
+        await this.usage.recordRetainedOutput(
+          current.job,
+          object.bytes,
+          session,
+        );
+        const job = await this.jobs
+          .findOneAndUpdate(
+            this.jobOwnershipFilter(current.job, current.attempt, now),
+            {
+              $set: {
+                status: 'ready',
+                outputObject: object,
+                retainedOutputAccountedAt: now,
+                retainedOutputReleasedAt: null,
+                currentExecution: null,
+                workerProgress: null,
+                finishedAt: now,
+                workerStageTimings: dto.stageTimings,
+                retryEligibility: {
+                  eligible: false,
+                  attemptsRemaining: 0,
+                  nextAttemptAt: null,
                 },
-                $inc: { revision: 1 },
               },
-              { session, runValidators: true },
-            );
-            if (attemptFence.modifiedCount !== 1)
-              throw workerError('WORKER_CONFLICT');
-            if (current.job.sharedResultKey) {
-              try {
-                await this.sharedMedia!.completeResult(
-                  current.job,
-                  sharedObject,
-                  dto.comparisonRanges ?? null,
-                  session,
-                );
-              } catch (error) {
-                // The driver must see transaction labels to retry a write conflict.
-                if (
-                  error &&
-                  typeof error === 'object' &&
-                  'errorLabels' in error &&
-                  Array.isArray(error.errorLabels) &&
-                  error.errorLabels.includes('TransientTransactionError')
-                )
-                  throw error;
-                throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-              }
-            }
-            if (!needsRendition)
-              await this.usage.recordRetainedOutput(
-                current.job,
-                sharedObject.bytes + (current.job.inputObject?.bytes ?? 0),
-                session,
-              );
-            const readyAt = new Date();
-            const finalizationMs = Math.round(
-              performance.now() - completionStarted,
-            );
-            const job = await this.jobs
-              .findOneAndUpdate(
-                this.jobOwnershipFilter(current.job, current.attempt, readyAt),
-                {
-                  $set: {
-                    status: needsRendition ? 'uploading_result' : 'ready',
-                    outputObject: needsRendition ? null : sharedObject,
-                    comparisonRanges: needsRendition
-                      ? null
-                      : (dto.comparisonRanges ?? null),
-                    renditionPending: needsRendition
-                      ? {
-                          full: sharedObject,
-                          attemptId,
-                          queuedAt: readyAt,
-                          nextAt: readyAt,
-                          leaseUntil: null,
-                          leaseToken: null,
-                          attempts: 0,
-                        }
-                      : null,
-                    retainedOutputAccountedAt: needsRendition ? null : readyAt,
-                    retainedInputBytes: needsRendition
-                      ? 0
-                      : (current.job.inputObject?.bytes ?? 0),
-                    retainedOutputReleasedAt: null,
-                    currentExecution: null,
-                    workerProgress: null,
-                    finishedAt: needsRendition ? null : readyAt,
-                    workerStageTimings: dto.stageTimings,
-                    stageTimingAttempts: withAttemptMeasurements(
-                      current.job,
-                      attemptId,
-                      current.attempt.attemptNumber,
-                      [
-                        ...(
-                          dto.executionTimings ??
-                          current.job.stageTimingAttempts?.find(
-                            (item) => item.attemptId === attemptId,
-                          )?.stages ??
-                          []
-                        ).filter((timing) => timing.stage !== 'completion'),
-                        {
-                          stage: 'completion',
-                          durationMs: finalizationMs,
-                          complete: !needsRendition,
-                        },
-                      ],
-                    ),
-                    retryEligibility: {
-                      eligible: false,
-                      attemptsRemaining: 0,
-                      nextAttemptAt: null,
-                    },
-                  },
-                  $inc: { revision: 1 },
-                },
-                { session, runValidators: true, returnDocument: 'after' },
-              )
-              .lean();
-            if (!job) throw workerError('WORKER_CONFLICT');
-            await this.releaseSlot(current.attempt, now, session);
-            // Model work has finished even while its requested rendition waits.
-            await this.usage.settleJob({ ...job, status: 'ready' }, session);
-            if (!needsRendition)
-              await this.enqueueNotification(job, 'ready', now, session);
-            if (!current.job.sharedResultKey)
-              await this.cleanup.cancelScheduled(reservation.key, session);
-            return {
-              attemptId,
-              jobId: job._id.toHexString(),
-              status: 'ready',
-              replayed: false,
-            };
-          }),
-      );
+              $inc: { revision: 1 },
+            },
+            { session, runValidators: true, returnDocument: 'after' },
+          )
+          .lean();
+        if (!job) throw workerError('WORKER_CONFLICT');
+        await this.releaseSlot(current.attempt, now, session);
+        await this.usage.settleJob(job, session);
+        await this.enqueueNotification(job, 'ready', now, session);
+        await this.cleanup.cancelScheduled(reservation.key, session);
+        return {
+          attemptId,
+          jobId: job._id.toHexString(),
+          status: 'ready',
+          replayed: false,
+        };
+      });
       if (!result) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-      if (needsRendition) this.renditions!.wake();
       return result;
     } finally {
       await session.endSession();
@@ -615,12 +468,6 @@ export class WorkerAttemptService {
             this.jobOwnershipFilter(current.job, current.attempt, now),
             {
               $set: {
-                stageTimingAttempts: withAttemptMeasurements(
-                  current.job,
-                  attemptId,
-                  current.attempt.attemptNumber,
-                  dto.executionTimings,
-                ),
                 status: retry ? 'queued' : 'failed',
                 currentExecution: null,
                 workerProgress: null,
@@ -638,13 +485,7 @@ export class WorkerAttemptService {
                   at: now,
                 },
                 ...(retry
-                  ? {
-                      queuedAt: now,
-                      queueTimingStartedAt: current.job.serverTimingStartedAt
-                        ? now
-                        : null,
-                      finishedAt: null,
-                    }
+                  ? { queuedAt: now, finishedAt: null }
                   : { finishedAt: now }),
               },
               $inc: { revision: 1 },
@@ -763,11 +604,6 @@ export class WorkerAttemptService {
   }
 
   private assertRecipe(job: Job, dto: CompleteWorkerAttemptDto): void {
-    if (
-      dto.comparisonRanges !== undefined &&
-      !validComparisonRanges(dto.comparisonRanges)
-    )
-      throw workerError('WORKER_CONFLICT');
     const recipe = job.recipeSnapshot;
     if (
       !recipe ||
@@ -862,7 +698,7 @@ export class WorkerAttemptService {
   ) {
     if (
       !attempt.outputObject ||
-      attempt.outputObject.etag !== dto.etag ||
+      attempt.outputObject.versionId !== dto.versionId ||
       JSON.stringify(attempt.processingStageTimings) !==
         JSON.stringify(dto.stageTimings)
     )
@@ -879,7 +715,7 @@ export class WorkerAttemptService {
 function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
   return (
     left.key === right.key &&
-    left.etag === right.etag &&
+    left.versionId === right.versionId &&
     left.bytes === right.bytes &&
     left.sha256 === right.sha256 &&
     left.contentType === right.contentType

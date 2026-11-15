@@ -15,7 +15,6 @@ struct JobArtifactProgress: Equatable, Sendable {
 /// Explicit result actions share one transfer per owner/job. A valid private cache is retained.
 @MainActor final class JobArtifactRepository: ObservableObject {
   @Published private(set) var progress: [String: JobArtifactProgress] = [:]
-  private let original: Bool
   private let api: JobsAPI
   private let root: URL
   private let sessionProvider: @MainActor () -> SessionFence?
@@ -34,21 +33,13 @@ struct JobArtifactProgress: Equatable, Sendable {
   init(
     api: JobsAPI, root: URL, sessionProvider: @escaping @MainActor () -> SessionFence?,
     transport: ArtifactDownloading? = nil,
-    original: Bool = false,
-    validate: (@Sendable (URL) async throws -> Void)? = nil
+    validate: @escaping @Sendable (URL) async throws -> Void = { try await validateMP3Artifact($0) }
   ) {
-    self.original = original
     self.api = api
     self.root = root.standardizedFileURL.resolvingSymlinksInPath()
     self.sessionProvider = sessionProvider
     self.transport = transport ?? URLSessionArtifactDownloader()
-    if let validate {
-      self.validate = validate
-    } else if original {
-      self.validate = { url in try await validateMP3Artifact(url, mp3Only: false) }
-    } else {
-      self.validate = { try await validateMP3Artifact($0) }
-    }
+    self.validate = validate
     boundSession = sessionProvider()
   }
 
@@ -116,28 +107,7 @@ struct JobArtifactProgress: Equatable, Sendable {
       "Named", isDirectory: true)
     try await prepare(directory: directory)
     try check(fence, jobId: id)
-    let ext: String
-    if original {
-      let metadata = output.deletingLastPathComponent().appendingPathComponent("job.json")
-      let job: Job
-      if let data = try? Data(contentsOf: metadata),
-        let cached = try? JSONDecoder().decode(Job.self, from: data), cached.id == id
-      {
-        job = cached
-      } else {
-        job = try await api.detail(id: id)
-        try check(fence, jobId: id)
-        try JSONEncoder().encode(job).write(to: metadata, options: .atomic)
-      }
-      try check(fence, jobId: id)
-      guard
-        ["mp3", "m4a", "wav", "ogg", "opus", "flac", "aac", "webm"].contains(job.input.extension)
-      else { throw JobArtifactFailure.invalidOutput }
-      ext = job.input.extension
-    } else {
-      ext = "mp3"
-    }
-    let filename = Self.safeFilename(displayName) + (original ? "-original." : ".") + ext
+    let filename = Self.safeFilename(displayName) + ".mp3"
     let destination = directory.appendingPathComponent(filename)
     do {
       for file in try FileManager.default.contentsOfDirectory(
@@ -157,26 +127,6 @@ struct JobArtifactProgress: Equatable, Sendable {
       throw CancellationError()
     } catch {
       throw JobArtifactFailure.storage
-    }
-  }
-
-  func isCached(jobId: String) async -> Bool {
-    guard jobId.range(of: "^[0-9a-fA-F]{24}$", options: .regularExpression) != nil else {
-      return false
-    }
-    onSessionChanged()
-    guard let fence = sessionProvider() else { return false }
-    let id = jobId.lowercased()
-    let file = root.appendingPathComponent(ProcessingStore.ownerDirectoryName(fence.uid))
-      .appendingPathComponent(id, isDirectory: true)
-      .appendingPathComponent(original ? "input.audio" : "output.mp3")
-    guard !deletedJobIDs.contains(id) else { return false }
-    do {
-      let cached = try await validCache(file) != nil
-      try check(fence, jobId: id)
-      return cached
-    } catch {
-      return false
     }
   }
 
@@ -201,7 +151,7 @@ struct JobArtifactProgress: Equatable, Sendable {
   private func fetch(jobId: String, fence: SessionFence, token: UUID) async throws -> URL {
     let directory = root.appendingPathComponent(ProcessingStore.ownerDirectoryName(fence.uid))
       .appendingPathComponent(jobId, isDirectory: true)
-    let destination = directory.appendingPathComponent(original ? "input.audio" : "output.mp3")
+    let destination = directory.appendingPathComponent("output.mp3")
     try await prepare(directory: directory)
     try check(fence, jobId: jobId)
     if let existing = try await validCache(destination) {
@@ -213,25 +163,13 @@ struct JobArtifactProgress: Equatable, Sendable {
     grantRequestIDs[jobId] = grantRequestID
     for attempt in 0...1 {
       try check(fence, jobId: jobId)
-      if original {
-        let job = try await api.detail(id: jobId)
-        try check(fence, jobId: jobId)
-        guard job.status == "ready", job.canDownloadInput else {
-          throw JobArtifactFailure.unavailable
-        }
-        try JSONEncoder().encode(job).write(
-          to: directory.appendingPathComponent("job.json"), options: .atomic)
-      }
-      // The output grant validates ownership, ready state and object identity in
-      // one command. Originals still retain the metadata needed for offline export.
-      let grant: DownloadGrant
-      do {
-        grant = try await api.download(
-          id: jobId, artifact: original ? "input" : "output", requestId: grantRequestID)
-      } catch JobsFailure.conflict(let code) where code == "JOB_STATE_CONFLICT" {
-        try check(fence, jobId: jobId)
+      let job = try await api.detail(id: jobId)
+      try check(fence, jobId: jobId)
+      guard job.status == "ready", job.canDownloadOutput else {
         throw JobArtifactFailure.unavailable
       }
+      let grant = try await api.download(
+        id: jobId, artifact: "output", requestId: grantRequestID)
       try check(fence, jobId: jobId)
       let partial = directory.appendingPathComponent(".download-\(UUID().uuidString).partial")
       progress[jobId] = JobArtifactProgress(receivedBytes: 0, totalBytes: nil)
@@ -366,7 +304,7 @@ struct JobArtifactProgress: Equatable, Sendable {
 }
 
 /// Checks the actual container and decodes audio frames; a renamed M4A or HTML body is not an MP3.
-func validateMP3Artifact(_ url: URL, mp3Only: Bool = true) async throws {
+func validateMP3Artifact(_ url: URL) async throws {
   try await Task.detached(priority: .utility) {
     try Task.checkCancellation()
     guard let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else {
@@ -380,7 +318,7 @@ func validateMP3Artifact(_ url: URL, mp3Only: Bool = true) async throws {
     var type: AudioFileTypeID = 0
     var propertySize = UInt32(MemoryLayout<AudioFileTypeID>.size)
     guard AudioFileGetProperty(fileID, kAudioFilePropertyFileFormat, &propertySize, &type) == noErr,
-      !mp3Only || type == kAudioFileMP3Type
+      type == kAudioFileMP3Type
     else { throw JobArtifactFailure.invalidOutput }
     do {
       let audio = try AVAudioFile(forReading: url)

@@ -1,6 +1,6 @@
 # MusicMute administrator dashboard
 
-Private React + TypeScript + Vite operations console for the MusicMute NestJS API. The dashboard covers administrator access, jobs, user processing controls, private media grants, store releases, update policy, processing settings, health alerts, audit history, and bounded CSV exports.
+Private React + TypeScript + Vite operations console for the MusicMute NestJS API. The dashboard covers administrator access, jobs, user processing controls, private media grants, releases and APK verification, update policy, processing settings, health alerts, audit history, and bounded CSV exports.
 
 ## Local setup
 
@@ -28,12 +28,6 @@ Configure these public values through the local environment while running Vite:
 
 The Firebase values are browser client configuration. Never place Admin SDK credentials or service-account files in this app. The API origin must list the dashboard origin in its `CORS_ORIGINS` setting.
 
-Dashboard calls use root-mounted `/admin/...` resource routes and snake_case
-JSON/query names on the wire. The API also checks the authenticated
-administrator's current role and each operation's permission. See the
-[API client contract](../docs/api/client-contract.md) for error, retry, and
-pagination rules, and [OpenAPI](../backend/openapi.yaml) for exact operations.
-
 The Playwright command selects a separate test-only auth adapter with Vite's `e2e` mode. That adapter is excluded from production builds.
 
 ## Validation
@@ -48,9 +42,9 @@ npm run test:e2e
 npm run build
 ```
 
-`npm run test:e2e` uses installed Google Chrome. It starts the Vite app plus a compiled NestJS fixture backed by test-owned, loopback-only MongoDB and Redis processes. It requires `mongod` and `redis-server` locally, uses synthetic Firebase/storage doubles, and removes its temporary database files when the run ends.
+`npm run test:e2e` uses installed Google Chrome. It starts the Vite app plus a compiled NestJS fixture backed by test-owned, loopback-only MongoDB and Redis processes. It requires `mongod` and `redis-server` locally, uses synthetic Firebase/storage/APK-verifier doubles, and removes its temporary database files when the run ends.
 
-The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, R2 CORS/IAM, production data, or deployment.
+The browser suite also uses deterministic route fixtures for UI states. Those fixtures prove browser behavior but do not prove live Firebase, S3 CORS/IAM, production data, or deployment.
 
 ## Security and behavior
 
@@ -82,7 +76,7 @@ Set these variables on the CapRover dashboard app before it starts:
 - `NODE_ENV=production`
 - `HOST=0.0.0.0`
 - `PORT=80`
-- `VITE_API_ORIGIN=https://api.example.com` — HTTPS origin only, without a path, credentials, query or fragment.
+- `VITE_API_ORIGIN=https://api.example.com` — HTTPS origin only, without `/api/v1`, credentials, query or fragment.
 - `VITE_APP_BASE_PATH=/` — use a root-relative subpath such as `/operations` only when the reverse proxy serves the app there.
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
@@ -98,65 +92,7 @@ Configure the backend `CORS_ORIGINS` with the exact public HTTPS dashboard origi
 
 See the [approved scope](../docs/tasks/full-dashboard/scope.md), [API contracts](../docs/tasks/full-dashboard/contracts.md), and [local validation record](../docs/validation/full-dashboard-local.md).
 
-## Mac updates
-
-**Mac updates** is a separate Sparkle release workflow at `/macos-updates`, with
-`releases.read` for inspection and `releases.manage` for upload/publication.
-An owner saves the 32-byte base64 Ed25519 public key with fresh authentication
-and an audit reason. The backend prevents key changes after any Mac release is
-created. The private signing key stays in the Mac's Keychain.
-
-Download `musicmute-macos-updates.json` from the page; it contains only public
-feed/download URLs and the public key. From `chrome-extension/`, build with
-`MUSICMUTE_MAC_VERSION=YOUR_NEW_VERSION MUSICMUTE_MAC_BUILD=YOUR_NEW_BUILD MUSICMUTE_UPDATE_CONFIG_FILE=/path/musicmute-macos-updates.json npm run package:macos:release`,
-then run `npm run prepare:macos:update -- --release-result /path/release-result.json --dashboard-config /path/musicmute-macos-updates.json --keychain-account YOUR_SPARKLE_ACCOUNT`.
-Existing Developer ID signing and notarization prerequisites still apply.
-
-Select the prepared canonical DMG (at most 2 GiB) and signed `appcast.xml`
-(at most 32 KiB). The dashboard hashes the DMG in bounded worker chunks, checks
-the pair's version, build, bytes, filename hash and download URL, creates a
-draft and uploads through an immutable private R2 grant. The server verifies
-the signed appcast and uploaded bytes before publication can be confirmed with
-fresh authentication and a reason. Withdrawals stop advertising the release in the public feed; existing immutable
-archive downloads remain available. The newest withdrawn release can be
-republished with a fresh review. Android/iOS releases and update policy are separate.
-
-Mac release reads have no polling or focus/reconnect refetch. Explicit commands
-read back committed state. Lost create responses recover the draft through its
-receipt; an explicit **Recover upload grant and resume** action replays the same
-operation ID for a fresh grant. Signed URLs stay in memory. Unresolved receipts
-fence new writes until **Check operation outcome** resolves them. Cancelled or
-ambiguous transfers can be verified before retrying. **Resume upload** lets a
-manager recover an awaiting draft after reloading the page using the same prepared
-DMG; the signed appcast already saved by the server is retained. This workflow's local
-fixture checks do not establish live R2, signing, Sparkle or deployment success.
-
 ## Processing administration
-
-User detail includes a **Devices** section backed by the shared
-`admin.user_devices` WebSocket subscription (`users.read`). It pages through
-recorded installations and shows platform/model, OS, app version/build,
-country/city, last seen and session status. Expand a device for installation ID,
-metadata revision, first seen/authentication/history-hidden dates, every available
-location field and up to 20 recorded version transitions. Hidden user-history
-records are labeled and remain visible to authorized administrators. Missing
-values are shown as unavailable; `unknown` sessions are never labeled online.
-Location is the latest detected connection location. Web records represent
-browser-profile installations. No additional device collection, polling,
-automatic HTTP refetch or Refresh control is introduced. The compatible
-`GET /admin/users/{id}/devices` is a bounded, no-store administration read;
-backend support must be deployed before this dashboard change.
-
-The update-policy page has a separate **Desktop build gates** section for macOS
-and Windows. It reads `/admin/update-policy/desktop` once, reviews only changed
-desktop channels and requires fresh Google release-management authority plus a
-reason before PATCH. Blank means no minimum; accepted build numbers are whole
-integers 1–2147483647. A global revision conflict reads back once and requires a new
-review; lost replies reconcile the operation receipt without replaying PATCH.
-No periodic status reads or focus/reconnect refetches are introduced. This editor
-does not publish an installer or alter mobile release selection. Below-minimum
-desktop builds retain local processing and completed-download access while new
-cloud processing follows the existing backend access policy.
 
 User detail includes current UTC-month processing usage, upload grants/confirmed
 bytes, result grants/estimated bytes, retained-output bytes, effective limits, reset
@@ -166,143 +102,3 @@ continue using the global standard policy.
 Reason, operation ID, expected revision and fresh authentication are required for
 override changes. Suspensions can have an optional expiry; effective access comes
 from the server, not a client timer. Override writes perform authoritative read-back.
-
-## Realtime processing
-
-Processing updates use authenticated raw WebSocket snapshots with automatic
-reconnection. One app-level socket is shared by all live views and remains open
-while the page is loaded, including across route changes and browser-tab switches.
-Background tabs suspend only client-side response deadlines; returning to the tab
-gives the existing connection a heartbeat grace window before recovery.
-See the [protocol and rollout notes](../docs/realtime-processing-queue/PROTOCOL.md)
-and [local validation ledger](../docs/realtime-processing-queue/IMPLEMENTATION.md).
-HTTP remains responsible for authentication, commands and file transfers.
-
-Worker fleet (Machines), Users and Jobs include a small header refresh icon that
-keeps the current filters and page. Jobs and worker machines request a fresh
-snapshot over the shared WebSocket; Users repeats its directory HTTP read.
-The icon is disabled and spins while the request is pending. Live pages continue
-receiving automatic socket updates without status polling.
-
-## Account usage reset
-
-The user detail page's **Reset usage** action calls
-`POST /admin/users/:id/account-usage-resets`. It zeroes current UTC-month processing
-used/released seconds, upload grants/confirmed bytes, download grants/estimated
-bytes, and current UTC-day upload grants. Quota limits, overrides, actual stored
-file usage, files, historical periods and service-wide bandwidth remain unchanged.
-Active jobs, imports or reservations must finish or be cancelled first.
-The operation requires `users.processing.manage`, fresh authentication, a reason,
-a UUID operation ID, and the displayed usage revision/month/day. Stale confirmations
-return 409; refresh and reopen the dialog. Successful operation replays cannot erase
-new usage. Audit records retain before/after values; deployment alone resets no user.
-
-API guideline preflight: [official Zalando guidelines](https://opensource.zalando.com/restful-api-guidelines/),
-read 2026-09-29: rules 101, 104, 106, 118, 149, 151 and 176 (OpenAPI,
-authorization, compatibility, snake_case, HTTP semantics and problem responses).
-
-## Push notifications
-
-Owners can open **Push notifications**, compose an 80-character title and
-500-character message, review the preview, provide an audit reason, reauthenticate,
-and queue a broadcast to all eligible registered native devices. Broadcasts cannot
-be recalled. The page streams cursor-paginated FCM history over the shared socket.
-History includes content, creator, reason, timestamps and per-device pending,
-FCM-accepted, failed, invalid and skipped counts. No device tokens are exposed.
-An unresolved operation receipt disables further sending in that page session.
-
-This is broadcast history from this dashboard, not an inbox of job-result pushes.
-FCM acceptance does not prove device delivery or reading. Current Android clients
-show notification payloads in the background; they do not show announcement banners
-in the foreground. iOS display depends on APNs setup and notification permission.
-Web users without a native push registration are not reachable by this feature.
-
-## Worker insights and commands
-
-On user detail, owners and support administrators can enable **Allow this account
-to register worker machines**, with a reason and fresh authentication. The saved
-permission defaults off. An active Google session in an open, connected MusicMute
-Local app can then register each new Mac automatically. Disabled or deleting
-accounts cannot change this permission. Lost mutation responses are reconciled
-through the operation receipt and an authoritative user read; an unresolved
-receipt blocks further changes until **Check operation outcome** resolves it.
-
-Registration approval controls new registrations only. Registered machines keep
-their own identity and credentials after sign-out, app quit, account switching,
-permission removal or account deletion. Manage them from **Worker fleet** using
-the existing pause, drain, resume and revoke actions. Machine detail shows the
-registering account as informational history, or **Legacy registration** when no
-account provenance exists. Enrollment invitations and codes are no longer shown
-in the dashboard.
-
-The fleet page summarizes only the currently loaded, filtered page. Worker detail
-explains contact, policy-sync and slot blockers against the server observation
-time, and labels cached data when disconnected. It does not promise scheduler
-eligibility or an ETA. The overview links directly to failed jobs, worker capacity,
-health and push history according to administrator permissions.
-
-Owners can request Runtime snapshot (service/storage), Engine checks
-(model/provider/FFmpeg), full Doctor, and one Kim Vocal 2 Benchmark. Existing
-pause/drain/resume/revoke controls are retained. Commands require an audit reason
-and fresh authentication. A pending command disables another of the same kind;
-a lost response is reconciled through the operation receipt, and an unresolved
-outcome blocks further commands in that page session.
-
-Recent command history shows up to 20 commands, checks, expiry/completion times
-and bounded readable metrics. Runtime snapshot metrics on updated workers include
-supervisor/host uptime, supervisor resident/heap memory, host total/free memory,
-CPU parallelism, and scratch volume available/total space. These are observations
-at command execution, not continuous CPU/GPU utilization or memory budgets. Older
-workers may omit metrics. The engine checks share one packaged probe: a failed
-probe means its requested checks failed or could not complete. Successful unrelated
-checks remain visible. See [review and plan](../docs/dashboard/worker-insights-plan.md).
-
-## Native link-import visibility
-
-The standard account policy includes **Show import from link**, a searchable
-country multi-select, and **Hide link import for these users**. Search the account
-directory explicitly by email, exact ID, or supported prefix, then select accounts
-to hide their new-link controls. User search requires `users.read`; changing the
-policy requires `settings.manage`. Selected account IDs remain removable if an
-account is deleted or its details cannot be loaded. Removing a user selection
-restores the global and country rules; it does not force visibility when another
-rule hides the controls. Up to 1,000 accounts can be selected, with selected-user
-details loaded in bounded pages and no recurring directory reads. Older policies
-without a selected-user list start with no user exclusions.
-
-These controls hide new-link UI on Android, iOS, and macOS
-while file import, history, retries, queued imports, downloads, and running jobs
-keep their existing behavior. Web and the Chrome browser panel are unaffected.
-The stored switch defaults to off; the existing API process flag can also keep
-the native UI hidden, which the form reports. Saving uses the existing revision,
-reason, fresh admin authentication, and `settings.manage` permission. Native
-apps consume the existing owner `policy` snapshot; signed-out Macs use public
-policy checkout and offline apps retain the last installation policy.
-
-## Android update releases
-
-Android release drafts record the Google Play version name, version code,
-English changelog and the fixed MusicMute listing. Upload the AAB in Play
-Console; this dashboard does not receive an APK or AAB. The Android policy
-contains only the minimum supported build and Play release ID. Builds below
-the minimum must install a Play update before continuing; any Play build that
-meets the minimum clears that requirement after installation. Builds between
-the minimum and target may receive an optional update to the latest target.
-
-Publication requires a valid preview, confirmation that the store release is
-available to its intended audience, a reason and fresh authentication. Play
-releases do not need artifact verification. Historical direct APK releases
-remain readable as **Retired direct APK**, with no edit, upload, publication or
-policy-target action. These source and fixture checks do not prove availability
-in Play Console or a Play-installed device update.
-
-## Private local diagnostics
-
-From the repository root, start `node tools/local-logging/cli.mjs up`, then
-`node tools/local-logging/cli.mjs run dashboard`. The Vite development server logs
-HTTP, raw WebSocket reception/sends, lifecycle, actions, storage operation metadata
-and safe errors. `globalThis.__MUSICMUTE_LOCAL_LOG_STATUS__` reports bounded queue,
-delivery, drops and failures. Payload, console and collector controls are separate;
-release builds compile the collector gate off even when development environment
-variables are supplied. See the [local logging guide](../docs/local-logging/README.md)
-for privacy, retained files, source coverage, Logdy and read-only MCP setup.

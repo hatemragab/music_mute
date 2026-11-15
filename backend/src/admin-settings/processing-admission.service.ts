@@ -1,4 +1,3 @@
-import { hasProcessingCapacity } from '../jobs/dispatch-eligibility.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -19,10 +18,7 @@ import type { JobMetadata } from '../jobs/job-metadata.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { User } from '../users/user.schema.js';
 import { ProcessingAdmissionFence } from './processing-settings.schema.js';
-import {
-  AccountPolicyService,
-  type EffectiveAccountPolicy,
-} from './account-policy.service.js';
+import { AccountPolicyService } from './account-policy.service.js';
 
 @Injectable()
 export class ProcessingAdmissionService {
@@ -42,127 +38,7 @@ export class ProcessingAdmissionService {
     session: ClientSession,
     newJobId: Types.ObjectId,
     metadata: JobMetadata = {},
-    importReservationId?: Types.ObjectId,
   ): Promise<AdmissionSnapshot> {
-    const { admissionSnapshot } = await this.assertNewWorkWithPolicy(
-      userId,
-      input,
-      session,
-      newJobId,
-      metadata,
-      importReservationId,
-    );
-    return admissionSnapshot;
-  }
-
-  /** Reuse only within this fenced transaction callback, never across retries. */
-  async assertNewWorkWithPolicy(
-    userId: string | Types.ObjectId,
-    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
-    session: ClientSession,
-    newJobId: Types.ObjectId,
-    metadata: JobMetadata = {},
-    importReservationId?: Types.ObjectId,
-  ): Promise<{
-    admissionSnapshot: AdmissionSnapshot;
-    policy: EffectiveAccountPolicy;
-  }> {
-    const { accountId, policy } = await this.assertAdmissionPolicy(
-      userId,
-      input,
-      session,
-      metadata,
-      importReservationId,
-    );
-    await this.usage.assertRetainedCapacity(
-      accountId,
-      policy.values.maxRetainedOutputBytes,
-      session,
-    );
-
-    const waitingJobs = await this.countCapacity(
-      userId,
-      WAITING_CAPACITY_STATUSES,
-      session,
-    );
-    const processingJobs = await this.countCapacity(
-      userId,
-      PROCESSING_CAPACITY_STATUSES,
-      session,
-    );
-    const maxWaitingJobs = policy.values.maxWaitingJobs;
-    const maxProcessingJobs = policy.values.maxProcessingJobs;
-    if (waitingJobs >= maxWaitingJobs)
-      throw jobError('PROCESSING_LIMIT_REACHED', {
-        nextResetAt: null,
-        capacity: {
-          waitingJobs,
-          maxWaitingJobs,
-          processingJobs,
-          maxProcessingJobs,
-        },
-        action: 'wait_for_job_to_finish',
-      });
-
-    await this.usage.reserveForJob(
-      newJobId,
-      accountId,
-      input.durationSeconds,
-      session,
-      new Date(),
-      policy,
-    );
-    return { admissionSnapshot: this.snapshot(policy, metadata), policy };
-  }
-
-  /** A completed cache result does not consume queue or processing capacity. */
-  async assertCachedWork(
-    userId: string | Types.ObjectId,
-    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
-    session: ClientSession,
-    metadata: JobMetadata,
-    importReservationId?: Types.ObjectId,
-  ): Promise<AdmissionSnapshot> {
-    const { admissionSnapshot } = await this.assertCachedWorkWithPolicy(
-      userId,
-      input,
-      session,
-      metadata,
-      importReservationId,
-    );
-    return admissionSnapshot;
-  }
-
-  /** Cached delivery still resolves current policy after its admission fences. */
-  async assertCachedWorkWithPolicy(
-    userId: string | Types.ObjectId,
-    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
-    session: ClientSession,
-    metadata: JobMetadata,
-    importReservationId?: Types.ObjectId,
-  ): Promise<{
-    admissionSnapshot: AdmissionSnapshot;
-    policy: EffectiveAccountPolicy;
-  }> {
-    const { policy } = await this.assertAdmissionPolicy(
-      userId,
-      input,
-      session,
-      metadata,
-      importReservationId,
-    );
-    // The exact retained input and output bytes are claimed and checked by
-    // recordRetainedCachedMedia in the same creation transaction.
-    return { admissionSnapshot: this.snapshot(policy, metadata), policy };
-  }
-
-  private async assertAdmissionPolicy(
-    userId: string | Types.ObjectId,
-    input: Pick<InputDeclaration, 'bytes' | 'durationSeconds'>,
-    session: ClientSession,
-    metadata: JobMetadata,
-    importReservationId?: Types.ObjectId,
-  ): Promise<{ accountId: Types.ObjectId; policy: EffectiveAccountPolicy }> {
     if (!session.inTransaction())
       throw new Error('Processing admission requires a transaction');
 
@@ -183,16 +59,6 @@ export class ProcessingAdmissionService {
       typeof userId === 'string'
         ? new this.jobs.base.Types.ObjectId(userId)
         : userId;
-    // All admissions acquire these fences before mutating account usage. The
-    // import hold and measured job reservation are exchanged in one transaction,
-    // so the hold cannot consume the allowance used to admit its replacement.
-    if (importReservationId)
-      await this.usage.releaseImport(
-        importReservationId,
-        accountId,
-        session,
-        true,
-      );
     const policy = await this.policies.effective(
       accountId,
       new Date(),
@@ -220,22 +86,46 @@ export class ProcessingAdmissionService {
     )
       throw jobError('PROCESSING_UNAVAILABLE');
 
-    return { accountId, policy };
-  }
+    await this.usage.assertRetainedCapacity(
+      accountId,
+      policy.values.maxRetainedOutputBytes,
+      session,
+    );
 
-  private snapshot(
-    policy: EffectiveAccountPolicy,
-    metadata: JobMetadata,
-  ): AdmissionSnapshot {
+    const [waitingJobs, processingJobs] = await Promise.all([
+      this.countCapacity(userId, WAITING_CAPACITY_STATUSES, session),
+      this.countCapacity(userId, PROCESSING_CAPACITY_STATUSES, session),
+    ]);
+    const maxWaitingJobs = policy.values.maxWaitingJobs;
+    const maxProcessingJobs = policy.values.maxProcessingJobs;
+    if (waitingJobs >= maxWaitingJobs)
+      throw jobError('PROCESSING_LIMIT_REACHED', {
+        nextResetAt: null,
+        capacity: {
+          waitingJobs,
+          maxWaitingJobs,
+          processingJobs,
+          maxProcessingJobs,
+        },
+        action: 'wait_for_job_to_finish',
+      });
+
+    await this.usage.reserveForJob(
+      newJobId,
+      accountId,
+      input.durationSeconds,
+      session,
+    );
+
     return {
       policyVersion: 2 as const,
       maxDurationSeconds: policy.values.maxDurationSeconds,
       maxInputBytes: policy.values.maxPreparedAudioBytes,
-      preparationProfileId: metadata.preparationProfileId!,
+      preparationProfileId: metadata.preparationProfileId,
       source: metadata.source!,
       settingsRevision: policy.globalRevision,
-      maxWaitingJobs: policy.values.maxWaitingJobs,
-      maxProcessingJobs: policy.values.maxProcessingJobs,
+      maxWaitingJobs,
+      maxProcessingJobs,
       maxInfrastructureAttempts: policy.values.maxInfrastructureAttempts,
       maxClientInputAttempts: policy.values.maxClientInputAttempts,
       reservationExpiresAt: new Date(
@@ -253,7 +143,12 @@ export class ProcessingAdmissionService {
       throw new Error('Processing claim admission requires a transaction');
     const userId = job.userId;
     const maxProcessingJobs = job.admissionSnapshot?.maxProcessingJobs;
-    if (!hasProcessingCapacity(maxProcessingJobs, 0)) return false;
+    if (
+      typeof maxProcessingJobs !== 'number' ||
+      !Number.isSafeInteger(maxProcessingJobs) ||
+      maxProcessingJobs < 1
+    )
+      return false;
     await this.touchAccountFence(userId, session);
     const user = await this.users.updateOne(
       {
@@ -276,7 +171,7 @@ export class ProcessingAdmissionService {
       PROCESSING_CAPACITY_STATUSES,
       session,
     );
-    return hasProcessingCapacity(maxProcessingJobs, processingJobs);
+    return processingJobs < maxProcessingJobs;
   }
 
   private async touchAccountFence(

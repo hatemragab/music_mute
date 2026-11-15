@@ -16,8 +16,7 @@ afterEach(async () => {
   );
 });
 
-// These fixtures exercise Darwin paths, UID ownership and POSIX permissions.
-describe.skipIf(process.platform !== "darwin")("macOS per-user paths", () => {
+describe("macOS per-user paths", () => {
   it("places all worker state under the user Library roots", () => {
     const layout = createMacUserLayout("/Users/tester");
     expect(layout.installRoot).toBe(

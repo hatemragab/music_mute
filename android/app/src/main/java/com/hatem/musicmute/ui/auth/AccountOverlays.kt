@@ -2,7 +2,6 @@ package com.hatem.musicmute.ui.auth
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -17,20 +16,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 
 @Composable
-internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldownUntil: Long,
+internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldown: Long,
     onDismiss: () -> Unit, onSend: () -> Unit, onCheck: () -> Unit, dismissMessage: () -> Unit) {
     CreativeSheet(onDismiss, dismissible = !state.busy) {
         CreativeWave(Modifier.fillMaxWidth())
         AccountSymbol(Icons.Outlined.Email, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.creative_account_verify), style = MaterialTheme.typography.headlineSmall)
         Text(email)
-        Text(stringResource(R.string.auth_verification_quota_description))
+        Text(stringResource(R.string.auth_optional_verification))
         AuthMessages(state, dismissMessage)
-        CooldownContent(cooldownUntil) { cooldown ->
-            CreativePrimaryButton(onSend, Modifier.fillMaxWidth().testTag("auth-verify-email"),
-                enabled = cooldown == 0L && state.identity?.email != null, busy = state.busy) {
-                Text(if (cooldown > 0) stringResource(R.string.auth_retry_seconds, cooldown) else stringResource(R.string.auth_send_verification))
-            }
+        CreativePrimaryButton(onSend, Modifier.fillMaxWidth().testTag("auth-verify-email"),
+            enabled = cooldown == 0L && state.identity?.email != null, busy = state.busy) {
+            Text(if (cooldown > 0) stringResource(R.string.auth_retry_seconds, cooldown) else stringResource(R.string.auth_send_verification))
         }
         OutlinedButton(onCheck, Modifier.fillMaxWidth().testTag("auth-check-verification"), enabled = !state.busy) { Text(stringResource(R.string.auth_check_verification)) }
     }
@@ -40,7 +37,7 @@ internal fun EmailVerificationSheet(state: AuthUiState, email: String, cooldownU
 internal fun SignOutAllSheet(state: AuthUiState, onDismiss: () -> Unit, onConfirm: () -> Unit, dismissMessage: () -> Unit) {
     CreativeSheet(onDismiss, dismissible = !state.busy) {
         CreativeWave(Modifier.fillMaxWidth())
-        AccountSymbol(Icons.AutoMirrored.Outlined.Logout, Modifier.align(Alignment.CenterHorizontally))
+        AccountSymbol(Icons.Outlined.Logout, Modifier.align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.auth_logout_all), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.auth_logout_all_description))
         AuthMessages(state, dismissMessage)
@@ -50,43 +47,8 @@ internal fun SignOutAllSheet(state: AuthUiState, onDismiss: () -> Unit, onConfir
 }
 
 @Composable
-internal fun SignOutDialog(
-    state: AuthUiState,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = { if (!state.busy) onDismiss() },
-        modifier = Modifier.testTag("auth-sign-out-dialog"),
-        icon = { Icon(Icons.AutoMirrored.Outlined.Logout, null) },
-        title = { Text(stringResource(R.string.auth_sign_out)) },
-        text = { Text(stringResource(R.string.auth_sign_out_description)) },
-        confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                enabled = !state.busy,
-                modifier = Modifier.testTag("auth-confirm-sign-out"),
-            ) {
-                Text(stringResource(R.string.auth_sign_out))
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                enabled = !state.busy,
-                modifier = Modifier.testTag("auth-cancel-sign-out"),
-            ) {
-                Text(stringResource(R.string.auth_cancel))
-            }
-        },
-    )
-}
-
-@Composable
 internal fun AccountDeletionReviewScreen(state: AuthUiState, password: String, onPassword: (String) -> Unit,
     onCancel: () -> Unit, onContinue: () -> Unit, dismissMessage: () -> Unit) {
-    val googleReauthentication = PASSWORD_PROVIDER !in state.identity?.providers.orEmpty() &&
-        GOOGLE_PROVIDER in state.identity?.providers.orEmpty()
     AuthPage {
         AccountHeader(stringResource(R.string.account_delete), onCancel, !state.busy)
         Text(stringResource(R.string.creative_account_delete_step), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -103,10 +65,7 @@ internal fun AccountDeletionReviewScreen(state: AuthUiState, password: String, o
             PasswordField(password, onPassword, R.string.auth_current_password, "auth-delete-password", !state.busy)
         else Text(stringResource(R.string.auth_google_reauth))
         CreativePrimaryButton(onContinue, Modifier.fillMaxWidth(), enabled = PASSWORD_PROVIDER !in state.identity?.providers.orEmpty() || password.isNotEmpty(),
-            busy = state.busy, destructive = true) {
-            if (googleReauthentication) GoogleActionLabel(stringResource(R.string.auth_continue_google))
-            else Text(stringResource(R.string.auth_confirm))
-        }
+            busy = state.busy, destructive = true) { Text(stringResource(R.string.auth_confirm)) }
         OutlinedButton(onCancel, Modifier.fillMaxWidth(), enabled = !state.busy) { Text(stringResource(R.string.auth_cancel)) }
     }
 }

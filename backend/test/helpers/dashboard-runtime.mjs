@@ -21,6 +21,10 @@ const { StoragePreflightService } =
   await import('../../dist/storage/storage-preflight.service.js');
 const { StorageTransfersService } =
   await import('../../dist/storage/storage-transfers.service.js');
+const { ReleaseArtifactStorageService } =
+  await import('../../dist/releases/release-artifact-storage.service.js');
+const { ApkVerifierService } =
+  await import('../../dist/releases/apk-verifier.service.js');
 const { authError } = await import('../../dist/auth/auth.errors.js');
 
 const useCurl = process.env.DASHBOARD_HTTP_CLIENT === 'curl';
@@ -124,10 +128,7 @@ const uidFor = (token) => {
   return token;
 };
 const firebase = {
-  verifySignature: async (token) => ({
-    uid: uidFor(token),
-    exp: Math.floor(Date.now() / 1000) + 3600,
-  }),
+  verifySignature: async (token) => ({ uid: uidFor(token) }),
   verifySession: async (token) => ({
     uid: uidFor(token),
     provider: 'google.com',
@@ -144,32 +145,45 @@ const grant = () => ({
 const storage = {
   createDownloadGrant: async () => grant(),
   createMediaGrant: async () => grant(),
-  deleteObject: async () => undefined,
+  isPinnedObjectAvailable: async () => true,
+  deleteVersionsForKey: async () => true,
 };
 const builder = Test.createTestingModule({ imports: [AppModule] })
   .overrideProvider(FirebaseIdentityService)
   .useValue(firebase)
   .overrideProvider(StoragePreflightService)
-  .useValue({
-    assertReady: async () => undefined,
-    snapshot: () => ({
-      status: 'healthy',
-      checkedAt: new Date().toISOString(),
-      code: null,
-    }),
-  })
+  .useValue({ assertReady: async () => undefined })
   .overrideProvider(StorageTransfersService)
-  .useValue(storage);
+  .useValue(storage)
+  .overrideProvider(ReleaseArtifactStorageService)
+  .useValue({
+    grant: async () => ({
+      ...grant(),
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/vnd.android.package-archive',
+        'x-amz-checksum-sha256': 'A'.repeat(43) + '=',
+        'If-None-Match': '*',
+      },
+    }),
+    pin: async () => 'fixture-apk-version',
+    download: async () => undefined,
+  })
+  .overrideProvider(ApkVerifierService)
+  .useValue({
+    verify: async () => ({
+      packageId: 'com.example.fixture',
+      minimumSdk: 26,
+      signerSha256Hex: 'b'.repeat(64),
+    }),
+  });
 let app;
 try {
   const module = await builder.compile();
   app = module.createNestApplication({ logger: false });
   configureHttp(app);
   await app.listen(requestedPort, '127.0.0.1');
-  const { RealtimeSocketService } =
-    await import('../../dist/realtime/realtime-socket.service.js');
-  app.get(RealtimeSocketService).attach(app.getHttpServer());
-  const base = await app.getUrl();
+  const base = `${await app.getUrl()}/api/v1`;
   const accesses = app.get(getModelToken('AdminAccess'));
   await accesses.create({
     uid: 'owner-fixture',
@@ -179,7 +193,7 @@ try {
   });
   const model = (name) => app.get(getModelToken(name));
   const command = (extra = {}) => ({
-    operation_id: randomUUID(),
+    operationId: randomUUID(),
     reason: 'Owned dashboard integration fixture',
     ...extra,
   });
@@ -209,7 +223,9 @@ try {
       ? await curlResponse(method, `${base}${path}`, body, token)
       : await fetch(`${base}${path}`, options);
     const text = await response.text();
-    const value = response.headers.get('content-type')?.includes('json')
+    const value = response.headers
+      .get('content-type')
+      ?.includes('application/json')
       ? JSON.parse(text)
       : text;
     assert.equal(
@@ -222,33 +238,10 @@ try {
     requests++;
     if (response.ok && typeof value === 'object')
       snapshots.push({ method, path: path.split('?')[0], response: value });
-    if (response.ok && body?.operation_id)
-      successfulOperations.add(body.operation_id);
+    if (response.ok && body?.operationId)
+      successfulOperations.add(body.operationId);
     return value;
   }
-  for (const [method, retiredPath] of [
-    ['GET', `/app-updates/releases/${'a'.repeat(24)}`],
-    ['POST', `/app-updates/releases/${'a'.repeat(24)}/download-grants`],
-    ['POST', `/app-updates/releases/${'a'.repeat(24)}/download-redirects`],
-  ]) {
-    const rejected = await api(
-      method,
-      retiredPath,
-      method === 'POST' ? {} : undefined,
-      '',
-      404,
-    );
-    assert.equal(rejected.code, 'RESOURCE_NOT_FOUND');
-    assert.equal('url' in rejected, false);
-  }
-  await api(
-    'GET',
-    '/app-updates/policy?platform=android&distribution=direct',
-    undefined,
-    '',
-    400,
-  );
-
   let curlProbes = 0;
   if (routeInventory) {
     assert.equal(useCurl, true);
@@ -275,7 +268,7 @@ try {
     'POST',
     '/admin/access',
     command({
-      verified_email: 'support-fixture@example.invalid',
+      verifiedEmail: 'support-fixture@example.invalid',
       role: 'support',
     }),
   );
@@ -313,7 +306,7 @@ try {
   ]);
   const input = {
     key: `private/${jobId}/input.mp3`,
-    etag: '"fixture-input-version"',
+    versionId: 'fixture-input-version',
     contentType: 'audio/mpeg',
     bytes: 42,
     sha256: Buffer.alloc(32).toString('base64'),
@@ -340,9 +333,9 @@ try {
     'PUT',
     `/admin/users/${userId}/restriction`,
     {
-      operation_id: randomUUID(),
-      expected_revision: 0,
-      reason_code: 'manual_review',
+      operationId: randomUUID(),
+      expectedRevision: 0,
+      reasonCode: 'manual_review',
       note: 'Owned dashboard integration fixture',
     },
     'support-fixture',
@@ -355,7 +348,7 @@ try {
     'support-fixture',
   );
   assert.equal(media.bytes, 42);
-  assert.equal(media.content_type, 'audio/mpeg');
+  assert.equal(media.contentType, 'audio/mpeg');
   assert.ok(media.url);
   await api('GET', `/admin/jobs/${jobId}`, undefined, 'support-fixture');
   const draft = await api(
@@ -363,67 +356,57 @@ try {
     '/admin/releases',
     command({
       platform: 'android',
-      source: 'google_play',
-      version_name: '1.0.0',
-      build_number: 2,
-      changelog_en: 'Fixture release notes',
-      store_url: `https://play.google.com/store/apps/details?id=${process.env.APK_EXPECTED_PACKAGE_ID ?? 'com.example.fixture'}`,
+      source: 'direct_apk',
+      versionName: '1.0.0',
+      buildNumber: 2,
+      changelogEn: 'Fixture release notes',
+      storeUrl: null,
     }),
   );
-  const verified = await api('GET', `/admin/releases/${draft.id}`);
-  assert.equal(verified.artifact_state, null);
-  const uploadCount = await model('ReleaseUpload').countDocuments();
-  for (const retiredPath of [
-    `/admin/releases/${draft.id}/uploads`,
-    `/admin/releases/${draft.id}/uploads/${'a'.repeat(24)}/completions`,
-  ]) {
-    const rejected = await api('POST', retiredPath, {}, 'owner-fixture', 400);
-    assert.equal(rejected.code, 'INVALID_REQUEST');
-    assert.equal('grant' in rejected, false);
-  }
-  assert.equal(await model('ReleaseUpload').countDocuments(), uploadCount);
-  await model('Release').create({
-    platform: 'android',
-    source: 'direct_apk',
-    versionName: '0.9.0',
-    buildNumber: 1,
-    changelogEn: 'Historical retired direct APK',
-    storeUrl: null,
-    state: 'published',
-    artifactState: 'verified',
-    createdBy: 'owner-fixture',
+  const upload = await api('POST', `/admin/releases/${draft.id}/uploads`, {
+    operationId: randomUUID(),
+    expectedRevision: draft.revision,
+    bytes: 32,
+    sha256Hex: 'a'.repeat(64),
   });
+  await api(
+    'POST',
+    `/admin/releases/${draft.id}/uploads/${upload.uploadId}/complete`,
+    { operationId: randomUUID() },
+  );
+  const verified = await api('GET', `/admin/releases/${draft.id}`);
+  assert.equal(verified.artifactState, 'verified');
   const policy = await api('GET', '/admin/update-policy');
   const selection = {
     android: {
-      minimum_build: null,
-      direct_release_id: null,
-      store_release_id: draft.id,
-      source: 'google_play',
+      minimumBuild: null,
+      directReleaseId: draft.id,
+      storeReleaseId: null,
+      source: 'direct_apk',
     },
-    ios: { minimum_build: null, store_release_id: null },
+    ios: { minimumBuild: null, storeReleaseId: null },
   };
   const published = await api(
     'POST',
-    `/admin/releases/${draft.id}/publications`,
+    `/admin/releases/${draft.id}/publish`,
     command({
       policy: selection,
-      expected_revision: policy.revision,
-      expected_release_revision: verified.revision,
-      store_availability_confirmed: true,
+      expectedRevision: policy.revision,
+      expectedReleaseRevision: verified.revision,
+      storeAvailabilityConfirmed: false,
     }),
   );
   assert.equal(published.release.state, 'published');
   const withdrawal = await api(
     'POST',
-    `/admin/releases/${draft.id}/withdrawals`,
+    `/admin/releases/${draft.id}/withdraw`,
     command({
-      replacement_policy: {
+      replacementPolicy: {
         ...selection,
-        android: { ...selection.android, store_release_id: null },
+        android: { ...selection.android, directReleaseId: null },
       },
-      expected_revision: published.policy_revision,
-      expected_release_revision: published.release.revision,
+      expectedRevision: published.policyRevision,
+      expectedReleaseRevision: published.release.revision,
     }),
   );
   assert.equal(withdrawal.release.state, 'withdrawn');

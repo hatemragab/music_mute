@@ -11,23 +11,6 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class JobHistoryControllerTest {
-    @Test fun rebindingOwnerWaitsForFreshHistoryInsteadOfRestoringJobs() = runTest {
-        val api = HistoryTestApi().apply { page = { JobPage(listOf(job("old"))) } }
-        val controller = JobHistoryController(api, this, now = { testScheduler.currentTime })
-        controller.bindOwner("owner")
-        controller.refresh()
-        runCurrent()
-        assertEquals(listOf("old"), controller.state.value.jobs.map { it.id })
-        controller.bindOwner(null)
-        controller.bindOwner("owner")
-        assertTrue(controller.state.value.jobs.isEmpty())
-        api.page = { JobPage(listOf(job("fresh"))) }
-        controller.refresh()
-        runCurrent()
-        assertEquals(listOf("fresh"), controller.state.value.jobs.map { it.id })
-        controller.close()
-    }
-
     @Test fun mutationDuringRefreshSchedulesOneFollowupForNewJob() = runTest {
         val pending = CompletableDeferred<JobPage>()
         var calls = 0
@@ -202,7 +185,7 @@ class JobHistoryControllerTest {
         controller.close()
     }
 
-    @Test fun visibilityBeforeOwnerBindingLoadsOnceWithoutPolling() = runTest {
+    @Test fun visibilityBeforeOwnerBindingStartsAndRestartsPolling() = runTest {
         var calls = 0
         val api = HistoryTestApi().apply {
             page = { calls++; JobPage(listOf(job("queued")), null) }
@@ -214,15 +197,15 @@ class JobHistoryControllerTest {
         assertEquals(1, calls)
         advanceTimeBy(10_000)
         runCurrent()
-        assertEquals(1, calls)
+        assertEquals(2, calls)
         controller.bindOwner(null)
         controller.bindOwner("owner")
         runCurrent()
-        assertEquals(2, calls)
+        assertEquals(3, calls)
         controller.close()
         advanceTimeBy(20_000)
         runCurrent()
-        assertEquals(2, calls)
+        assertEquals(3, calls)
     }
 
     @Test fun unknownAndTerminalStatusesDoNotPoll() {
@@ -240,7 +223,7 @@ class JobHistoryControllerTest {
             fetch = { throw JobsFailure(JobsProblem.JOB_NOT_FOUND) }
         }
         val controller = JobHistoryController(api, this,
-            onJobsChanged = { _, jobs -> saved += jobs.map { it.id } })
+            saveCached = { _, jobs -> saved += jobs.map { it.id } })
         controller.bindOwner("owner")
         controller.refresh()
         runCurrent()

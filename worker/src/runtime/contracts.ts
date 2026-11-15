@@ -15,7 +15,7 @@ const SHA256_HEX = /^[a-f0-9]{64}$/u;
 
 export interface ObjectIdentity {
   key: string;
-  etag: string;
+  versionId: string;
   bytes: number;
   sha256: string;
   contentType: string;
@@ -177,7 +177,6 @@ export interface ChildProcessResult {
   outputFormat: "mp3";
   outputBitrateKbps: number;
   stageTimings: WorkerProcessingStageTiming[];
-  comparisonRanges?: number[][] | undefined;
   separationTimings?: Array<{ stage: string; durationMs: number }>;
 }
 
@@ -285,12 +284,7 @@ function objectIdentity(value: unknown, label: string): ObjectIdentity {
   const item = record(value, label);
   return {
     key: text(item.key, `${label}.key`, undefined, 1024),
-    etag: text(
-      item.etag,
-      `${label}.etag`,
-      /^"[\x21\x23-\x7e]{1,1022}"$/u,
-      1024,
-    ),
+    versionId: text(item.versionId, `${label}.versionId`, undefined, 1024),
     bytes: integer(item.bytes, `${label}.bytes`, 1, 1_000_000_000),
     sha256: text(item.sha256, `${label}.sha256`, SHA256_BASE64, 44),
     contentType: text(item.contentType, `${label}.contentType`, undefined, 100),
@@ -411,7 +405,12 @@ export function parseWorkerHintTicket(value: unknown): WorkerHintTicket {
     throw new TypeError("Worker hint ticket is expired");
   return {
     ticket: text(item.ticket, "ticket", /^[A-Za-z0-9_-]{43}$/u, 43),
-    path: text(item.path, "path", /^\/worker\/hints\/socket$/u, 128),
+    path: text(
+      item.path,
+      "path",
+      /^\/api\/v1\/worker\/v1\/hints\/socket$/u,
+      128,
+    ),
     expiresAt,
   };
 }
@@ -678,7 +677,6 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
       32,
       160,
     ),
-    comparisonRanges: comparisonRanges(item.editMap),
     separationTimings: Object.entries(
       item.separationTimings === undefined
         ? {}
@@ -714,27 +712,4 @@ export function parseChildProcessResult(value: unknown): ChildProcessResult {
       ];
     }),
   };
-}
-
-function comparisonRanges(value: unknown): number[][] | undefined {
-  if (value === undefined) return undefined;
-  const map = record(value, "editMap");
-  if (!Array.isArray(map.chunks)) throw new TypeError("Invalid edit map");
-  const ranges = map.chunks.flat().map((value: unknown) => {
-    const range = record(value, "edit range");
-    return [
-      integer(range.sourceStart, "sourceStart", 0, 79380000),
-      integer(range.sourceEnd, "sourceEnd", 1, 79380000),
-    ];
-  });
-  if (
-    ranges.length < 1 ||
-    ranges.length > 3001 ||
-    ranges.some(
-      (range, i) =>
-        range[1]! <= range[0]! || (i > 0 && range[0]! < ranges[i - 1]![1]!),
-    )
-  )
-    throw new TypeError("Invalid edit map intervals");
-  return ranges;
 }

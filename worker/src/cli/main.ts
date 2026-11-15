@@ -1,31 +1,18 @@
 #!/usr/bin/env node
 
-import "../observability/local-debug.js";
-
-import { dirname, join, resolve } from "node:path";
-import {
-  MacAppStartupRecovered,
-  recoverMacAppActivationAtStartup,
-} from "../platform/macos/app-installation.js";
-import { verifyMacAppServiceConfiguration } from "../platform/macos/app-installation-binding.js";
-import { lstat } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { printWorkerVersion } from "./version.js";
 import {
   sanitizeDiagnostic,
   WorkerChildProcess,
 } from "../agent/child-process.js";
 import { MachineSupervisor } from "../agent/machine-supervisor.js";
-import { MacPersonalAdmission } from "../runtime/personal-admission.js";
-import {
-  ControlPlaneError,
-  WorkerControlPlaneClient,
-} from "../runtime/control-plane-client.js";
+import { WorkerControlPlaneClient } from "../runtime/control-plane-client.js";
 import { WorkerHintClient } from "../runtime/worker-hint-client.js";
 import { loadRuntimeConfig } from "../runtime/runtime-config.js";
 import { PackagedRuntimeCommandExecutor } from "../runtime/remote-command-executor.js";
-import { IsolatedWorkerTransferClient } from "../runtime/isolated-transfers.js";
+import { WorkerTransferClient } from "../runtime/transfers.js";
 import { WorkerRuntime } from "../runtime/worker-runtime.js";
 import {
   MAC_PACKAGE_USAGE,
@@ -35,10 +22,6 @@ import {
   MAC_USER_USAGE,
   runMacUserCommand,
 } from "../platform/macos/user-cli.js";
-import {
-  WINDOWS_USER_USAGE,
-  runWindowsUserCommand,
-} from "../platform/windows/user-cli.js";
 import {
   WINDOWS_USAGE,
   runWindowsCommand,
@@ -51,35 +34,17 @@ import {
   runInstallationPreparationCommand,
 } from "../enrollment/cli.js";
 import { createMacUserLayout } from "../platform/macos/user-paths.js";
-import { writeMachineDeletionNotice } from "../platform/macos/deleted-registration.js";
-import { createWindowsServiceLayout } from "../platform/windows/service-definition.js";
-import { windowsOperationPending } from "../platform/windows/user-maintenance.js";
-import { maintainStorageAtStartup } from "../platform/shared/startup-storage.js";
 import {
-  MacUpdateStartupRecovered,
-  recoverMacUpdateAtStartup,
-  loadUpdateState,
-} from "../platform/macos/user-updater.js";
-import {
-  appendWorkerFatalError,
-  maintainWorkerLogs,
-} from "../platform/shared/operational-logs.js";
+  appendMacFatalError,
+  maintainMacUserLogs,
+} from "../platform/macos/operational-logs.js";
 import {
   captureWorkerFailure,
-  captureWorkerRuntimeEvent,
   engineTelemetryEnvironment,
   initializeWorkerSentry,
 } from "../observability/sentry.js";
 
-import {
-  PersistentRestartBudget,
-  RestartCircuitOpenError,
-  waitForOperatorStop,
-} from "../runtime/restart-budget.js";
-
 const command = process.argv[2];
-const userUsage =
-  process.platform === "win32" ? WINDOWS_USER_USAGE : MAC_USER_USAGE;
 if (command === "run") initializeWorkerSentry();
 const macUserCommands = new Set([
   "install",
@@ -94,41 +59,24 @@ const macUserCommands = new Set([
   "perf",
   "diagnostics",
   "doctor",
-  "cleanup",
   "pause",
   "drain",
   "resume",
   "update",
   "benchmark",
   "benchmark-file",
-  "capacity",
   "unpair",
   "uninstall",
 ]);
 
-if (command === "--version" || command === "version" || command === "-v") {
+if (command === "--help" || command === "help") {
+  console.log(MAC_USER_USAGE);
+} else if (command !== undefined && macUserCommands.has(command)) {
   try {
-    await printWorkerVersion(process.argv.slice(3));
-  } catch {
-    console.error(
-      "Unable to read worker version. Usage: mw --version [--json]",
-    );
-    process.exitCode = 2;
-  }
-} else if (command === "--help" || command === "help" || command === "-h") {
-  console.log(userUsage);
-} else if (
-  command !== undefined &&
-  (macUserCommands.has(command) ||
-    (process.platform === "win32" && command === "recover"))
-) {
-  try {
-    process.exitCode = await (
-      process.platform === "win32" ? runWindowsUserCommand : runMacUserCommand
-    )(command, process.argv.slice(3));
+    process.exitCode = await runMacUserCommand(command, process.argv.slice(3));
   } catch (error) {
     console.error(
-      `MusicMute worker command: FAILED (${error instanceof Error ? error.message : "unknown error"})\n${userUsage}`,
+      `MusicMute worker command: FAILED (${error instanceof Error ? error.message : "unknown error"})\n${MAC_USER_USAGE}`,
     );
     process.exitCode = error instanceof TypeError ? 2 : 1;
   }
@@ -200,42 +148,19 @@ if (command === "--version" || command === "version" || command === "-v") {
     const logLayout =
       process.platform === "darwin" ? createMacUserLayout(homedir()) : null;
     let nextLogMaintenanceAt = 0;
-    let restartAdmitted = false;
-    let restartPersistenceFailed = false;
-    let runtimeMachineId: string | null = null;
-    const restartBudget = new PersistentRestartBudget(
-      join(dirname(configPath), "restart-budget.json"),
-    );
     const stopping = new AbortController();
     const stop = () => stopping.abort();
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     try {
-      await restartBudget.admit(stopping.signal);
-      restartAdmitted = true;
-      if (
-        logLayout !== null &&
-        resolve(configPath) === resolve(logLayout.configPath)
-      ) {
-        await recoverMacAppActivationAtStartup(logLayout);
-        await recoverMacUpdateAtStartup(logLayout);
-      }
-      if (logLayout !== null) await maintainWorkerLogs(logLayout);
-      await maintainStorageAtStartup(configPath);
+      if (logLayout !== null) await maintainMacUserLogs(logLayout);
       const config = await loadRuntimeConfig(configPath);
-      runtimeMachineId = config.machineId;
-      if (
-        logLayout !== null &&
-        resolve(configPath) === resolve(logLayout.configPath)
-      )
-        await verifyMacAppServiceConfiguration(logLayout, config);
       const supervisor = new MachineSupervisor(
         config.slots.map((slot) => ({
           workerId: slot.workerId,
           gpuId: slot.gpuId,
           child: {
             command: config.pythonPath,
-            windowsJobObject: process.platform === "win32",
             args: [
               "-m",
               "musicmute_engine.child",
@@ -262,8 +187,7 @@ if (command === "--version" || command === "version" || command === "-v") {
         credential: config.credential,
         allowInsecureLoopback: config.allowInsecureLoopback,
       });
-      const transfers = new IsolatedWorkerTransferClient({
-        workRoot: config.workRoot,
+      const transfers = new WorkerTransferClient({
         allowInsecureLoopback: config.allowInsecureLoopback,
       });
       const primarySlot = config.slots[0]!;
@@ -302,55 +226,12 @@ if (command === "--version" || command === "version" || command === "-v") {
           ffmpegPath: config.ffmpegPath,
           ffprobePath: config.ffprobePath,
           commandExecutor,
-          ...(logLayout === null ||
-          resolve(configPath) !== resolve(logLayout.configPath)
-            ? {}
-            : {
-                personalAdmission: new MacPersonalAdmission(
-                  logLayout.stateRoot,
-                ),
-                deferPreloadForMaintenance: true,
-                maintenancePending: async () => {
-                  for (const name of [
-                    "app-maintenance.json",
-                    "app-preparation.json",
-                  ]) {
-                    try {
-                      await lstat(join(logLayout.stateRoot, name));
-                      return true;
-                    } catch (error) {
-                      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-                        throw error;
-                    }
-                  }
-                  const update = await loadUpdateState(
-                    logLayout.updateStatePath,
-                  );
-                  return (
-                    update.status === "staged" ||
-                    update.status === "activating" ||
-                    update.recovery !== undefined
-                  );
-                },
-              }),
-          ...(process.platform === "win32"
-            ? {
-                maintenancePending: () =>
-                  windowsOperationPending(
-                    createWindowsServiceLayout(dirname(dirname(configPath))),
-                  ),
-              }
-            : {}),
           hintClientFactory: (onHint) => new WorkerHintClient(control, onHint),
           onEvent: (event) => {
-            if (event.kind === "attempt-succeeded") {
-              void restartBudget.recordSuccess().catch(() => stopping.abort());
-            }
-            captureWorkerRuntimeEvent(event);
             console.log(JSON.stringify(event));
             if (logLayout !== null && Date.now() >= nextLogMaintenanceAt) {
               nextLogMaintenanceAt = Date.now() + 60_000;
-              void maintainWorkerLogs(logLayout).catch(() => undefined);
+              void maintainMacUserLogs(logLayout).catch(() => undefined);
             }
           },
         },
@@ -359,36 +240,11 @@ if (command === "--version" || command === "version" || command === "-v") {
         supervisor,
       );
       await runtime.run(stopping.signal);
-      await restartBudget.orderlyStop();
     } catch (error) {
-      if (
-        error instanceof MacUpdateStartupRecovered ||
-        error instanceof MacAppStartupRecovered
-      ) {
-        await restartBudget.orderlyStop();
-        console.error(
-          "MusicMute worker: interrupted update restored before processing",
-        );
-        process.exitCode = error.restart ? 1 : 0;
-      } else if (!stopping.signal.aborted) {
-        if (
-          process.platform === "darwin" &&
-          logLayout !== null &&
-          resolve(configPath) === resolve(logLayout.configPath) &&
-          runtimeMachineId !== null &&
-          error instanceof ControlPlaneError &&
-          error.code === "WORKER_MACHINE_DELETED" &&
-          error.status === 410
-        )
-          await writeMachineDeletionNotice(logLayout, runtimeMachineId).catch(
-            () => undefined,
-          );
-        await restartBudget.recordFailure(error).catch(() => {
-          restartPersistenceFailed = true;
-        });
+      if (!stopping.signal.aborted) {
         await captureWorkerFailure(error);
         if (logLayout !== null)
-          await appendWorkerFatalError(
+          await appendMacFatalError(
             logLayout.stderrPath,
             "runtime",
             error,
@@ -398,16 +254,6 @@ if (command === "--version" || command === "version" || command === "-v") {
         ).slice(0, 2_000);
         console.error(`MusicMute worker runtime: FAILED (${detail})`);
         process.exitCode = 1;
-        if (
-          !restartAdmitted ||
-          restartPersistenceFailed ||
-          error instanceof RestartCircuitOpenError ||
-          error instanceof TypeError ||
-          (error instanceof ControlPlaneError && !error.retryable)
-        )
-          await waitForOperatorStop(stopping.signal);
-      } else if (restartAdmitted) {
-        await restartBudget.orderlyStop().catch(() => undefined);
       }
     } finally {
       process.removeListener("SIGINT", stop);
@@ -416,7 +262,7 @@ if (command === "--version" || command === "version" || command === "-v") {
   }
 } else {
   console.error(
-    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | capacity | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | package-macos ... | windows ...>`,
+    `Usage: mw <install | status | start | stop | restart | logs | job | errors | explain | perf | diagnostics | doctor | benchmark | benchmark-file | pause | drain | resume | update | unpair | uninstall | protocol-doctor | prepare-installation ... | enroll ... | run --config <absolute-path> | package-macos ... | windows ...>`,
   );
   process.exitCode = 2;
 }

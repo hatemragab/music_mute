@@ -1,4 +1,3 @@
-import { isStorageEtag } from '../storage/object-identity.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Types, type Model } from 'mongoose';
@@ -48,7 +47,7 @@ export class AdminMediaService {
             : job.status === 'ready'
               ? job.outputObject
               : null;
-        if (!object || !isStorageEtag(object.etag))
+        if (!object || !object.versionId || object.versionId === 'null')
           throw adminError('MEDIA_UNAVAILABLE');
         await this.accounts.assertActive(job.userId, session);
         // Conflict with deletion or rename before exposing the URL.
@@ -58,6 +57,8 @@ export class AdminMediaService {
           { session },
         );
         if (touched.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
+        if (!(await this.storage.isPinnedObjectAvailable(object)))
+          throw adminError('MEDIA_UNAVAILABLE');
         const extension =
           dto.asset === 'result' ? 'mp3' : job.inputReservation.extension;
         if (!/^[a-z0-9]{1,8}$/.test(extension))

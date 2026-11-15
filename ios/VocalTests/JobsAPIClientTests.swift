@@ -4,142 +4,6 @@ import XCTest
 @testable import Vocal
 
 @MainActor final class JobsAPIClientTests: XCTestCase {
-  func testPolicyCheckoutIsPublicWhenSignedOutAndDoesNotAcquireAToken() async throws {
-    let token = JobsTokenFixture()
-    token.tokenSession = nil
-    let api = client(token)
-    JobsURLProtocol.handler = { request in
-      XCTAssertEqual(request.url?.path, "/processing-policy")
-      XCTAssertEqual(request.url?.query, "schema_version=2")
-      XCTAssertEqual(request.httpMethod, "GET")
-      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-      XCTAssertNil(request.value(forHTTPHeaderField: "X-Installation-Id"))
-      return (
-        200, ["Cache-Control": "no-store"],
-        Data(
-          """
-          {"schema_version":2,"accept_new_jobs":true,"accept_long_jobs":true,
-          "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,
-          "max_local_source_bytes":200000000,"max_preparation_seconds":120,"long_job_threshold_seconds":600},
-          "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
-          "fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}},
-          "link_import_visible":false,"link_import_policy_revision":3}
-          """.utf8)
-      )
-    }
-    let policy = try await api.processingPolicy()
-    XCTAssertEqual(policy.linkImportVisible, false)
-    XCTAssertEqual(try policy.validated(), .standard)
-    XCTAssertTrue(token.refreshes.isEmpty)
-  }
-
-  func testPolicyCheckoutUsesOwnerTokenWhenSignedIn() async throws {
-    let token = JobsTokenFixture()
-    token.tokenSession = IDTokenSession(uid: "hidden-owner", epoch: 1)
-    let api = client(token)
-    JobsURLProtocol.handler = { request in
-      XCTAssertEqual(request.url?.path, "/processing-policy")
-      XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer initial")
-      return (
-        200, [:],
-        Data(
-          """
-          {"schema_version":2,"accept_new_jobs":true,"accept_long_jobs":true,
-          "limits":{"max_duration_seconds":1200,"max_prepared_audio_bytes":50000000,
-          "max_local_source_bytes":200000000,"max_preparation_seconds":120,"long_job_threshold_seconds":600},
-          "preparation_profile":{"id":"audio-cap-aac-lc-160-v1","preserve_compatible_audio":true,
-          "fallback_conversion":{"codec":"aac-lc","output_content_type":"audio/mp4","target_bitrate":160000}},
-          "link_import_visible":false,"link_import_reason":"user_hidden","link_import_policy_revision":3}
-          """.utf8)
-      )
-    }
-    let policy = try await api.processingPolicy()
-    XCTAssertEqual(policy.linkImportVisible, false)
-    XCTAssertEqual(policy.linkImportReason, "user_hidden")
-    XCTAssertEqual(token.refreshes, [false])
-  }
-
-  func testImportQueueCooldownPreventsEarlyRetry() async throws {
-    let token = JobsTokenFixture()
-    var clock: TimeInterval = 0
-    let api = client(token, now: { clock })
-    var calls = 0
-    JobsURLProtocol.handler = { _ in
-      calls += 1
-      if calls == 1 {
-        return (503, ["Retry-After": "7"], Data(#"{"code":"IMPORT_QUEUE_FULL"}"#.utf8))
-      }
-      return (
-        202, [:],
-        Data(
-          #"{"import_id":"68c000000000000000000001","status":"queued","job_id":null,"error":null}"#
-            .utf8)
-      )
-    }
-    _ = try? await api.createURLImport(
-      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
-    _ = try? await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
-    XCTAssertEqual(calls, 1)
-    clock = 7
-    _ = try await api.createURLImport(url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId)
-    XCTAssertEqual(calls, 2)
-  }
-
-  func testUnsupportedImportNeverAcquiresTokenOrTransport() async {
-    let token = JobsTokenFixture()
-    let api = client(token)
-    var calls = 0
-    JobsURLProtocol.handler = { _ in
-      calls += 1
-      return (500, [:], Data())
-    }
-    do {
-      _ = try await api.createURLImport(url: "https://unknown.example/audio", requestId: requestId)
-      XCTFail("Unsupported URL admitted")
-    } catch { XCTAssertEqual(error as? URLImportFailure, .unsupportedSite) }
-    XCTAssertEqual(calls, 0)
-    XCTAssertTrue(token.refreshes.isEmpty)
-  }
-
-  func testImportWireContractAndSanitizedFailure() async throws {
-    let token = JobsTokenFixture()
-    let api = client(token)
-    var calls = 0
-    JobsURLProtocol.handler = { request in
-      calls += 1
-      if calls == 1 {
-        XCTAssertEqual(request.url?.path, "/media-imports")
-        XCTAssertEqual(request.httpMethod, "POST")
-        XCTAssertEqual(
-          request.value(forHTTPHeaderField: "X-Installation-Id"), self.installation.lowercased())
-        let fields = try! self.body(request)
-        XCTAssertEqual(fields["url"] as? String, "https://youtu.be/UXqq0ZvbOnk")
-        XCTAssertEqual(fields["trim_enabled"] as? Bool, false)
-        XCTAssertEqual(fields["request_id"] as? String, self.requestId.uuidString.lowercased())
-        return (
-          202, [:],
-          Data(
-            #"{"import_id":"68c000000000000000000001","status":"queued","job_id":null,"error":null}"#
-              .utf8)
-        )
-      }
-      return (
-        422, [:],
-        Data(
-          #"{"code":"IMPORT_UNSUPPORTED_AUDIO_SOURCE","message":"private upstream detail"}"#.utf8)
-      )
-    }
-    let view = try await api.createURLImport(
-      url: "https://youtu.be/UXqq0ZvbOnk", requestId: requestId, trimEnabled: false)
-    XCTAssertEqual(view.status, "queued")
-    do {
-      _ = try await api.urlImport(id: view.importId)
-      XCTFail("Failure accepted")
-    } catch {
-      XCTAssertEqual(error as? URLImportFailure, .server("IMPORT_UNSUPPORTED_AUDIO_SOURCE"))
-    }
-  }
-
   func testRateLimitStopsOtherJobRoutesBeforeTransport() async {
     let token = JobsTokenFixture()
     var clock: TimeInterval = 0
@@ -163,7 +27,7 @@ import XCTest
   private let requestId = UUID(uuidString: "C21A2EAA-7E73-4F08-89DA-6AC35BAA83E1")!
   private let installation = "D7EA7DE6-52E9-4B96-8834-3B517941BDB0"
   private let grant =
-    #"{"method":"PUT","url":"https://storage.example/","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "x-amz-meta-sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","If-None-Match":"*"},"expires_at":"2026-09-09T12:15:00.123Z"}"#
+    #"{"method":"PUT","url":"https://storage.example/","headers":{"Content-Type":"audio/mpeg","x-amz-checksum-sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","If-None-Match":"*"},"expiresAt":"2026-09-09T12:15:00.123Z"}"#
   private var input: InputDeclaration {
     InputDeclaration(
       extension: "mp3", contentType: "audio/mpeg", bytes: 123,
@@ -185,8 +49,8 @@ import XCTest
     let api = client(token)
     JobsURLProtocol.handler = { request in
       let body = try! self.body(request)
-      XCTAssertEqual(body["policy_version"] as? Int, 2)
-      XCTAssertEqual(body["preparation_profile_id"] as? String, "audio-cap-aac-lc-160-v1")
+      XCTAssertEqual(body["policyVersion"] as? Int, 2)
+      XCTAssertEqual(body["preparationProfileId"] as? String, "audio-cap-aac-lc-160-v1")
       XCTAssertEqual(body["source"] as? String, "video_file")
       return (429, [:], Data(#"{"code":"PROCESSING_ALLOWANCE_EXHAUSTED"}"#.utf8))
     }
@@ -210,13 +74,13 @@ import XCTest
       received.append(request)
       let path = request.url!.path
       let json: String
-      if path.hasSuffix("upload-grants") {
+      if path.hasSuffix("upload-url") {
         json = self.grant
-      } else if path.hasSuffix("download-grants") {
-        json = #"{"url":"https://storage.example/output","expires_at":"2026-09-09T12:15:00Z"}"#
-      } else if path == "/jobs" && request.httpMethod == "GET" {
-        json = #"{"items":[],"next_cursor":null}"#
-      } else if path == "/jobs" {
+      } else if path.hasSuffix("download-url") {
+        json = #"{"url":"https://storage.example/output","expiresAt":"2026-09-09T12:15:00Z"}"#
+      } else if path == "/api/v1/jobs" && request.httpMethod == "GET" {
+        json = #"{"items":[],"nextCursor":null}"#
+      } else if path == "/api/v1/jobs" {
         json = "{\"id\":\"\(self.id)\",\"status\":\"awaiting_upload\",\"upload\":\(self.grant)}"
       } else if request.httpMethod == "GET" {
         json = self.jobJSON(status: "ready")
@@ -240,9 +104,9 @@ import XCTest
     XCTAssertEqual(
       received.map { $0.url!.path },
       [
-        "/jobs", "/jobs/\(id)/upload-grants", "/jobs/\(id)/upload-completions",
-        "/jobs", "/jobs/\(id)", "/jobs/\(id)/cancellations",
-        "/jobs/\(id)/retry-attempts", "/jobs/\(id)/download-grants",
+        "/api/v1/jobs", "/api/v1/jobs/\(id)/upload-url", "/api/v1/jobs/\(id)/upload-complete",
+        "/api/v1/jobs", "/api/v1/jobs/\(id)", "/api/v1/jobs/\(id)/cancel",
+        "/api/v1/jobs/\(id)/retry", "/api/v1/jobs/\(id)/download-url",
       ])
     for (index, request) in received.enumerated() {
       XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer initial")
@@ -251,22 +115,17 @@ import XCTest
         [0, 1, 2, 6].contains(index) ? installation.lowercased() : nil)
       if [2, 5].contains(index) { XCTAssertEqual(try body(request).count, 0) }
     }
-    XCTAssertEqual(
-      try body(received[0])["request_id"] as? String, requestId.uuidString.lowercased())
-    XCTAssertEqual(
-      try body(received[1])["request_id"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(try body(received[0])["requestId"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(try body(received[1])["requestId"] as? String, requestId.uuidString.lowercased())
     XCTAssertEqual(
       Set(try body(received[0]).keys),
-      ["policy_version", "preparation_profile_id", "source", "request_id", "input", "trim_enabled"])
-    XCTAssertEqual(try body(received[0])["trim_enabled"] as? Bool, true)
+      ["policyVersion", "preparationProfileId", "source", "requestId", "input"])
     let declaration = try XCTUnwrap(try body(received[0])["input"] as? [String: Any])
     XCTAssertEqual(
-      Set(declaration.keys), ["extension", "content_type", "bytes", "duration_seconds", "sha256"])
+      Set(declaration.keys), ["extension", "contentType", "bytes", "durationSeconds", "sha256"])
     XCTAssertEqual(declaration["bytes"] as? Int, 123)
-    XCTAssertEqual(
-      try body(received[6])["request_id"] as? String, requestId.uuidString.lowercased())
-    XCTAssertEqual(
-      try body(received[7])["request_id"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(try body(received[6])["requestId"] as? String, requestId.uuidString.lowercased())
+    XCTAssertEqual(try body(received[7])["requestId"] as? String, requestId.uuidString.lowercased())
     XCTAssertEqual(try body(received[7])["artifact"] as? String, "output")
     XCTAssertEqual(try body(received[7])["artifact"] as? String, "output")
     XCTAssertEqual(
@@ -275,76 +134,17 @@ import XCTest
     XCTAssertTrue(received[3].url!.absoluteString.contains("%2B"))
   }
   func testKnownAndUnknownStatusesAndOptionalDates() throws {
-    let decoder = JSONDecoder.authDecoder()
-    decoder.keyDecodingStrategy = .convertFromSnakeCase
     for status in [
       "awaiting_upload", "queued", "validating", "processing", "uploading_result", "interrupted",
       "cancel_requested", "ready", "failed", "cancelled", "future_state",
     ] {
-      let job = try decoder.decode(
+      let job = try JSONDecoder.authDecoder().decode(
         Job.self, from: Data(jobJSON(status: status).utf8))
       XCTAssertEqual(job.status, status)
       XCTAssertNil(job.queuedAt)
       XCTAssertNil(job.finishedAt)
       XCTAssertEqual(job.workerAvailable, false)
     }
-  }
-
-  func testNullableThumbnailSurvivesHTTPRealtimeAndCachedHistory() async throws {
-    let thumbnail =
-      "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=fixture_123&rs=signature-123"
-    let token = JobsTokenFixture()
-    let api = client(token)
-    for value in [NSNull(), thumbnail, "https://private.invalid/video.jpg", 1, ["untrusted"]]
-      as [Any]
-    {
-      var payload = try XCTUnwrap(
-        JSONSerialization.jsonObject(with: Data(jobJSON(status: "ready").utf8))
-          as? [String: Any])
-      payload["thumbnail_url"] = value
-      let data = try JSONSerialization.data(withJSONObject: payload)
-      JobsURLProtocol.handler = { _ in (200, [:], data) }
-      let job = try await api.detail(id: id)
-      let expected = value as? String == thumbnail ? thumbnail : nil
-      XCTAssertEqual(job.thumbnailUrl, expected)
-      XCTAssertEqual(job.thumbnailURL?.absoluteString, expected)
-
-      let snapshot = try JSONSerialization.data(withJSONObject: ["items": [payload]])
-      let page = try JSONDecoder.authDecoder().decode(
-        JobPage.self, from: ApiWireJSON.response(snapshot))
-      XCTAssertEqual(page.items.first?.thumbnailURL?.absoluteString, expected)
-
-      let encoder = JSONEncoder()
-      encoder.dateEncodingStrategy = .iso8601
-      let restored = try JSONDecoder.authDecoder().decode(Job.self, from: encoder.encode(job))
-      XCTAssertEqual(restored.thumbnailURL?.absoluteString, expected)
-      XCTAssertEqual(restored.id, job.id)
-    }
-    let old = try JSONDecoder.authDecoder().decode(
-      Job.self, from: ApiWireJSON.response(Data(jobJSON(status: "ready").utf8)))
-    XCTAssertNil(old.thumbnailUrl)
-    XCTAssertNil(old.thumbnailURL)
-  }
-
-  func testThumbnailURLRejectsUnsafeHostsPathsAndParameters() {
-    let thumbnail = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
-    XCTAssertEqual(JobThumbnailURL.validated(thumbnail)?.absoluteString, thumbnail)
-    XCTAssertNotNil(
-      JobThumbnailURL.validated("https://i.ytimg.com/vi_webp/jNQXAC9IVRw/hqdefault.webp"))
-    for value in [
-      thumbnail.replacingOccurrences(of: "https:", with: "http:"),
-      thumbnail.replacingOccurrences(of: "i.ytimg.com", with: "i.ytimg.com.evil.invalid"),
-      thumbnail.replacingOccurrences(of: "i.ytimg.com", with: "user:secret@i.ytimg.com"),
-      thumbnail.replacingOccurrences(of: "i.ytimg.com", with: "i.ytimg.com:443"),
-      thumbnail.replacingOccurrences(of: "/vi/", with: "/vi/../vi/"),
-      thumbnail.replacingOccurrences(of: "/vi/", with: "\\vi/"),
-      thumbnail + "#", thumbnail + "\n", thumbnail + "?token=secret",
-      thumbnail + "?sqp=one&sqp=two", thumbnail + "?sqp=one&",
-      thumbnail + "?rs=" + String(repeating: "x", count: 1025),
-    ] {
-      XCTAssertNil(JobThumbnailURL.validated(value), value)
-    }
-    XCTAssertNil(JobThumbnailURL.validated(nil))
   }
 
   func testAudioExperienceMetadataActionsAndDiagnosticContract() async throws {
@@ -354,21 +154,21 @@ import XCTest
     JobsURLProtocol.handler = { request in
       received.append(request)
       switch (request.httpMethod, request.url!.path) {
-      case ("POST", "/jobs"):
+      case ("POST", "/api/v1/jobs"):
         return (
           200, [:],
           Data(
-            "{\"id\":\"\(self.id)\",\"status\":\"awaiting_upload\",\"request_id\":\"\(self.requestId.uuidString.lowercased())\",\"upload\":\(self.grant)}"
+            "{\"id\":\"\(self.id)\",\"status\":\"awaiting_upload\",\"requestId\":\"\(self.requestId.uuidString.lowercased())\",\"upload\":\(self.grant)}"
               .utf8)
         )
-      case ("PATCH", "/jobs/\(self.id)"):
+      case ("PATCH", "/api/v1/jobs/\(self.id)"):
         return (200, [:], Data(self.jobJSON(status: "ready", metadata: true).utf8))
-      case ("DELETE", "/jobs/\(self.id)"):
+      case ("DELETE", "/api/v1/jobs/\(self.id)"):
         return (204, [:], Data())
-      case ("POST", "/client-errors"):
+      case ("POST", "/api/v1/client-errors"):
         return (
           201, [:],
-          Data("{\"event_id\":\"bba62714-ab09-4c79-9453-ccae688c092c\"}".utf8)
+          Data("{\"eventId\":\"bba62714-ab09-4c79-9453-ccae688c092c\"}".utf8)
         )
       default:
         return (500, [:], Data())
@@ -380,7 +180,8 @@ import XCTest
       reservation = try await api.create(
         requestId: requestId, input: input,
         metadata: JobSourceMetadata(
-          sourceTitle: "Interview", sourceKind: .file, clientStartedAt: started))
+          sourceTitle: "Interview", sourceKind: .url, clientStartedAt: started,
+          sourceURL: "https://www.youtube.com/watch?v=jNQXAC9IVRw"))
     } catch {
       XCTFail("create metadata failed: \(error)")
       return
@@ -392,8 +193,6 @@ import XCTest
       return
     }
     XCTAssertEqual(renamed.displayName, "My interview")
-    XCTAssertEqual(renamed.serverStageTimings?.totalMs, 60000)
-    XCTAssertEqual(renamed.serverStageTimings?.stages.first?.stage, "separation")
     XCTAssertEqual(renamed.sourceTitle, "Interview")
     XCTAssertEqual(renamed.sourceKind, .url)
     XCTAssertEqual(renamed.timing?.processingElapsedMs, 20_000)
@@ -412,18 +211,20 @@ import XCTest
     XCTAssertEqual(accepted.eventId, event.eventId.uuidString.lowercased())
 
     let createBody = try body(received[0])
-    XCTAssertEqual(createBody["source_title"] as? String, "Interview")
-    XCTAssertEqual(createBody["source_kind"] as? String, "file")
-    XCTAssertNil(createBody["source_url"])
-    XCTAssertEqual(createBody["client_started_at"] as? String, "2026-09-10T12:00:00.000Z")
-    XCTAssertEqual(try body(received[1])["display_name"] as? String, "My interview")
+    XCTAssertEqual(createBody["sourceTitle"] as? String, "Interview")
+    XCTAssertEqual(createBody["sourceKind"] as? String, "url")
+    XCTAssertEqual(
+      createBody["sourceUrl"] as? String,
+      "https://www.youtube.com/watch?v=jNQXAC9IVRw")
+    XCTAssertEqual(createBody["clientStartedAt"] as? String, "2026-09-10T12:00:00.000Z")
+    XCTAssertEqual(try body(received[1])["displayName"] as? String, "My interview")
     let report = try body(received[3])
     XCTAssertEqual(report["stage"] as? String, "DOWNLOADING_SOURCE")
     XCTAssertEqual(report["code"] as? String, "NETWORK")
     XCTAssertEqual(report["platform"] as? String, "ios")
-    XCTAssertEqual(report["occurred_at"] as? String, "2026-09-10T12:00:00.000Z")
+    XCTAssertEqual(report["occurredAt"] as? String, "2026-09-10T12:00:00.000Z")
     XCTAssertNil(report["message"])
-    XCTAssertNil(report["owner_uid"])
+    XCTAssertNil(report["ownerUid"])
   }
   func testRefreshNeverReplaysUnderChangedUserOrSameUidSession() async throws {
     for changed in [
@@ -499,7 +300,7 @@ import XCTest
     let mutation = try await api.retry(id: id, requestId: requestId)
     XCTAssertEqual(mutation.status, "queued")
     XCTAssertEqual(requests.map { $0.0 }, ["Bearer initial", "Bearer refreshed"])
-    XCTAssertEqual(requests[0].1["request_id"] as? String, requests[1].1["request_id"] as? String)
+    XCTAssertEqual(requests[0].1["requestId"] as? String, requests[1].1["requestId"] as? String)
   }
 
   func testUnknownErrorCodeIsDiscardedAndDeviceSyncCodeRetained() async throws {
@@ -520,8 +321,8 @@ import XCTest
   func testTransferLimitCodesRemainTypedWithoutRateCooldown() async throws {
     let token = JobsTokenFixture()
     for (status, code) in [
-      (409, "UPLOAD_GRANT_LIMIT_REACHED"),
-      (409, "DOWNLOAD_GRANT_LIMIT_REACHED"),
+      (429, "UPLOAD_GRANT_LIMIT_REACHED"),
+      (429, "DOWNLOAD_GRANT_LIMIT_REACHED"),
       (409, "DOWNLOAD_BYTE_LIMIT_REACHED"),
       (409, "RETAINED_STORAGE_LIMIT_REACHED"),
       (503, "SERVICE_BANDWIDTH_LIMIT_REACHED"),
@@ -545,7 +346,7 @@ import XCTest
     let task = session.dataTask(with: origin)
     let response = HTTPURLResponse(
       url: origin, statusCode: 307, httpVersion: nil, headerFields: nil)!
-    for url in ["https://api.example/jobs", "https://storage.example/steal"] {
+    for url in ["https://api.example/api/v1/jobs", "https://storage.example/steal"] {
       var invoked = false
       delegate.urlSession(
         session, task: task, willPerformHTTPRedirection: response,
@@ -591,10 +392,10 @@ import XCTest
   private func jobJSON(status: String, metadata: Bool = false) -> String {
     let extra =
       metadata
-      ? "\"request_id\":\"c21a2eaa-7e73-4f08-89da-6ac35baa83e1\",\"source_title\":\"Interview\",\"display_name\":\"My interview\",\"source_kind\":\"url\",\"server_time\":\"2026-09-10T12:01:10.000Z\",\"server_stage_timings\":{\"total_ms\":60000,\"total_complete\":true,\"stages\":[{\"stage\":\"separation\",\"duration_ms\":20000,\"complete\":true}],\"attempts\":[]},\"timing\":{\"processing_elapsed_ms\":20000,\"processing_elapsed_approximate\":false,\"total_elapsed_ms\":70000,\"total_elapsed_approximate\":true},\"stages\":{\"validating_at\":\"2026-09-10T12:00:40.000Z\",\"processing_started_at\":\"2026-09-10T12:00:45.000Z\",\"processing_finished_at\":\"2026-09-10T12:01:05.000Z\",\"uploading_result_at\":\"2026-09-10T12:01:05.000Z\"},"
+      ? "\"requestId\":\"c21a2eaa-7e73-4f08-89da-6ac35baa83e1\",\"sourceTitle\":\"Interview\",\"displayName\":\"My interview\",\"sourceKind\":\"url\",\"serverTime\":\"2026-09-10T12:01:10.000Z\",\"timing\":{\"processingElapsedMs\":20000,\"processingElapsedApproximate\":false,\"totalElapsedMs\":70000,\"totalElapsedApproximate\":true},\"stages\":{\"validatingAt\":\"2026-09-10T12:00:40.000Z\",\"processingStartedAt\":\"2026-09-10T12:00:45.000Z\",\"processingFinishedAt\":\"2026-09-10T12:01:05.000Z\",\"uploadingResultAt\":\"2026-09-10T12:01:05.000Z\"},"
       : ""
     return
-      "{\(extra)\"id\":\"\(id)\",\"status\":\"\(status)\",\"created_at\":\"2026-09-09T12:00:00Z\",\"updated_at\":\"2026-09-09T12:00:00.123Z\",\"input\":{\"extension\":\"mp3\",\"bytes\":123,\"duration_seconds\":2.5},\"can_download_input\":true,\"can_download_output\":false,\"worker_available\":false}"
+      "{\(extra)\"id\":\"\(id)\",\"status\":\"\(status)\",\"createdAt\":\"2026-09-09T12:00:00Z\",\"updatedAt\":\"2026-09-09T12:00:00.123Z\",\"input\":{\"extension\":\"mp3\",\"bytes\":123,\"durationSeconds\":2.5},\"canDownloadInput\":true,\"canDownloadOutput\":false,\"workerAvailable\":false}"
   }
   private func body(_ request: URLRequest) throws -> [String: Any] {
     var data = request.httpBody ?? Data()

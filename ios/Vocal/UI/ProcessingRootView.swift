@@ -60,12 +60,8 @@ struct ProcessingRootView: View {
           model.downloadSelected(stage: .exporting) { share = ProcessingExport(url: $0) }
         },
         onRename: model.renameSelected,
-        onDelete: {
-          model.deleteSelected { showingDetail = false }
-        },
-        onCancel: model.cancelSelected, onRetry: model.retrySelected,
-        original: player.original, onOriginal: model.selectOriginal,
-        onSaveOriginal: { model.downloadOriginal { export = ProcessingExport(url: $0) } }
+        onDelete: model.deleteSelected,
+        onCancel: model.cancelSelected, onRetry: model.retrySelected
       )
     }
     .sheet(item: $export) { item in

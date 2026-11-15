@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
 import {
   chmod,
   copyFile,
@@ -8,23 +7,15 @@ import {
   open,
   readdir,
   readFile,
-  readlink,
-  realpath,
   rename,
-  link,
   rm,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import {
   runEnrollmentCommand,
   runInstallationPreparationCommand,
 } from "../../enrollment/cli.js";
 import { parseQualificationEvidence } from "../../enrollment/report-builder.js";
-import {
-  WorkerEnrollmentClient,
-  WorkerEnrollmentError,
-} from "../../enrollment/enrollment-client.js";
-import { cleanupQualificationWorkspace } from "../../enrollment/qualification-cleanup.js";
 import {
   initializeLocalLifecycle,
   loadLocalLifecycle,
@@ -33,7 +24,6 @@ import { writeLocalRuntimeStatus } from "../../runtime/local-runtime-status.js";
 import {
   MacLaunchAgentController,
   writeLaunchAgentPlist,
-  type LaunchAgentStatus,
 } from "./launch-agent.js";
 import {
   inspectInstalledMacRuntime,
@@ -46,20 +36,11 @@ import {
   activateMacUserRelease,
   rollbackMacUserRelease,
 } from "./user-release.js";
-import {
-  assertSafeExistingAncestors,
-  createMacUserDirectories,
-  type MacUserLayout,
-} from "./user-paths.js";
+import { createMacUserDirectories, type MacUserLayout } from "./user-paths.js";
 import { inspectMacUserHealth } from "./user-health.js";
-import {
-  verifyManagedMacRelease as verifyMacRelease,
-  resolveMacAppExecutionLayout,
-} from "./app-installation-binding.js";
 import { MAC_RECIPE_IDS } from "./runtime-recipes.js";
-import { finishDeletedMacRegistration } from "./deleted-registration.js";
 
-export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com";
+export const PRODUCTION_BACKEND_BASE_URL = "https://api.music-mute.com/api/v1";
 
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 const UUID_V4 =
@@ -76,24 +57,6 @@ interface InstallationReceipt {
 interface EnrollmentState {
   machineId: string;
   workerId: string;
-}
-
-interface InstallationQualificationReceipt {
-  schemaVersion: 1;
-  installationId: string;
-  releaseVersion: string;
-  releaseManifestDigest: string;
-  modelDigest: string;
-  fixtureDigest: string;
-  reportDigest: string;
-  outputPath: string;
-  outputDigest: string;
-  outputBytes: number;
-}
-
-export interface MacQualificationClock {
-  now?: () => number;
-  wait?: (milliseconds: number) => Promise<void>;
 }
 
 export interface MacUserInstallationOptions {
@@ -121,7 +84,6 @@ export interface MacUserInstallationOptions {
     >,
   ) => Promise<string>;
   inspectRuntime?: typeof inspectInstalledMacRuntime;
-  beforeQualification?: () => Promise<void>;
 }
 
 export interface MacUserInstallationResult {
@@ -162,283 +124,43 @@ export async function readPendingMacUserEnrollmentCredential(
   }
 }
 
-type PendingEnrollmentReplacement = "pre-exchange" | "expired-unactivated";
-
-interface PendingEnrollmentSnapshot {
-  replacement: PendingEnrollmentReplacement;
-  fingerprint: string;
-  installationId?: string;
-  installationCredential?: string;
-}
-
-/** Local eligibility only. Expiration must still be confirmed by the original backend credential. */
-export async function inspectPendingMacUserEnrollment(
+export async function resetPendingMacUserEnrollment(
   layout: MacUserLayout,
-  service: Pick<LaunchAgentStatus, "loaded" | "running">,
-): Promise<{ replacement: PendingEnrollmentReplacement | null }> {
-  if (service.loaded || service.running) return { replacement: null };
-  try {
-    const pending = await readPendingEnrollmentSnapshot(layout);
-    return { replacement: pending?.replacement ?? null };
-  } catch {
-    return { replacement: null };
-  }
-}
-
-async function readPendingEnrollmentSnapshot(
-  layout: MacUserLayout,
-): Promise<PendingEnrollmentSnapshot | null> {
+): Promise<void> {
   const transactionRoot = join(layout.transactionRoot, "install");
-  await assertSafeExistingAncestors(layout.homeRoot, transactionRoot);
-  const identities: unknown[] = [];
-  const content: unknown[] = [];
-  const allowed = new Set([
-    "enrollment.credential",
-    ".enrollment-state.json",
-    "installation-artifacts.json",
-    ".qualification-receipt.json",
-    "machine.credential",
-    "installation-artifacts",
-  ]);
-  let entries: string[];
+  let entries;
   try {
     const info = await lstat(transactionRoot);
     if (
       !info.isDirectory() ||
       info.isSymbolicLink() ||
-      info.uid !== process.getuid?.() ||
       (info.mode & 0o077) !== 0
     )
       throw new TypeError("Pending enrollment directory is unsafe");
-    entries = (await readdir(transactionRoot)).sort();
+    entries = await readdir(transactionRoot, { withFileTypes: true });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  if (entries.some((entry) => !allowed.has(entry)))
+  const allowed = new Set(["enrollment.credential", ".enrollment-state.json"]);
+  if (entries.some((entry) => !entry.isFile() || !allowed.has(entry.name)))
     throw new Error(
       "Pending installation has progressed; its enrollment code cannot be replaced",
     );
-  if (entries.length === 0) return null;
-  for (const path of [
-    layout.configPath,
-    layout.credentialPath,
-    layout.installationStatePath,
-    join(layout.stateRoot, "app-activation.json"),
-  ])
-    if (await exists(path))
+  const statePath = join(transactionRoot, ".enrollment-state.json");
+  if (entries.some((entry) => entry.name === ".enrollment-state.json")) {
+    const info = await lstat(statePath);
+    if (info.size < 2 || info.size > 64 * 1024 || (info.mode & 0o077) !== 0)
+      throw new TypeError("Pending enrollment state is unsafe");
+    const value: unknown = JSON.parse(await readFile(statePath, "utf8"));
+    if (!isPreExchangeEnrollmentState(value))
       throw new Error(
         "Pending installation has progressed; its enrollment code cannot be replaced",
       );
-  // Bound this metadata walk. The app transaction contains only its fixture and
-  // small journals; larger or unfamiliar transactions require operator review.
-  async function inspect(path: string, depth = 0): Promise<void> {
-    const info = await lstat(path);
-    if (
-      identities.length >= 256 ||
-      depth > 8 ||
-      info.uid !== process.getuid?.() ||
-      (info.mode & 0o077) !== 0 ||
-      info.isSymbolicLink() ||
-      (!info.isDirectory() && (!info.isFile() || info.nlink !== 1))
-    )
-      throw new TypeError("Pending enrollment transaction is unsafe");
-    identities.push([
-      path,
-      info.dev,
-      info.ino,
-      info.mode,
-      info.uid,
-      info.nlink,
-      info.size,
-      info.mtimeMs,
-      info.ctimeMs,
-    ]);
-    if (info.isDirectory()) {
-      for (const name of (await readdir(path)).sort())
-        await inspect(join(path, name), depth + 1);
-    }
   }
-  await inspect(transactionRoot);
-  for (const name of entries) {
-    if (name === "installation-artifacts") continue;
-    const bytes = await readOwnedPrivateBytes(
-      join(transactionRoot, name),
-      64 * 1024,
-    );
-    content.push([name, bytes.toString("utf8")]);
-  }
-  const credentialPath = join(transactionRoot, "enrollment.credential");
-  const credential = (await readOwnedPrivateBytes(credentialPath, 128))
-    .toString("utf8")
-    .trim();
-  if (!CREDENTIAL.test(credential))
-    throw new TypeError("Pending enrollment credential is invalid");
-  const statePath = join(transactionRoot, ".enrollment-state.json");
-  const value: unknown = entries.includes(".enrollment-state.json")
-    ? JSON.parse(
-        (await readOwnedPrivateBytes(statePath, 64 * 1024)).toString("utf8"),
-      )
-    : null;
-  const fingerprint = () =>
-    createHash("sha256")
-      .update(JSON.stringify([identities, content]))
-      .digest("hex");
-  if (
-    entries.every((name) =>
-      ["enrollment.credential", ".enrollment-state.json"].includes(name),
-    ) &&
-    (value === null || isPreExchangeEnrollmentState(value))
-  )
-    return { replacement: "pre-exchange", fingerprint: fingerprint() };
-  const state = asRecord(value, "Pending enrollment state");
-  const stateKeys = new Set([
-    "schemaVersion",
-    "exchangeRequestId",
-    "reportRequestId",
-    "activationRequestId",
-    "qualificationGrantRequestId",
-    "qualificationConfirmRequestId",
-    "installationId",
-    "installationCredential",
-    "machineCredential",
-    "workerId",
-  ]);
-  if (
-    state.schemaVersion !== 1 ||
-    Object.keys(state).some((key) => !stateKeys.has(key)) ||
-    ![
-      "exchangeRequestId",
-      "reportRequestId",
-      "activationRequestId",
-      "installationId",
-    ].every(
-      (key) => typeof state[key] === "string" && UUID_V4.test(state[key]),
-    ) ||
-    ![
-      "qualificationGrantRequestId",
-      "qualificationConfirmRequestId",
-      "workerId",
-    ].every(
-      (key) =>
-        state[key] === undefined ||
-        (typeof state[key] === "string" && UUID_V4.test(state[key])),
-    ) ||
-    typeof state.installationCredential !== "string" ||
-    !CREDENTIAL.test(state.installationCredential) ||
-    (state.machineCredential === undefined) !==
-      (state.workerId === undefined) ||
-    (state.machineCredential !== undefined &&
-      (typeof state.machineCredential !== "string" ||
-        !CREDENTIAL.test(state.machineCredential)))
-  )
-    throw new Error(
-      "Pending installation has progressed; activation cannot be safely excluded",
-    );
-  if (entries.includes("machine.credential")) {
-    const machine = (
-      await readOwnedPrivateBytes(
-        join(transactionRoot, "machine.credential"),
-        128,
-      )
-    )
-      .toString("utf8")
-      .trim();
-    if (machine !== state.machineCredential)
-      throw new TypeError("Pending machine credential identity changed");
-  } else if (state.machineCredential !== undefined) {
-    throw new TypeError("Pending machine credential is missing");
-  }
-  if (entries.includes("installation-artifacts.json")) {
-    const receipt = await readInstallationReceipt(
-      join(transactionRoot, "installation-artifacts.json"),
-    );
-    if (receipt.installationId !== state.installationId)
-      throw new TypeError("Pending installation artifact identity changed");
-  }
-  if (entries.includes(".qualification-receipt.json")) {
-    const receipt = asRecord(
-      JSON.parse(
-        (
-          await readOwnedPrivateBytes(
-            join(transactionRoot, ".qualification-receipt.json"),
-            16 * 1024,
-          )
-        ).toString("utf8"),
-      ),
-      "Pending qualification receipt",
-    );
-    if (receipt.installationId !== state.installationId)
-      throw new TypeError(
-        "Pending qualification installation identity changed",
-      );
-  }
-  return {
-    replacement: "expired-unactivated",
-    fingerprint: fingerprint(),
-    installationId: state.installationId as string,
-    installationCredential: state.installationCredential,
-  };
-}
-
-/** Caller holds the command lock. Preserve progressed transactions unless the server confirms expiry. */
-export async function resetPendingMacUserEnrollment(
-  layout: MacUserLayout,
-  options: {
-    launchAgent?: Pick<MacLaunchAgentController, "status">;
-    confirmExpiredInstallation?: (
-      installationId: string,
-      credential: string,
-    ) => Promise<unknown>;
-  } = {},
-): Promise<void> {
-  const pending = await readPendingEnrollmentSnapshot(layout);
-  if (!pending) return;
-  const transactionRoot = join(layout.transactionRoot, "install");
-  const service =
-    options.launchAgent ??
-    new MacLaunchAgentController(process.getuid?.() ?? 0);
-  const stopped = await service.status();
-  if (stopped.loaded || stopped.running)
-    throw new Error("Stop the worker before replacing expired enrollment");
-  if (pending.replacement === "pre-exchange") {
-    await rm(join(transactionRoot, "enrollment.credential"), { force: true });
-    await rm(join(transactionRoot, ".enrollment-state.json"), { force: true });
-    return;
-  }
-  const confirm =
-    options.confirmExpiredInstallation ??
-    ((id: string, credential: string) =>
-      new WorkerEnrollmentClient({
-        baseUrl: PRODUCTION_BACKEND_BASE_URL,
-      }).artifacts(id, credential, "darwin-arm64"));
-  try {
-    await confirm(pending.installationId!, pending.installationCredential!);
-    throw new Error("Pending worker installation has not expired");
-  } catch (error) {
-    if (
-      !(error instanceof WorkerEnrollmentError) ||
-      error.code !== "WORKER_EXPIRED" ||
-      error.status !== 410
-    )
-      throw error;
-  }
-  const checked = await readPendingEnrollmentSnapshot(layout);
-  const latest = await service.status();
-  if (
-    !checked ||
-    checked.fingerprint !== pending.fingerprint ||
-    latest.loaded ||
-    latest.running
-  )
-    throw new Error(
-      "Pending worker installation changed during expiry confirmation",
-    );
-  await rename(
-    transactionRoot,
-    join(layout.transactionRoot, `expired-install-${randomUUID()}`),
-  );
-  await syncDirectory(layout.transactionRoot);
+  await readPendingMacUserEnrollmentCredential(layout);
+  await rm(join(transactionRoot, "enrollment.credential"), { force: true });
+  await rm(statePath, { force: true });
 }
 
 function isPreExchangeEnrollmentState(value: unknown): boolean {
@@ -479,7 +201,6 @@ export async function recoverMacUserWorker(options: {
     "bootstrap" | "bootout" | "status"
   >;
   confirmHealthy?: () => Promise<boolean>;
-  beforeStart?: () => Promise<void>;
 }): Promise<MacUserRecoveryResult> {
   if (await exists(options.layout.currentLink))
     throw new Error("MusicMute worker runtime is already active");
@@ -512,7 +233,6 @@ export async function recoverMacUserWorker(options: {
       );
     activated = true;
     await writeLaunchAgentPlist(options.layout);
-    await options.beforeStart?.();
     await launchAgent.bootstrap(options.layout.plistPath);
     const healthy = await (
       options.confirmHealthy ??
@@ -584,26 +304,16 @@ export async function installMacUserWorker(
   const receipt = await readInstallationReceipt(
     join(transactionRoot, "installation-artifacts.json"),
   );
-  const preparedLayout = await resolveMacAppExecutionLayout(
-    options.layout,
-    receipt.release.releaseRoot,
-  );
   const inspectRuntime = options.inspectRuntime ?? inspectInstalledMacRuntime;
   const runtime = await inspectRuntime({
     nodeCandidates: [
-      preparedLayout.nodePath === options.layout.nodePath
-        ? join(receipt.release.releaseRoot, "runtime", "node", "bin", "node")
-        : preparedLayout.nodePath,
+      join(receipt.release.releaseRoot, "runtime", "node", "bin", "node"),
     ],
     ffmpegCandidates: [
-      preparedLayout.ffmpegPath === options.layout.ffmpegPath
-        ? join(receipt.release.releaseRoot, "runtime", "bin", "ffmpeg")
-        : preparedLayout.ffmpegPath,
+      join(receipt.release.releaseRoot, "runtime", "bin", "ffmpeg"),
     ],
     ffprobeCandidates: [
-      preparedLayout.ffprobePath === options.layout.ffprobePath
-        ? join(receipt.release.releaseRoot, "runtime", "bin", "ffprobe")
-        : preparedLayout.ffprobePath,
+      join(receipt.release.releaseRoot, "runtime", "bin", "ffprobe"),
     ],
     uid: options.uid,
   });
@@ -612,10 +322,6 @@ export async function installMacUserWorker(
     options.layout,
     receipt.release.releaseRoot,
   );
-  const executionLayout = await resolveMacAppExecutionLayout(
-    options.layout,
-    release.releaseRoot,
-  );
   if (release.releaseVersion !== receipt.releaseVersion) {
     await rollbackMacUserRelease(options.layout, release.previousRelease);
     throw new TypeError("Prepared release version does not match its receipt");
@@ -623,7 +329,7 @@ export async function installMacUserWorker(
   let backendActivated = false;
   try {
     const model = await installMacUserModel({
-      layout: executionLayout,
+      layout: options.layout,
       sourcePath: receipt.model.path,
       filename: "Kim_Vocal_2.onnx",
       bytes: receipt.model.bytes,
@@ -632,35 +338,13 @@ export async function installMacUserWorker(
     const launchAgent =
       options.launchAgent ?? new MacLaunchAgentController(options.uid);
     const qualify = options.qualify ?? qualifyMacUserRelease;
-    let qualificationPath = await reusableInstallationQualification(
-      executionLayout,
-      receipt,
+    const qualificationPath = await qualify(
+      options.layout,
       release.releaseRoot,
+      receipt.fixture.path,
+      receipt.fixture.sha256,
+      launchAgent,
     );
-    if (qualificationPath === null) {
-      await options.beforeQualification?.();
-      qualificationPath = await qualify(
-        executionLayout,
-        release.releaseRoot,
-        receipt.fixture.path,
-        receipt.fixture.sha256,
-        launchAgent,
-      );
-      // Enrollment still validates missing reports from injected qualification
-      // implementations. Only actual verified evidence becomes reusable.
-      if (await exists(qualificationPath)) {
-        const verified = await verifyInstallationQualification(
-          executionLayout,
-          receipt,
-          release.releaseRoot,
-          qualificationPath,
-        );
-        await writePrivateJson(
-          installationQualificationPath(executionLayout),
-          verified,
-        );
-      }
-    }
     const enroll = options.enroll ?? runEnrollmentCommand;
     await enroll([
       "--backend-url",
@@ -673,8 +357,6 @@ export async function installMacUserWorker(
       qualificationPath,
       "--label",
       options.label,
-      "--service-root",
-      options.layout.homeRoot,
       ...(options.groupId === undefined ? [] : ["--group-id", options.groupId]),
       "--output",
       transactionRoot,
@@ -689,378 +371,48 @@ export async function installMacUserWorker(
       join(transactionRoot, "machine.credential"),
       options.layout.credentialPath,
     );
-    await writePrivateJson(join(transactionRoot, "finalization.json"), {
+    await writePrivateJson(
+      options.layout.configPath,
+      buildMacUserRuntimeConfig(
+        options.layout,
+        backendBaseUrl,
+        allowInsecureLoopback,
+        enrollmentState,
+      ),
+    );
+    try {
+      await loadLocalLifecycle(options.layout.lifecyclePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await initializeLocalLifecycle(options.layout.lifecyclePath);
+    }
+    await writeLocalRuntimeStatus(options.layout.runtimeStatusPath, []);
+    await writeLaunchAgentPlist(options.layout);
+    await writePrivateJson(options.layout.installationStatePath, {
       schemaVersion: 1,
-      backendBaseUrl,
-      allowInsecureLoopback,
-      enrollmentState,
       installationId: receipt.installationId,
+      machineId: enrollmentState.machineId,
+      releaseVersion: release.releaseVersion,
+      runtimePreflight: runtime,
       installedAt: new Date().toISOString(),
-      result: {
-        machineId: enrollmentState.machineId,
-        releaseVersion: release.releaseVersion,
-        reusedRelease: release.reused,
-        reusedModel: model.reused,
-        serviceLoaded: true,
-        runtime,
-      },
     });
-    const result = await resumeMacUserInstallation({
-      layout: executionLayout,
-      uid: options.uid,
-      launchAgent,
-      ...(options.beforeQualification
-        ? { beforeStart: options.beforeQualification }
-        : {}),
-    });
-    if (!result)
-      throw new Error("Installation finalization journal disappeared");
-    return result;
+    await launchAgent.bootstrap(options.layout.plistPath);
+    const service = await launchAgent.status();
+    if (!service.loaded)
+      throw new Error("MusicMute worker LaunchAgent did not load");
+    await rm(enrollmentPath, { force: true });
+    return {
+      machineId: enrollmentState.machineId,
+      releaseVersion: release.releaseVersion,
+      reusedRelease: release.reused,
+      reusedModel: model.reused,
+      serviceLoaded: true,
+      runtime,
+    };
   } catch (error) {
     if (!backendActivated)
       await rollbackMacUserRelease(options.layout, release.previousRelease);
     throw error;
-  }
-}
-
-function installationQualificationPath(layout: MacUserLayout): string {
-  return join(layout.transactionRoot, "install", ".qualification-receipt.json");
-}
-
-async function reusableInstallationQualification(
-  layout: MacUserLayout,
-  receipt: InstallationReceipt,
-  releaseRoot: string,
-): Promise<string | null> {
-  let saved: Record<string, unknown>;
-  try {
-    saved = asRecord(
-      JSON.parse(
-        (
-          await readOwnedPrivateBytes(
-            installationQualificationPath(layout),
-            16 * 1024,
-          )
-        ).toString("utf8"),
-      ),
-      "Installation qualification receipt",
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-  const path = join(layout.stateRoot, "qualification.json");
-  const verified = await verifyInstallationQualification(
-    layout,
-    receipt,
-    releaseRoot,
-    path,
-  );
-  if (
-    Object.keys(saved).length !== Object.keys(verified).length ||
-    Object.entries(verified).some(([key, value]) => saved[key] !== value)
-  )
-    throw new TypeError("Installation qualification identity changed");
-  return path;
-}
-
-async function verifyInstallationQualification(
-  layout: MacUserLayout,
-  receipt: InstallationReceipt,
-  releaseRoot: string,
-  reportPath: string,
-): Promise<InstallationQualificationReceipt> {
-  if (reportPath !== join(layout.stateRoot, "qualification.json"))
-    throw new TypeError("Installation qualification report path is unsafe");
-  const bytes = await readOwnedPrivateBytes(reportPath, 64 * 1024);
-  const evidence = parseQualificationEvidence(
-    JSON.parse(bytes.toString("utf8")),
-  );
-  const releaseManifestDigest = await sha256(
-    join(releaseRoot, "release-manifest.json"),
-  );
-  if (
-    evidence.platform !== "darwin-arm64" ||
-    evidence.provider !== "mps" ||
-    evidence.releaseManifestDigest !== releaseManifestDigest ||
-    evidence.modelDigest !== receipt.model.sha256 ||
-    evidence.fixtureDigest !== receipt.fixture.sha256 ||
-    createHash("sha256")
-      .update(await readOwnedPrivateBytes(receipt.fixture.path, 30_000_000))
-      .digest("hex") !== receipt.fixture.sha256
-  )
-    throw new TypeError(
-      "Installation qualification does not match its prepared artifacts",
-    );
-  const candidate = evidence.uploadCandidate;
-  const parts = relative(layout.workRoot, candidate.path).split(sep);
-  if (
-    resolve(candidate.path) !== candidate.path ||
-    !/^qualification-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-      parts[0] ?? "",
-    ) ||
-    !(
-      (parts.length === 2 && parts[1] === "vocals.mp3") ||
-      (parts.length === 4 &&
-        UUID_V4.test(parts[1] ?? "") &&
-        parts[2] === "output" &&
-        parts[3] === "vocals.mp3")
-    )
-  )
-    throw new TypeError("Installation qualification output path is unsafe");
-  try {
-    if (
-      (await realpath(candidate.path)) !==
-      join(await realpath(layout.workRoot), ...parts)
-    )
-      throw new TypeError(
-        "Installation qualification output contains a symbolic link",
-      );
-    const output = await readOwnedPrivateBytes(candidate.path, 30_000_000);
-    if (
-      output.length !== candidate.resultBytes ||
-      createHash("sha256").update(output).digest("hex") !==
-        candidate.resultDigest
-    )
-      throw new TypeError("Installation qualification output identity changed");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    await assertSafeExistingAncestors(
-      layout.installRoot,
-      dirname(candidate.path),
-    );
-    const present = await lstat(candidate.path).catch((missing: unknown) => {
-      if ((missing as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw missing;
-    });
-    if (
-      present !== null ||
-      !(await installationReportAccepted(layout, receipt.installationId))
-    )
-      throw error;
-    // Enrollment removes scratch only after the report was durably accepted.
-    // The immutable receipt below still binds that accepted output's identity.
-  }
-  return {
-    schemaVersion: 1,
-    installationId: receipt.installationId,
-    releaseVersion: receipt.releaseVersion,
-    releaseManifestDigest,
-    modelDigest: evidence.modelDigest,
-    fixtureDigest: evidence.fixtureDigest,
-    reportDigest: createHash("sha256").update(bytes).digest("hex"),
-    outputPath: candidate.path,
-    outputDigest: candidate.resultDigest,
-    outputBytes: candidate.resultBytes,
-  };
-}
-
-async function installationReportAccepted(
-  layout: MacUserLayout,
-  installationId: string,
-): Promise<boolean> {
-  try {
-    const state = asRecord(
-      JSON.parse(
-        (
-          await readOwnedPrivateBytes(
-            join(layout.transactionRoot, "install", ".enrollment-state.json"),
-            64 * 1024,
-          )
-        ).toString("utf8"),
-      ),
-      "Installation enrollment state",
-    );
-    return (
-      state.installationId === installationId &&
-      typeof state.installationCredential === "string" &&
-      CREDENTIAL.test(state.installationCredential) &&
-      [
-        "exchangeRequestId",
-        "reportRequestId",
-        "activationRequestId",
-        "qualificationGrantRequestId",
-        "qualificationConfirmRequestId",
-      ].every(
-        (key) => typeof state[key] === "string" && UUID_V4.test(state[key]),
-      ) &&
-      Number.isSafeInteger(state.reportRevision) &&
-      Number(state.reportRevision) >= 1
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-async function readOwnedPrivateBytes(
-  path: string,
-  maximum: number,
-): Promise<Buffer> {
-  const handle = await open(
-    path,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  );
-  try {
-    const before = await handle.stat();
-    const uid = process.getuid?.();
-    if (
-      !before.isFile() ||
-      before.nlink !== 1 ||
-      (uid !== undefined && before.uid !== uid) ||
-      (before.mode & 0o077) !== 0 ||
-      before.size < 1 ||
-      before.size > maximum
-    )
-      throw new TypeError("Installation qualification private file is unsafe");
-    const bytes = await handle.readFile();
-    const after = await handle.stat();
-    const current = await lstat(path);
-    if (
-      bytes.length !== before.size ||
-      bytes.length > maximum ||
-      after.size !== before.size ||
-      after.mtimeMs !== before.mtimeMs ||
-      after.mode !== before.mode ||
-      after.uid !== before.uid ||
-      after.nlink !== before.nlink ||
-      current.dev !== before.dev ||
-      current.ino !== before.ino ||
-      current.mode !== before.mode ||
-      current.uid !== before.uid ||
-      current.nlink !== before.nlink ||
-      current.isSymbolicLink()
-    )
-      throw new TypeError(
-        "Installation qualification private file changed while reading",
-      );
-    return bytes;
-  } finally {
-    await handle.close();
-  }
-}
-
-/** Caller holds the CLI command lock. No enrollment exchange is repeated here. */
-export async function resumeMacUserInstallation(options: {
-  layout: MacUserLayout;
-  uid: number;
-  launchAgent?: Pick<
-    MacLaunchAgentController,
-    "bootstrap" | "bootout" | "status"
-  >;
-  beforeStart?: () => Promise<void>;
-}): Promise<MacUserInstallationResult | null> {
-  const { layout } = options;
-  const transactionRoot = join(layout.transactionRoot, "install");
-  const journalPath = join(transactionRoot, "finalization.json");
-  let raw: unknown;
-  try {
-    raw = await readPrivateJson(journalPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-  const journal = asRecord(raw, "Installation finalization journal");
-  const identity = asRecord(journal.enrollmentState, "Enrollment identity");
-  const result = asRecord(journal.result, "Installation result");
-  if (
-    journal.schemaVersion !== 1 ||
-    typeof journal.backendBaseUrl !== "string" ||
-    typeof journal.allowInsecureLoopback !== "boolean" ||
-    !UUID_V4.test(String(journal.installationId)) ||
-    typeof journal.installedAt !== "string" ||
-    !Number.isFinite(Date.parse(journal.installedAt)) ||
-    typeof result.releaseVersion !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u.test(result.releaseVersion) ||
-    typeof identity.machineId !== "string" ||
-    typeof identity.workerId !== "string" ||
-    result.machineId !== identity.machineId ||
-    result.serviceLoaded !== true ||
-    typeof result.reusedRelease !== "boolean" ||
-    typeof result.reusedModel !== "boolean"
-  )
-    throw new TypeError("Installation finalization journal is invalid");
-  const runtime = asRecord(result.runtime, "Installation runtime");
-  for (const name of ["node", "ffmpeg", "ffprobe"]) {
-    const component = asRecord(runtime[name], "Installation runtime component");
-    if (
-      component.decision !== "reuse" ||
-      typeof component.installedVersion !== "string"
-    )
-      throw new TypeError("Installation runtime evidence is invalid");
-  }
-  const executionLayout = await resolveMacAppExecutionLayout(
-    layout,
-    join(layout.releasesRoot, String(result.releaseVersion)),
-  );
-  const config = buildMacUserRuntimeConfig(
-    executionLayout,
-    journal.backendBaseUrl,
-    journal.allowInsecureLoopback,
-    { machineId: identity.machineId, workerId: identity.workerId },
-  );
-  if (
-    (await readlink(layout.currentLink)) !== `releases/${result.releaseVersion}`
-  )
-    throw new Error("Installation recovery found an unrelated active release");
-  await verifyMacRelease(join(layout.releasesRoot, result.releaseVersion));
-  await installMachineCredential(
-    join(transactionRoot, "machine.credential"),
-    layout.credentialPath,
-  );
-  await writePrivateJson(layout.configPath, config);
-  try {
-    await loadLocalLifecycle(layout.lifecyclePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    await initializeLocalLifecycle(layout.lifecyclePath);
-  }
-  if (!(await exists(layout.runtimeStatusPath)))
-    await writeLocalRuntimeStatus(layout.runtimeStatusPath, []);
-  await writeLaunchAgentPlist(layout);
-  await writePrivateJson(layout.installationStatePath, {
-    schemaVersion: 1,
-    installationId: journal.installationId,
-    machineId: identity.machineId,
-    releaseVersion: result.releaseVersion,
-    runtimePreflight: result.runtime,
-    installedAt: journal.installedAt,
-  });
-  const service =
-    options.launchAgent ?? new MacLaunchAgentController(options.uid);
-  if (!(await service.status()).loaded) {
-    await options.beforeStart?.();
-    await service.bootstrap(layout.plistPath);
-  }
-  if (!(await service.status()).loaded)
-    throw new Error("MusicMute worker LaunchAgent did not load");
-  await finishDeletedMacRegistration(layout, String(identity.machineId));
-  await rm(join(transactionRoot, "enrollment.credential"), { force: true });
-  await rm(journalPath);
-  await syncDirectory(transactionRoot);
-  // Rename after committing finalization so recovery never mistakes cleanup
-  // leftovers for an installation that still needs backend activation.
-  const completedRoot = join(
-    layout.transactionRoot,
-    `.install-${randomUUID()}.completed`,
-  );
-  try {
-    await rename(transactionRoot, completedRoot);
-    await syncDirectory(layout.transactionRoot);
-    await rm(completedRoot, { recursive: true, force: true });
-  } catch {
-    console.warn("Worker completed installation cleanup deferred.");
-  }
-  return result as unknown as MacUserInstallationResult;
-}
-
-async function syncDirectory(path: string): Promise<void> {
-  if (process.platform === "win32") return;
-  const directory = await open(path, "r");
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
   }
 }
 
@@ -1092,11 +444,10 @@ export function buildMacUserRuntimeConfig(
     url.username !== "" ||
     url.password !== "" ||
     url.hash !== "" ||
-    url.search !== "" ||
-    url.pathname !== "/" ||
     (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
   )
     throw new TypeError("Worker backend URL is unsafe");
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return {
     schemaVersion: 1,
     backendBaseUrl: url.toString(),
@@ -1134,8 +485,6 @@ export async function qualifyMacUserRelease(
     MacLaunchAgentController,
     "bootstrap" | "bootout" | "status"
   >,
-  retainUploadCandidate = true,
-  clock: MacQualificationClock = {},
 ): Promise<string> {
   const fixturePath = join(layout.stateRoot, "qualification.wav");
   const reportPath = join(layout.stateRoot, "qualification.json");
@@ -1151,50 +500,22 @@ export async function qualifyMacUserRelease(
     reportPath,
     releaseRoot,
   });
-  let uploadCandidatePath: string | undefined;
-  const now = clock.now ?? (() => performance.now());
-  const wait =
-    clock.wait ??
-    ((milliseconds) =>
-      new Promise<void>((resolveWait) =>
-        setTimeout(resolveWait, milliseconds),
-      ));
   try {
     await launchAgent.bootstrap(layout.plistPath);
-    const started = now();
-    let observedRunning = false;
-    while (now() - started < 2_400_000) {
+    for (let attempt = 0; attempt < 9_600; attempt += 1) {
       if (await exists(reportPath)) {
         const evidence = parseQualificationEvidence(
           JSON.parse(await readFile(reportPath, "utf8")) as unknown,
         );
-        uploadCandidatePath = evidence.uploadCandidate.path;
         if (evidence.fixtureDigest !== fixtureSha256)
           throw new TypeError("Qualification fixture identity changed");
         return reportPath;
       }
-      const service = await launchAgent.status();
-      if (service.loaded && service.running) observedRunning = true;
-      else if (observedRunning || now() - started >= 15_000) {
-        // Publication may race this local service read. Completed evidence wins
-        // even when the one-shot process has already exited normally.
-        if (await exists(reportPath)) continue;
-        throw new Error(
-          "MPS qualification service stopped before publishing its report",
-        );
-      }
-      await wait(250);
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
     throw new Error("MPS qualification timed out");
   } finally {
     if ((await launchAgent.status()).loaded) await launchAgent.bootout();
-    if (!retainUploadCandidate && uploadCandidatePath !== undefined)
-      await cleanupQualificationWorkspace({
-        workRoot: layout.workRoot,
-        outputPath: uploadCandidatePath,
-      }).catch(() => {
-        console.warn("Worker qualification workspace cleanup deferred.");
-      });
     await writeLaunchAgentPlist(layout);
   }
 }
@@ -1294,12 +615,8 @@ async function writeStablePrivateText(
   } finally {
     await handle.close();
   }
-  try {
-    await link(temporary, path);
-    await syncDirectory(dirname(path));
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  await rename(temporary, path);
+  await chmod(path, 0o600);
 }
 
 async function exists(path: string): Promise<boolean> {

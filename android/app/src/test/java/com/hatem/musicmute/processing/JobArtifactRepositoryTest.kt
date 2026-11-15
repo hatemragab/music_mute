@@ -31,17 +31,6 @@ class JobArtifactRepositoryTest {
     private val mp3 = "valid-mp3-bytes".toByteArray()
     private var session: ProcessingSession? = ProcessingSession("owner", 1)
 
-    @Test fun transferProgressUsesMonotonicTimeForRemainingEstimate() {
-        assertNull(artifactTransferProgress(0, 1_000, "output", 0, 500_000_000).estimatedRemainingMs)
-        val progress = artifactTransferProgress(250, 1_000, "output", 0, 1_000_000_000)
-        assertEquals(250L, progress.bytes)
-        assertEquals(1_000L, progress.totalBytes)
-        assertEquals("output", progress.artifact)
-        assertEquals(3_000L, progress.estimatedRemainingMs)
-        assertEquals(0L, artifactTransferProgress(1_000, 1_000, "output", 0, 1_000_000_000).estimatedRemainingMs)
-        assertNull(artifactTransferProgress(250, null, "output", 0, 1_000_000_000).estimatedRemainingMs)
-    }
-
     @Test fun recreatedRepositoryResolvesFullOfflineFileWithoutAnyNetwork() = runTest {
         val first = repository(FakeApi(), ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope)
         first.ensureOutput(id)
@@ -60,7 +49,7 @@ class JobArtifactRepositoryTest {
             false, true, displayName = "Saved voice")
         val firstProcess = SupervisorJob()
         val store = ProcessingStore(metadataRoot, CoroutineScope(firstProcess + Dispatchers.IO))
-        store.updateLibraryJobs("owner", listOf(original))
+        store.saveSnapshots("owner", listOf(original))
         store.updateLibraryFlags("owner", id, starred = true)
         repository(FakeApi(), ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope).ensureOutput(id)
         firstProcess.cancelAndJoin()
@@ -104,7 +93,6 @@ class JobArtifactRepositoryTest {
         assertEquals(file, repository.ensureOutput(id))
         assertEquals(1, transfers)
         assertEquals(1, api.grants)
-        assertEquals(0, api.details)
         assertTrue(repository.progress.value.isEmpty())
     }
 
@@ -156,7 +144,7 @@ class JobArtifactRepositoryTest {
         assertArrayEquals(mp3, repository.ensureOutput(id).readBytes())
         assertEquals(2, api.grants)
         assertNotEquals(api.grantRequestIds[0], api.grantRequestIds[1])
-        assertEquals(0, api.details)
+        assertEquals(2, api.details)
         assertEquals(1, downloads)
     }
 
@@ -259,40 +247,19 @@ class JobArtifactRepositoryTest {
         assertFalse(first.path.contains("../"))
     }
 
-    @Test fun authoritativeGrantRejectsNonReadyJobWithoutTransfer() = runTest {
+    @Test fun nonReadyJobNeverRequestsGrant() = runTest {
         val api = FakeApi().apply { status = "processing" }
         val repository = repository(api, ArtifactDownloader { _, _, _ -> fail("Unexpected download") }, backgroundScope)
         try { repository.ensureOutput(id); fail("Expected not ready") }
         catch (error: ArtifactException) { assertEquals(ArtifactProblem.NOT_READY, error.problem) }
-        assertEquals(1, api.grants)
-        assertEquals(0, api.details)
-    }
-
-    @Test fun originalAndVoiceUseSeparateCachesAndDownloadGrants() = runTest {
-        val api = FakeApi()
-        val repository = repository(api, ArtifactDownloader { _, file, _ -> file.writeBytes(mp3) }, backgroundScope)
-        val original = repository.ensureOriginal(id)
-        val voice = repository.ensureOutput(id)
-        assertNotEquals(original, voice)
-        assertEquals(listOf("input", "output"), api.artifacts)
-        api.allowNetwork = false
-        val restored = repository(api, ArtifactDownloader { _, _, _ -> error("Offline transfer") }, backgroundScope)
-        assertEquals(original, restored.ensureOriginal(id))
-        assertEquals(voice, restored.ensureOutput(id))
-        assertEquals(1, api.details)
-        assertEquals(2, api.grants)
-        repository.evict(id)
-        assertFalse(original.exists())
-        assertFalse(voice.exists())
+        assertEquals(0, api.grants)
     }
 
     private fun repository(api: FakeApi, downloader: ArtifactDownloader, scope: kotlinx.coroutines.CoroutineScope) =
         JobArtifactRepository(temporary.root, api, { session }, downloader,
-            isPlayableMp3 = { it.isFile && it.readBytes().contentEquals(mp3) }, scope = scope, now = { now },
-            isPlayableAudio = { it.isFile && it.readBytes().contentEquals(mp3) })
+            isPlayableMp3 = { it.isFile && it.readBytes().contentEquals(mp3) }, scope = scope, now = { now })
 
     private inner class FakeApi : JobsApi {
-        val artifacts = mutableListOf<String>()
         var allowNetwork = true
         var grants = 0
         var details = 0
@@ -310,10 +277,9 @@ class JobArtifactRepositoryTest {
         }
         override suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant {
             check(allowNetwork) { "Offline grant request" }
-            artifacts += artifact
+            assertEquals("output", artifact)
             grantRequestIds += requestId
             grants++
-            if (artifact == "output" && status != "ready") throw JobsFailure(JobsProblem.JOB_STATE_CONFLICT)
             return onGrant?.invoke(grants) ?: grant
         }
         override suspend fun create(requestId: String, input: InputDeclaration): CreateReservation = error("unused")

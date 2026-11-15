@@ -1,8 +1,7 @@
 import { accountFixture } from './helpers/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { randomUUID } from 'node:crypto';
-import mongoose, { createConnection, trusted } from 'mongoose';
+import mongoose, { createConnection } from 'mongoose';
 import { Device, DeviceSchema } from '../dist/devices/device.schema.js';
 import {
   DeviceInstallationOwner,
@@ -22,7 +21,6 @@ import { IsolatedServices } from './helpers/isolated-services.mjs';
 const installA = 'd7ea7de6-52e9-4b96-8834-3b517941bdb0';
 const installB = '75dcab60-447a-4a44-b116-2dd3e1945d90';
 const installC = '33e91b43-a505-4bbb-b4a9-7bf42916c6ed';
-const installWeb = 'f09d48ad-c982-47c6-9bbd-dd248916b031';
 const installD = '1ec036f6-03d4-49e0-88d6-bb67abe57c88';
 
 test('push bindings survive rotation, account switches, logout and opt-out without destination confusion', async (t) => {
@@ -72,11 +70,11 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     });
   const owner = await createUser('push-owner');
   const other = await createUser('push-other');
-  const createDevice = (userId, installationId, platform = 'ios') =>
+  const createDevice = (userId, installationId) =>
     devices.create({
       userId,
       installationId,
-      platform,
+      platform: 'ios',
       appVersion: '1.0',
       buildNumber: 1,
       metadataRevision: 1,
@@ -93,20 +91,13 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     createDevice(other._id, installA),
     createDevice(other._id, installB),
     createDevice(other._id, installC),
-    createDevice(owner._id, installWeb, 'web'),
   ]);
   await Promise.all([
     ownerService.claim(owner._id.toHexString(), installA, 100),
     ownerService.claim(other._id.toHexString(), installB, 100),
     ownerService.claim(owner._id.toHexString(), installC, 100),
     ownerService.claim(owner._id.toHexString(), installD, 100),
-    ownerService.claim(owner._id.toHexString(), installWeb, 100),
   ]);
-
-  await assert.rejects(
-    service.register(owner, installWeb, 'fixture-web-push-token', 100),
-    (error) => error.getResponse?.().code === 'DEVICE_SYNC_REQUIRED',
-  );
 
   const staleAfterSwitch = await service.register(
     owner,
@@ -269,7 +260,6 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
   assert.equal(afterDelayedLogout.active, true);
   assert.equal(afterDelayedLogout.bindingRevision, reactivated.bindingRevision);
   assert.equal(afterDelayedLogout.deactivatedAt, null);
-  assert.equal(afterDelayedLogout.purgeAt, null);
   await service.deactivate(
     other._id.toHexString(),
     installB,
@@ -284,10 +274,6 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
     .findOne({ installationId: installB })
     .lean();
   assert.equal(currentOptOut.active, false);
-  assert.equal(
-    currentOptOut.purgeAt.getTime(),
-    currentOptOut.deactivatedAt.getTime() + 30 * 86400000,
-  );
   assert.equal(currentOptOut.bindingRevision, reactivated.bindingRevision + 1);
   const binding = await service.register(
     other,
@@ -365,75 +351,11 @@ test('push bindings survive rotation, account switches, logout and opt-out witho
   assert.equal((await service.eligibleFor(other._id.toHexString())).length, 0);
 
   const indexes = await registrations.listIndexes();
-  assert.ok(
-    indexes.some(
-      (index) =>
-        index.name === 'push_inactive_registration_retention' &&
-        index.expireAfterSeconds === 0 &&
-        index.partialFilterExpression.active === false,
-    ),
-  );
+  assert.ok(indexes.every((index) => index.expireAfterSeconds === undefined));
   assert.ok(
     indexes.some(
       (index) =>
         index.name === 'push_active_token_hash_unique' && index.unique === true,
     ),
-  );
-
-  const legacyDeactivatedAt = new Date(Date.now() - 10 * 86400000);
-  const legacyIds = await registrations.collection.insertMany(
-    Array.from({ length: 101 }, () => ({
-      userId: owner._id,
-      installationId: randomUUID(),
-      token: 'fixture-inactive-token',
-      tokenHash: randomUUID().replaceAll('-', '').padEnd(64, '0'),
-      active: false,
-      bindingRevision: 1,
-      authTimeSec: 100,
-      deactivatedAt: legacyDeactivatedAt,
-    })),
-  );
-  const legacyKeys = Object.values(legacyIds.insertedIds);
-  const inactiveWithoutDate = await registrations.collection.insertOne({
-    userId: owner._id,
-    installationId: randomUUID(),
-    token: 'fixture-undated-token',
-    tokenHash: randomUUID().replaceAll('-', '').padEnd(64, '0'),
-    active: false,
-    bindingRevision: 1,
-    authTimeSec: 100,
-    deactivatedAt: null,
-  });
-  await service.scheduleInactiveRetention();
-  assert.equal(
-    await registrations.countDocuments({
-      _id: trusted({ $in: legacyKeys }),
-      purgeAt: trusted({ $ne: null }),
-    }),
-    100,
-  );
-  await service.scheduleInactiveRetention();
-  assert.equal(
-    await registrations.countDocuments({
-      _id: trusted({ $in: legacyKeys }),
-      purgeAt: trusted({ $ne: null }),
-    }),
-    101,
-  );
-  assert.equal(
-    (await registrations.findById(legacyKeys[0]).lean()).purgeAt.getTime(),
-    legacyDeactivatedAt.getTime() + 30 * 86400000,
-  );
-  assert.equal(
-    (await registrations.findById(inactiveWithoutDate.insertedId).lean())
-      .purgeAt,
-    undefined,
-  );
-  assert.equal(
-    await registrations.countDocuments({
-      active: true,
-      purgeAt: trusted({ $ne: null }),
-    }),
-    0,
   );
 });

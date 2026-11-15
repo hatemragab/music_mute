@@ -8,14 +8,11 @@ export const ADMIN_ROLES = [
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const PERMISSIONS = [
-  "notifications.read",
-  "notifications.send",
   "overview.read",
   "jobs.read",
   "jobs.manage",
   "users.read",
   "users.processing.manage",
-  "users.worker-registration.manage",
   "users.restrictions.manage",
   "users.account-recovery.manage",
   "abuse.read",
@@ -102,16 +99,6 @@ export interface JobDetail extends JobSummary {
   measuredBytes?: number | null;
   policyVersion?: number;
   retryOfJobId: string | null;
-  serverStageTimings?: {
-    totalMs: number | null;
-    totalComplete: boolean;
-    stages: Array<{ stage: string; durationMs: number; complete: boolean }>;
-    attempts?: Array<{
-      attemptNumber: number;
-      stages: Array<{ stage: string; durationMs: number; complete: boolean }>;
-    }>;
-  } | null;
-  workerStageTimings?: Array<{ stage: string; durationMs: number }>;
   stageTimings: Array<{
     stage: string;
     startedAt: string | null;
@@ -134,8 +121,6 @@ export interface UserSummary {
 }
 
 export interface UserDetail extends UserSummary {
-  workerRegistrationAllowed: boolean;
-  providers?: string[];
   processingCounts: Record<string, number>;
   recentJobIds: string[];
   deletion: {
@@ -228,7 +213,6 @@ export interface AccountRecoveryQueueSummary {
 
 export type ReleasePlatform = "android" | "ios";
 export type ReleaseSource = "direct_apk" | "google_play" | "app_store";
-export type ReleaseWriteSource = Exclude<ReleaseSource, "direct_apk">;
 
 export interface ReleaseSummary {
   id: string;
@@ -254,12 +238,6 @@ export interface ReleaseDetail extends ReleaseSummary {
   publishedBy: string | null;
 }
 
-export interface ReleaseUploadStatus {
-  artifactState: string;
-  code?: string;
-  checkedAt?: string;
-}
-
 export interface ReleaseProposal {
   platform: ReleasePlatform;
   source: ReleaseSource;
@@ -271,19 +249,14 @@ export interface UpdatePolicy {
   revision: number;
   android: {
     minimumBuild: number | null;
-    source: "google_play";
-    directReleaseId: null;
+    source: "direct_apk" | "google_play";
+    directReleaseId: string | null;
     storeReleaseId: string | null;
   };
   ios: {
     minimumBuild: number | null;
     storeReleaseId: string | null;
   };
-}
-export interface DesktopUpdatePolicy {
-  revision: number;
-  macos: { minimumBuild: number | null };
-  windows: { minimumBuild: number | null };
 }
 
 export interface AccountPolicyValues {
@@ -306,10 +279,6 @@ export interface AccountPolicyValues {
 }
 
 export interface AccountPolicy {
-  linkImportEnabled?: boolean;
-  linkImportDisabledCountries?: string[];
-  linkImportDisabledUserIds?: string[];
-  linkImportForcedOff?: boolean;
   plan: "standard";
   revision: number;
   acceptNewJobs: boolean;

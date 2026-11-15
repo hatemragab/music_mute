@@ -1,23 +1,6 @@
 #if DEBUG
   import Foundation
   import SwiftUI
-  import UIKit
-
-  /// A synthetic landscape cover for offline artwork screenshots; no URL is fetched.
-  private func processingArtworkFixture() -> UIImage {
-    UIGraphicsImageRenderer(size: CGSize(width: 480, height: 270)).image { context in
-      UIColor(red: 0.09, green: 0.38, blue: 0.62, alpha: 1).setFill()
-      context.fill(CGRect(x: 0, y: 0, width: 480, height: 270))
-      UIColor(red: 1, green: 0.7, blue: 0.25, alpha: 1).setFill()
-      context.cgContext.fillEllipse(in: CGRect(x: 250, y: 45, width: 86, height: 86))
-      UIColor(red: 0.05, green: 0.22, blue: 0.3, alpha: 1).setFill()
-      context.cgContext.move(to: CGPoint(x: 0, y: 270))
-      context.cgContext.addLine(to: CGPoint(x: 180, y: 125))
-      context.cgContext.addLine(to: CGPoint(x: 355, y: 270))
-      context.cgContext.closePath()
-      context.cgContext.fillPath()
-    }
-  }
 
   /// All mutable state is scoped to a test UUID. No production Firebase, HTTP or OS transfer
   /// object is constructed. The real views, models, store and action coordinator run unchanged.
@@ -39,39 +22,24 @@
 
     var body: some View {
       VocalRootView(
-        preferences: preferences, player: graph.player,
-        auth: graph.auth, processing: graph.processing,
-        artifacts: graph.artifacts, push: graph.push, requestNotifications: {},
-        libraryOwnerUID: graph.ownerUID
+        preferences: preferences, downloads: graph.downloads, player: graph.player,
+        files: graph.files, auth: graph.auth, processing: graph.processing,
+        artifacts: graph.artifacts, push: graph.push, requestNotifications: {}
       )
       .environment(\.locale, preferences.locale)
       .environment(\.layoutDirection, preferences.direction)
       .preferredColorScheme(preferences.colorScheme)
-      .environment(\.artworkFixturePhase, graph.artworkPhase)
       .overlay(alignment: .bottomTrailing) {
         VStack {
-          if ProcessInfo.processInfo.arguments.contains("--processing-fixture-policy-controls") {
-            Button(api.linkImportVisible ? "Hide link import" : "Show link import") {
-              api.toggleLinkVisibility()
-            }
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("fixtureToggleLinkImport")
-          }
-          VStack {
-            fixtureMetric(api.createdCount, id: "fixtureCreatedJobs")
-            fixtureMetric(api.outputRequestCount, id: "fixtureOutputRequests")
-            fixtureMetric(api.importRequestCount, id: "fixtureImportRequests")
-            fixtureMetric(api.importReadCount, id: "fixtureImportReads")
-            fixtureMetric(
-              FileManager.default.fileExists(
-                atPath: graph.importDirectory.appendingPathComponent("Fixture input.mp3").path)
-                ? 1 : 0,
-              id: "fixtureNativeInputReady")
-          }.opacity(0.01)
+          fixtureMetric(api.createdCount, id: "fixtureCreatedJobs")
+          fixtureMetric(api.outputRequestCount, id: "fixtureOutputRequests")
         }
+        .opacity(0.01)
       }
       .task {
-        await graph.processing.bindOwner(graph.ownerUID)
+        await graph.seedOriginal()
+        await graph.downloads.load()
+        await graph.processing.bindOwner("processing-ui-fixture")
       }
     }
 
@@ -85,15 +53,16 @@
 
   @MainActor private final class ProcessingFixtureGraph: ObservableObject {
     let preferences: AppPreferences
+    let downloads: DownloadModel
     let player = AudioPlayer()
-    let ownerUID: String
+    let files: AudioFiles
     let importDirectory: URL
+    let historyStore: HistoryStore
     let auth: AuthSessionModel
     let processing: ProcessingModel
     let artifacts: JobArtifactRepository
     let push: PushRegistrationCoordinator
     let api: ProcessingFixtureJobs
-    let artworkPhase: AsyncImagePhase?
 
     init() {
       let args = ProcessInfo.processInfo.arguments
@@ -104,33 +73,10 @@
         return args[index + 1]
       }
       let id = value("--processing-fixture-id").flatMap(UUID.init(uuidString:)) ?? UUID()
-      let artworkState = value("--processing-fixture-artwork")
-      switch artworkState {
-      case "loaded":
-        artworkPhase = .success(Image(uiImage: processingArtworkFixture()))
-      case "failed":
-        artworkPhase = .failure(URLError(.cannotDecodeContentData))
-      case "loading":
-        artworkPhase = .empty
-      default:
-        artworkPhase = nil
-      }
-      ownerUID = "processing-ui-fixture-\(id.uuidString)"
       let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("VocalProcessingUITests/" + id.uuidString)
-      let importRoot = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("UITestImports", isDirectory: true)
-      // Files keeps every prior fixture visible across launches. Reset only the
-      // harness-owned children while retaining the indexed root folder.
-      try? FileManager.default.createDirectory(
-        at: importRoot, withIntermediateDirectories: true)
-      importDirectory = importRoot.appendingPathComponent(id.uuidString, isDirectory: true)
-      for staleFixture
-        in (try? FileManager.default.contentsOfDirectory(
-          at: importRoot, includingPropertiesForKeys: nil)) ?? []
-      where UUID(uuidString: staleFixture.lastPathComponent) != nil {
-        try? FileManager.default.removeItem(at: staleFixture)
-      }
+      importDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("UITestImports/" + id.uuidString, isDirectory: true)
       try? FileManager.default.createDirectory(
         at: importDirectory, withIntermediateDirectories: true)
       try? processingFixtureMP3().write(
@@ -138,19 +84,24 @@
       let defaults = UserDefaults(suiteName: "VocalProcessingUITests." + id.uuidString)!
       defaults.set(value("-language") ?? "en", forKey: "language")
       defaults.set(value("-appearance") ?? "light", forKey: "appearance")
+      defaults.set("", forKey: "sourceURL")
+      if args.contains("--processing-fixture-paste-url") {
+        UIPasteboard.general.string =
+          value("--processing-fixture-paste-url") ?? "https://youtu.be/jNQXAC9IVRw"
+      }
       preferences = AppPreferences(defaults: defaults)
+      files = AudioFiles(root: root.appendingPathComponent("Audio"))
+      historyStore = HistoryStore(file: root.appendingPathComponent("history.json"))
+      let fixtureAudio = ProcessingFixtureAudio(root: root)
+      downloads = DownloadModel(
+        service: fixtureAudio,
+        history: historyStore,
+        defaults: defaults)
       auth = AuthSessionModel(
         firebase: ProcessingFixtureAuth(), apple: AppleCredentialProvider(),
         installationStore: InstallationStore(file: root.appendingPathComponent("auth.json")),
         api: nil)
-      let api = ProcessingFixtureJobs(
-        offline: args.contains("--processing-fixture-offline"),
-        offlineAfterCache: args.contains("--processing-fixture-offline-after-cache"),
-        paginated: args.contains("--processing-fixture-paginated"),
-        linkImportVisible: !args.contains("--processing-fixture-link-hidden"),
-        legacyPolicy: args.contains("--processing-fixture-legacy-policy"),
-        emptyHistory: args.contains("--processing-fixture-empty-history"),
-        thumbnailFixture: artworkState != nil)
+      let api = ProcessingFixtureJobs(offline: args.contains("--processing-fixture-offline"))
       self.api = api
       let inputRoot = root.appendingPathComponent("Inputs")
       let repository = ProcessingRepository(
@@ -160,15 +111,17 @@
         transfers: ProcessingFixtureTransfers())
       let preparer = AudioInputPreparer(root: inputRoot)
       let pipeline = AudioPipelineCoordinator(
-        store: repository.store, repository: repository, preparer: preparer)
+        store: repository.store, repository: repository, preparer: preparer,
+        download: { videoID, operationID, _, stage, progress in
+          let saved = try await fixtureAudio.download(
+            videoID: videoID, id: operationID, stage: stage, progress: progress)
+          return PipelineSourceFile(
+            url: root.appendingPathComponent(saved.relativePath), title: saved.title)
+        })
       let artifactRepository = JobArtifactRepository(
         api: api, root: root.appendingPathComponent("Outputs"),
         sessionProvider: { repository.session },
         transport: ProcessingFixtureArtifacts())
-      let originalRepository = JobArtifactRepository(
-        api: api, root: root.appendingPathComponent("Originals"),
-        sessionProvider: { repository.session },
-        transport: ProcessingFixtureArtifacts(), original: true)
       artifacts = artifactRepository
       push = PushRegistrationCoordinator(
         api: ProcessingFixturePush(), jobs: api, session: { nil }, identityUID: { nil },
@@ -176,13 +129,29 @@
       processing = ProcessingModel(
         api: api, repository: repository, preparer: preparer, pipeline: pipeline, player: player,
         outputFile: { try await artifactRepository.preparedOutput(jobId: $0, displayName: $1) },
-        libraryPreferences: LibraryPreferencesStore(defaults: defaults),
-        originalFile: { try await originalRepository.preparedOutput(jobId: $0, displayName: $1) },
         removeOutput: { await artifactRepository.removeCached(jobId: $0) },
-        sessionDidChange: { artifactRepository.onSessionChanged() },
-        policyCacheFile: root.appendingPathComponent("Policy/policy.json"))
+        sessionDidChange: { artifactRepository.onSessionChanged() })
     }
 
+    func seedOriginal() async {
+      do {
+        let payload = processingFixtureMP3()
+        guard try await historyStore.load().isEmpty else { return }
+        try FileManager.default.createDirectory(at: files.root, withIntermediateDirectories: true)
+        try payload.write(to: files.root.appendingPathComponent("original.mp3"), options: .atomic)
+        var record = AudioRecord(
+          id: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
+          videoID: "fixture-original", createdAt: Date())
+        record.status = .complete
+        record.title = "Synthetic original audio"
+        record.relativePath = "original.mp3"
+        record.fileExtension = "mp3"
+        record.codec = "mp3"
+        record.byteCount = Int64(payload.count)
+        record.duration = 20
+        try await historyStore.save([record], revision: 0)
+      } catch { assertionFailure("Isolated processing fixture media setup failed") }
+    }
   }
 
   @MainActor private final class ProcessingFixtureJobs: ObservableObject, JobsAPI {
@@ -190,109 +159,29 @@
     private var retried: [UUID: String] = [:]
     private var created: [UUID: String] = [:]
     private let offline: Bool
-    private let offlineAfterCache: Bool
-    private let paginated: Bool
-    private let legacyPolicy: Bool
-    private var policyRevision = 1
-    private var policyContinuation: AsyncThrowingStream<Data, Error>.Continuation?
-    @Published private(set) var linkImportVisible: Bool
-    @Published private(set) var importRequestCount = 0
-    @Published private(set) var importReadCount = 0
     @Published private(set) var createdCount = 0
     @Published private(set) var outputRequestCount = 0
-    init(
-      offline: Bool, offlineAfterCache: Bool = false, paginated: Bool = false,
-      linkImportVisible: Bool = true, legacyPolicy: Bool = false, emptyHistory: Bool = false,
-      thumbnailFixture: Bool = false
-    ) {
+    init(offline: Bool) {
       self.offline = offline
-      self.offlineAfterCache = offlineAfterCache
-      self.paginated = paginated
-      self.linkImportVisible = linkImportVisible
-      self.legacyPolicy = legacyPolicy
-      if !emptyHistory {
-        for (index, status) in ["ready", "processing", "failed", "interrupted"].enumerated() {
-          let id = String(format: "%024d", index + 1)
-          jobs[id] = Self.job(id, status: status)
-        }
-        if thumbnailFixture {
-          let id = String(format: "%024d", 1)
-          jobs[id] = Self.job(
-            id, status: "ready", sourceTitle: "Fixture video", sourceKind: .url,
-            thumbnailUrl: "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg")
-          let missingID = String(format: "%024d", 5)
-          jobs[missingID] = Self.job(
-            missingID, status: "ready", sourceTitle: "Fixture without cover")
-        }
+      for (index, status) in ["ready", "processing", "failed", "interrupted"].enumerated() {
+        let id = String(format: "%024d", index + 1)
+        jobs[id] = Self.job(id, status: status)
       }
-    }
-
-    func processingPolicy() async throws -> ProcessingPolicyResponse {
-      if offline { throw AuthFailure.offline }
-      return try policyResponse()
-    }
-
-    func watchProcessingPolicy() -> AsyncThrowingStream<Data, Error>? {
-      guard !offline else { return nil }
-      return AsyncThrowingStream { policyContinuation = $0 }
-    }
-
-    func toggleLinkVisibility() {
-      linkImportVisible.toggle()
-      policyRevision += 1
-      if let response = try? policyResponse(), let data = try? JSONEncoder().encode(response) {
-        policyContinuation?.yield(data)
-      }
-    }
-
-    private func policyResponse() throws -> ProcessingPolicyResponse {
-      var payload: [String: Any] = [
-        "schemaVersion": 2, "acceptNewJobs": true, "acceptLongJobs": true,
-        "limits": [
-          "maxDurationSeconds": 1200, "maxPreparedAudioBytes": 50_000_000,
-          "maxLocalSourceBytes": 200_000_000, "maxPreparationSeconds": 120,
-          "longJobThresholdSeconds": 600,
-        ],
-        "preparationProfile": [
-          "id": "audio-cap-aac-lc-160-v1", "preserveCompatibleAudio": true,
-          "fallbackConversion": [
-            "codec": "aac-lc", "outputContentType": "audio/mp4", "targetBitrate": 160_000,
-          ],
-        ],
-      ]
-      if !legacyPolicy {
-        payload["linkImportVisible"] = linkImportVisible
-        payload["linkImportPolicyRevision"] = policyRevision
-      }
-      return try JSONDecoder().decode(
-        ProcessingPolicyResponse.self, from: JSONSerialization.data(withJSONObject: payload))
-    }
-
-    func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
-      importRequestCount += 1
-      return URLImportView(
-        importId: String(format: "%024d", 100), status: "downloading", jobId: nil, error: nil)
-    }
-
-    func urlImport(id: String) async throws -> URLImportView {
-      importReadCount += 1
-      return URLImportView(importId: id, status: "downloading", jobId: nil, error: nil)
     }
     private static func job(
       _ id: String, status: String, retryOf: String? = nil, requestId: String? = nil,
       sourceTitle: String? = nil, displayName: String? = nil, sourceKind: JobSourceKind? = .file,
-      clientStartedAt: Date? = nil, thumbnailUrl: String? = nil
+      clientStartedAt: Date? = nil
     ) -> Job {
       let now = Date()
-      var result = Job(
+      return Job(
         id: id, status: status, createdAt: Date(timeIntervalSince1970: 1_780_000_000),
         updatedAt: now, queuedAt: status == "awaiting_upload" ? nil : now,
         finishedAt: ["ready", "failed", "cancelled"].contains(status) ? now : nil,
         retryOfJobId: retryOf,
         input: .init(extension: "m4a", bytes: 4096, durationSeconds: 4),
         error: status == "failed" ? .init(code: "SEPARATOR_FAILED", at: Date()) : nil,
-        canDownloadInput: status == "ready", canDownloadOutput: status == "ready",
-        workerAvailable: false,
+        canDownloadInput: false, canDownloadOutput: status == "ready", workerAvailable: false,
         requestId: requestId, sourceTitle: sourceTitle ?? "Fixture audio \(id.suffix(2))",
         displayName: displayName, sourceKind: sourceKind, serverTime: now,
         timing: JobTiming(
@@ -300,23 +189,14 @@
           processingElapsedApproximate: false,
           totalElapsedMs: clientStartedAt.map { Int64(max(0, now.timeIntervalSince($0)) * 1_000) },
           totalElapsedApproximate: clientStartedAt != nil),
-        stages: nil, thumbnailUrl: thumbnailUrl)
-      result.trimEnabled = false
-      return result
+        stages: nil)
     }
     func list(cursor: String?, status: String?) async throws -> JobPage {
-      if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
-      if paginated {
-        if cursor == nil {
-          return JobPage(items: jobs.values.sorted { $0.id < $1.id }, nextCursor: "older")
-        }
-        return JobPage(
-          items: [Self.job(String(format: "%024d", 6), status: "ready")], nextCursor: nil)
-      }
+      if offline { throw AuthFailure.offline }
       return JobPage(items: jobs.values.sorted { $0.id < $1.id }, nextCursor: nil)
     }
     func detail(id: String) async throws -> Job {
-      if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
+      if offline { throw AuthFailure.offline }
       guard let job = jobs[id] else { throw JobsFailure.notFound }
       return job
     }
@@ -356,8 +236,7 @@
       UploadGrant(
         method: .put, url: URL(string: "https://fixture.invalid/upload")!,
         headers: [
-          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture",
-          "x-amz-meta-sha256": "fixture", "If-None-Match": "*",
+          "Content-Type": "audio/mpeg", "x-amz-checksum-sha256": "fixture", "If-None-Match": "*",
         ],
         expiresAt: Date().addingTimeInterval(60))
     }
@@ -367,7 +246,6 @@
       return JobMutation(id: id, status: "queued", retryOfJobId: nil)
     }
     func download(id: String, artifact: String) async throws -> DownloadGrant {
-      if offline || (offlineAfterCache && outputRequestCount >= 2) { throw AuthFailure.offline }
       outputRequestCount += 1
       return DownloadGrant(
         url: URL(string: "https://fixture.invalid/output")!,
@@ -397,15 +275,14 @@
         canDownloadInput: job.canDownloadInput, canDownloadOutput: nextStatus == "ready",
         workerAvailable: job.workerAvailable, requestId: job.requestId,
         sourceTitle: job.sourceTitle, displayName: displayName ?? job.displayName,
-        sourceKind: job.sourceKind, serverTime: Date(), timing: job.timing, stages: job.stages,
-        thumbnailUrl: job.thumbnailUrl)
+        sourceKind: job.sourceKind, serverTime: Date(), timing: job.timing, stages: job.stages)
     }
   }
 
   @MainActor private final class ProcessingFixtureTransfers: BackgroundTransferring {
     var onCompletion: ((TransferCompletion) async -> Void)?
     var onProgress: ((TransferContext, TransferProgressSnapshot) -> Void)?
-    func startUpload(file: ObjectStorageUploadFile, grant: UploadGrant, context: TransferContext)
+    func startUpload(file: S3MultipartFile, grant: UploadGrant, context: TransferContext)
       async throws -> Int
     {
       Task { @MainActor in
@@ -431,6 +308,30 @@
       throw JobsFailure.serviceUnavailable
     }
     func deactivate(installationID: String, expectedBindingRevision: Int64) async throws {}
+  }
+  private struct ProcessingFixtureAudio: AudioDownloading {
+    let root: URL
+    func download(
+      videoID: String, id: UUID, stage: @escaping @Sendable (DownloadStatus) -> Void,
+      progress: @escaping @Sendable (DownloadProgress) -> Void
+    ) async throws -> SavedAudio {
+      stage(.resolving)
+      try await Task.sleep(for: .milliseconds(50))
+      try Task.checkCancellation()
+      stage(.downloading)
+      let payload = processingFixtureMP3()
+      progress(
+        DownloadProgress(downloadedBytes: Int64(payload.count), totalBytes: Int64(payload.count)))
+      let relative = "FixtureSources/\(id.uuidString).mp3"
+      let file = root.appendingPathComponent(relative)
+      try FileManager.default.createDirectory(
+        at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try payload.write(to: file, options: .atomic)
+      stage(.checking)
+      return SavedAudio(
+        title: "Fixture audio \(videoID)", relativePath: relative, codec: "mp3",
+        fileExtension: "mp3", bitrate: 128_000, byteCount: Int64(payload.count), duration: 4)
+    }
   }
   @MainActor private final class ProcessingFixtureAuth: FirebaseAuthenticating {
     var identity: IdentitySnapshot? { nil }

@@ -4,40 +4,18 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, Server } from 'node:http';
-import { isIP } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Redis } from 'ioredis';
 import { WebSocket, WebSocketServer } from 'ws';
-import {
-  observeWebSocket,
-  observeRedisClient,
-} from '../observability/local-service-diagnostics.js';
-import { ConfigService } from '@nestjs/config';
 import { SECURITY_REDIS } from '../rate-limits/security-redis.provider.js';
-import { RateBudgetService } from '../rate-limits/rate-budget.service.js';
-import { RateLimitKeys } from '../rate-limits/rate-limit-keys.js';
-import { registerWebSocketUpgrade } from '../http/websocket-upgrades.js';
 
-const SOCKET_PATH = '/worker/hints/socket';
+const SOCKET_PATH = '/api/v1/worker/v1/hints/socket';
 const CHANNEL = 'musicmute:worker-hints:v1';
 const TICKET_PREFIX = 'musicmute:worker-hint-ticket:v1:';
 const TICKET_TTL_SECONDS = 30;
 const MAX_MESSAGE_BYTES = 1024;
-const MAX_BUFFERED_BYTES = 64 * 1024;
-const MAX_SOCKET_AGE_MS = 60 * 60 * 1000;
-const HEARTBEAT_MS = 30_000;
-const CONNECTION_LEASE_MS = 90_000;
-const SOCKET_PROTOCOL = 'musicmute.worker-hint.v1';
-
-const RENEW_CONNECTION = `
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
-redis.call('PEXPIRE', KEYS[1], ARGV[2])
-return 1`;
-const RELEASE_CONNECTION = `
-if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
-return redis.call('DEL', KEYS[1])`;
 
 export const WORKER_HINT_TYPES = [
   'work_available',
@@ -53,41 +31,24 @@ interface PublishedHint {
   sentAt: string;
 }
 
-interface WorkerSocketClient {
-  machineId: string;
-  socket: WebSocket;
-  connectionId: string;
-  leaseKey: string;
-  alive: boolean;
-  checking: boolean;
-  heartbeat: NodeJS.Timeout;
-  expiry: NodeJS.Timeout;
-}
-
 @Injectable()
 export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   private subscriber: Redis | null = null;
-  private readonly sockets = new Map<string, WorkerSocketClient>();
+  private readonly sockets = new Map<string, Set<WebSocket>>();
   private readonly server = new WebSocketServer({
     noServer: true,
     maxPayload: MAX_MESSAGE_BYTES,
     perMessageDeflate: false,
   });
   private revision = 0;
-  private detachUpgrade?: () => void;
+  private attached = false;
 
-  constructor(
-    @Inject(SECURITY_REDIS) private readonly redis: Redis,
-    private readonly budgets: RateBudgetService,
-    private readonly keys: RateLimitKeys,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(@Inject(SECURITY_REDIS) private readonly redis: Redis) {}
 
   async onModuleInit(): Promise<void> {
     if (typeof this.redis.duplicate !== 'function') return;
     const subscriber = this.redis.duplicate();
     this.subscriber = subscriber;
-    observeRedisClient(subscriber, 'worker-hint-subscriber');
     subscriber.on('error', () => undefined);
     await subscriber.subscribe(CHANNEL).catch(() => undefined);
     subscriber.on('message', (channel, message) => {
@@ -98,14 +59,8 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    this.detachUpgrade?.();
-    this.detachUpgrade = undefined;
-    const clients = [...this.sockets.values()];
-    for (const client of clients) {
-      client.socket.close(1001, 'server shutdown');
-      this.dispose(client);
-    }
-    await Promise.allSettled(clients.map((client) => this.release(client)));
+    for (const clients of this.sockets.values())
+      for (const socket of clients) socket.close(1001, 'server shutdown');
     this.server.close();
     try {
       if (this.subscriber?.status === 'ready') await this.subscriber.quit();
@@ -115,12 +70,11 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
   }
 
   attach(httpServer: Server): void {
-    if (this.detachUpgrade) return;
-    this.detachUpgrade = registerWebSocketUpgrade(
-      httpServer,
-      SOCKET_PATH,
-      (request, socket, head) => this.upgrade(request, socket, head),
-    );
+    if (this.attached) return;
+    this.attached = true;
+    httpServer.on('upgrade', (request, socket, head) => {
+      void this.upgrade(request, socket, head);
+    });
   }
 
   async mintTicket(machineId: string): Promise<{
@@ -162,54 +116,24 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     socket: Duplex,
     head: Buffer,
   ): Promise<void> {
-    if ((request.url ?? '').split('?', 1)[0] !== SOCKET_PATH) {
-      rejectUpgrade(socket, 404);
+    let url: URL;
+    try {
+      url = new URL(
+        request.url ?? '',
+        `http://${request.headers.host ?? 'localhost'}`,
+      );
+    } catch {
       return;
     }
-    const protocolHeaders = (request.rawHeaders ?? []).filter(
-      (value, index) =>
-        index % 2 === 0 && value.toLowerCase() === 'sec-websocket-protocol',
-    ).length;
-    const protocol = request.headers['sec-websocket-protocol'];
-    const ticket =
-      protocolHeaders === 1 && typeof protocol === 'string'
-        ? new RegExp(
-            `^${SOCKET_PROTOCOL},\\s*ticket\\.([A-Za-z0-9_-]{43})$`,
-            'u',
-          ).exec(protocol)?.[1]
-        : undefined;
+    if (url.pathname !== SOCKET_PATH) return;
+    const ticket = url.searchParams.get('ticket');
     if (
-      request.url !== SOCKET_PATH ||
-      request.headers.origin !== undefined ||
       !ticket ||
-      request.method !== 'GET'
+      !/^[A-Za-z0-9_-]{43}$/u.test(ticket) ||
+      [...url.searchParams.keys()].some((key) => key !== 'ticket') ||
+      url.searchParams.getAll('ticket').length !== 1
     ) {
       rejectUpgrade(socket);
-      return;
-    }
-    const ip = workerSocketClientIp(
-      request,
-      this.config.get('TRUST_PROXY') === '1',
-    );
-    try {
-      const decision = await this.budgets.reserve([
-        {
-          key: this.keys.bucket('worker-socket-ip', ip),
-          limit: 120,
-          windowMs: 60_000,
-        },
-        {
-          key: this.keys.bucket('worker-socket-service', 'global'),
-          limit: 3_000,
-          windowMs: 60_000,
-        },
-      ]);
-      if (!decision.allowed) {
-        rejectUpgrade(socket, 429, decision.retryAfterSeconds);
-        return;
-      }
-    } catch {
-      rejectUpgrade(socket, 503);
       return;
     }
     const digest = createHash('sha256').update(ticket).digest('hex');
@@ -217,189 +141,42 @@ export class WorkerHintService implements OnModuleInit, OnModuleDestroy {
     try {
       machineId = await this.redis.getdel(`${TICKET_PREFIX}${digest}`);
     } catch {
-      rejectUpgrade(socket, 503);
+      rejectUpgrade(socket);
       return;
     }
     if (!machineId) {
       rejectUpgrade(socket);
       return;
     }
-    try {
-      const decision = await this.budgets.reserve([
-        {
-          key: this.keys.bucket('worker-socket-machine', machineId),
-          limit: 20,
-          windowMs: 60_000,
-        },
-      ]);
-      if (!decision.allowed) {
-        rejectUpgrade(socket, 429, decision.retryAfterSeconds);
-        return;
-      }
-    } catch {
-      rejectUpgrade(socket, 503);
-      return;
-    }
-    const connectionId = randomUUID();
-    const leaseKey = this.keys.bucket('worker-socket-connection', machineId);
-    let reserved: string | null;
-    try {
-      reserved = await this.redis.set(
-        leaseKey,
-        connectionId,
-        'PX',
-        CONNECTION_LEASE_MS,
-        'NX',
-      );
-    } catch {
-      rejectUpgrade(socket, 503);
-      return;
-    }
-    if (reserved !== 'OK') {
-      rejectUpgrade(socket, 429, Math.ceil(HEARTBEAT_MS / 1000));
-      return;
-    }
-    if (socket.destroyed) {
-      await this.release({ connectionId, leaseKey }).catch(() => undefined);
-      return;
-    }
-    try {
-      this.server.handleUpgrade(request, socket, head, (webSocket) =>
-        this.accept(machineId!, connectionId, leaseKey, webSocket),
-      );
-    } catch {
-      await this.release({ connectionId, leaseKey }).catch(() => undefined);
-      rejectUpgrade(socket, 503);
-    }
+    this.server.handleUpgrade(request, socket, head, (webSocket) =>
+      this.accept(machineId!, webSocket),
+    );
   }
 
-  private accept(
-    machineId: string,
-    connectionId: string,
-    leaseKey: string,
-    socket: WebSocket,
-  ): void {
-    const previous = this.sockets.get(machineId);
-    if (previous) {
-      previous.socket.terminate();
-      this.dispose(previous);
-    }
-    let client!: WorkerSocketClient;
-    const heartbeat = setInterval(() => {
-      void this.check(client);
-    }, HEARTBEAT_MS);
-    heartbeat.unref();
-    const expiry = setTimeout(
-      () => socket.close(1000, 'connection rotation'),
-      MAX_SOCKET_AGE_MS,
-    );
-    expiry.unref();
-    client = {
-      machineId,
-      socket,
-      connectionId,
-      leaseKey,
-      alive: true,
-      checking: false,
-      heartbeat,
-      expiry,
-    };
-    this.sockets.set(machineId, client);
-    observeWebSocket(socket, { streamId: connectionId }, 'worker-hints');
-    socket.on('pong', () => {
-      client.alive = true;
-    });
+  private accept(machineId: string, socket: WebSocket): void {
+    const clients = this.sockets.get(machineId) ?? new Set<WebSocket>();
+    clients.add(socket);
+    this.sockets.set(machineId, clients);
     socket.on('message', () => socket.close(1008, 'receive only'));
     socket.on('error', () => undefined);
-    socket.on('close', () => this.dispose(client));
-  }
-
-  private async check(client: WorkerSocketClient): Promise<void> {
-    if (client.checking || this.sockets.get(client.machineId) !== client)
-      return;
-    if (!client.alive) {
-      client.socket.terminate();
-      return;
-    }
-    client.checking = true;
-    client.alive = false;
-    try {
-      const renewed = await this.redis.eval(
-        RENEW_CONNECTION,
-        1,
-        client.leaseKey,
-        client.connectionId,
-        CONNECTION_LEASE_MS,
-      );
-      if (renewed !== 1) {
-        client.socket.close(1013, 'connection lease lost');
-        return;
-      }
-      if (client.socket.readyState === WebSocket.OPEN) client.socket.ping();
-    } catch {
-      client.socket.close(1013, 'connection lease unavailable');
-    } finally {
-      client.checking = false;
-    }
-  }
-
-  private dispose(client: WorkerSocketClient): void {
-    if (this.sockets.get(client.machineId) !== client) return;
-    this.sockets.delete(client.machineId);
-    clearInterval(client.heartbeat);
-    clearTimeout(client.expiry);
-    void this.release(client).catch(() => undefined);
-  }
-
-  private async release(
-    client: Pick<WorkerSocketClient, 'connectionId' | 'leaseKey'>,
-  ): Promise<void> {
-    await this.redis.eval(
-      RELEASE_CONNECTION,
-      1,
-      client.leaseKey,
-      client.connectionId,
-    );
+    socket.on('close', () => {
+      clients.delete(socket);
+      if (clients.size === 0) this.sockets.delete(machineId);
+    });
   }
 
   private broadcast(hint: PublishedHint): void {
     const targets = hint.machineId
-      ? [this.sockets.get(hint.machineId)].filter(
-          (client): client is WorkerSocketClient => client !== undefined,
-        )
-      : [...this.sockets.values()];
+      ? (this.sockets.get(hint.machineId) ?? [])
+      : [...this.sockets.values()].flatMap((clients) => [...clients]);
     const message = JSON.stringify({
       type: hint.type,
       revision: hint.revision,
       sentAt: hint.sentAt,
     });
-    for (const client of targets) {
-      if (client.socket.readyState !== WebSocket.OPEN) continue;
-      if (client.socket.bufferedAmount > MAX_BUFFERED_BYTES) {
-        client.socket.close(1013, 'hint backpressure');
-        continue;
-      }
-      try {
-        client.socket.send(message);
-      } catch {
-        client.socket.terminate();
-      }
-    }
+    for (const socket of targets)
+      if (socket.readyState === WebSocket.OPEN) socket.send(message);
   }
-}
-
-export function workerSocketClientIp(
-  request: IncomingMessage,
-  trustProxy: boolean,
-): string {
-  const direct = request.socket.remoteAddress ?? 'unknown';
-  if (!trustProxy) return direct;
-  // Express `trust proxy = 1` uses the rightmost forwarded address: the peer
-  // immediately before our one trusted reverse proxy, including Docker peers.
-  const forwarded = request.headers['x-forwarded-for'];
-  if (typeof forwarded !== 'string') return direct;
-  const last = forwarded.split(',').at(-1)?.trim() ?? '';
-  return isIP(last) ? last : direct;
 }
 
 function parsePublishedHint(value: string): PublishedHint | null {
@@ -419,24 +196,6 @@ function parsePublishedHint(value: string): PublishedHint | null {
   }
 }
 
-function rejectUpgrade(
-  socket: Duplex,
-  status = 401,
-  retryAfter?: number,
-): void {
-  const reason =
-    status === 429
-      ? 'Too Many Requests'
-      : status === 503
-        ? 'Service Unavailable'
-        : status === 404
-          ? 'Not Found'
-          : 'Unauthorized';
-  const retry =
-    status === 429 && retryAfter !== undefined
-      ? `Retry-After: ${retryAfter}\r\n`
-      : '';
-  socket.end(
-    `HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n${retry}\r\n`,
-  );
+function rejectUpgrade(socket: Duplex): void {
+  socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
 }

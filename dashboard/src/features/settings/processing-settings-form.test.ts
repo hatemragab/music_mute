@@ -4,9 +4,6 @@ import { validateAccountPolicy } from "./processing-settings-form";
 
 const valid: AccountPolicyDraft = {
   acceptNewJobs: true,
-  linkImportEnabled: false,
-  linkImportDisabledCountries: [],
-  linkImportDisabledUserIds: [],
   maintenanceMessageEn: "",
   maintenanceMessageAr: null,
   values: {
@@ -32,28 +29,6 @@ const valid: AccountPolicyDraft = {
 describe("validateAccountPolicy", () => {
   it("accepts the documented standard launch policy", () => {
     expect(validateAccountPolicy(valid)).toEqual([]);
-  });
-
-  it("accepts unique canonical account IDs and rejects duplicates, malformed IDs and excess selections", () => {
-    const id = "1234567890abcdef12345678";
-    expect(
-      validateAccountPolicy({ ...valid, linkImportDisabledUserIds: [id] }),
-    ).toEqual([]);
-    for (const ids of [
-      [id, id],
-      [id.toUpperCase()],
-      [`${id}\n`],
-      ["not-an-account"],
-      Array.from({ length: 1_001 }, (_, index) =>
-        index.toString(16).padStart(24, "0"),
-      ),
-    ]) {
-      expect(
-        validateAccountPolicy({ ...valid, linkImportDisabledUserIds: ids }),
-      ).toContain(
-        "Choose up to 1,000 unique account IDs for link import visibility.",
-      );
-    }
   });
 
   it("rejects unsafe numeric relationships and requires pause copy", () => {

@@ -1,4 +1,3 @@
-import { isStorageEtag } from '../storage/object-identity.js';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import type { QueryFilter, Model } from 'mongoose';
@@ -105,7 +104,7 @@ export class JobsQueryService {
     const page = results.slice(0, limit);
     const last = page.at(-1);
     return {
-      items: page.map((job) => presentJob(job, false)),
+      items: page.map((job) => presentJob(job)),
       nextCursor:
         results.length > limit && last
           ? encodeHistoryCursor({
@@ -128,7 +127,10 @@ export class JobsQueryService {
   ) {
     const job = await this.findOwned(userId, jobId);
     const object = this.downloadObject(job, artifact);
-    if (!object || !isStorageEtag(object.etag))
+    if (!object) throw jobError('JOB_STATE_CONFLICT');
+    if (
+      !(await processingIo(() => this.storage.isPinnedObjectAvailable(object)))
+    )
       throw jobError('JOB_STATE_CONFLICT');
     const entitlement = await this.transactions.run(async (session) => {
       await this.access.assertActive(userId, session);
@@ -164,21 +166,17 @@ export class JobsQueryService {
     artifact: 'input' | 'output',
   ): ObjectIdentity | null {
     return artifact === 'input'
-      ? job.reservationCleanupScheduledAt
-        ? null
-        : job.inputObject
+      ? job.inputObject
       : job.status === 'ready'
         ? job.outputObject
         : null;
   }
 
   private async findOwned(userId: string, jobId: string) {
-    await this.access.assertActiveReadOnly(userId);
+    await this.access.assertActive(userId);
     const job = await this.jobs
       .findOne({ _id: objectId(jobId), userId: objectId(userId) })
       .lean();
-    // Account disablement during the lookup must fence the returned snapshot.
-    await this.access.assertActiveReadOnly(userId);
     if (!job || job.deletedAt) throw jobError('JOB_NOT_FOUND');
     return job;
   }
@@ -187,7 +185,7 @@ export class JobsQueryService {
 function sameObject(left: ObjectIdentity, right: ObjectIdentity): boolean {
   return (
     left.key === right.key &&
-    left.etag === right.etag &&
+    left.versionId === right.versionId &&
     left.bytes === right.bytes &&
     left.sha256 === right.sha256 &&
     left.contentType === right.contentType

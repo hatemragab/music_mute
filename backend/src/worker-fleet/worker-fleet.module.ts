@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { SharedMediaModule } from '../shared-media/shared-media.module.js';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AdminModule } from '../admin/admin.module.js';
 import { ProcessingPersistenceModule } from '../processing/processing-persistence.module.js';
@@ -7,8 +6,6 @@ import { StorageTransfersModule } from '../storage/storage-transfers.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { WorkerAttemptController } from './attempts/worker-attempt.controller.js';
 import { WorkerAttemptService } from './attempts/worker-attempt.service.js';
-import { JobRenditionService } from './attempts/job-rendition.service.js';
-import { ProcessingTransactions } from '../processing/processing-transactions.js';
 import { AdminWorkerControlController } from './control/admin-worker-control.controller.js';
 import { WorkerConfigController } from './control/worker-config.controller.js';
 import { WorkerControlService } from './control/worker-control.service.js';
@@ -16,7 +13,6 @@ import { WorkerCommandController } from './control/worker-command.controller.js'
 import { WorkerAuthGuard } from './auth/worker-auth.guard.js';
 import { AdminWorkerEnrollmentController } from './enrollment/admin-worker-enrollment.controller.js';
 import { WorkerEnrollmentController } from './enrollment/worker-enrollment.controller.js';
-import { UserWorkerInstallationController } from './enrollment/user-worker-installation.controller.js';
 import { WorkerEnrollmentService } from './enrollment/worker-enrollment.service.js';
 import { WorkerInstallationArtifactsService } from './enrollment/worker-installation-artifacts.service.js';
 import { WorkerInstallationQualificationService } from './enrollment/worker-installation-qualification.service.js';
@@ -37,7 +33,6 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
 
 @Module({
   imports: [
-    SharedMediaModule,
     AdminModule,
     AdminSettingsModule,
     ProcessingPersistenceModule,
@@ -47,7 +42,6 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
   ],
   controllers: [
     WorkerEnrollmentController,
-    UserWorkerInstallationController,
     WorkerClaimController,
     WorkerLeaseController,
     WorkerAttemptController,
@@ -65,8 +59,6 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
     WorkerClaimService,
     WorkerLeaseService,
     WorkerAttemptService,
-    JobRenditionService,
-    ProcessingTransactions,
     WorkerControlService,
     WorkerRecoveryService,
     WorkerRecoveryMaintenanceService,
@@ -76,11 +68,6 @@ import { WorkerHintController } from './control/worker-hint.controller.js';
     WorkerMachineLifecycleService,
     WorkerFleetStartupService,
   ],
-  exports: [
-    MongooseModule,
-    WorkerAuthGuard,
-    WorkerEnrollmentService,
-    WorkerControlService,
-  ],
+  exports: [MongooseModule, WorkerAuthGuard, WorkerEnrollmentService],
 })
 export class WorkerFleetModule {}

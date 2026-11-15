@@ -16,17 +16,14 @@ describe('public update snapshots', () => {
     const service = new ReleasePolicyService(
       { current: async () => policy } as AppPolicyService,
       records as unknown as Model<Release>,
-      new ConfigService({
-        APP_UPDATES_ENABLED: true,
-        APK_EXPECTED_PACKAGE_ID: 'com.example.fixture',
-      }),
+      new ConfigService({ APP_UPDATES_ENABLED: true }),
     );
     return { service, records };
   }
 
   it('returns an empty valid snapshot without a selected release', async () => {
     const { service } = setup();
-    expect(await service.snapshot('android', 'play')).toMatchObject({
+    expect(await service.snapshot('android', 'direct')).toMatchObject({
       schemaVersion: 1,
       minimumBuild: null,
       target: null,
@@ -37,62 +34,40 @@ describe('public update snapshots', () => {
     const policy = defaultPolicy();
     policy.platforms.android.minimumBuild = 10;
     await expect(
-      setup(policy).service.snapshot('android', 'play'),
+      setup(policy).service.snapshot('android', 'direct'),
     ).rejects.toThrow();
   });
 
-  it('rejects retired distribution without reading releases', async () => {
-    const { service, records } = setup();
-    await expect(service.snapshot('android', 'direct')).rejects.toMatchObject({
-      status: 400,
-    });
-    expect(records.findById).not.toHaveBeenCalled();
-  });
-
-  it('never exposes historical artifact fields from a Play target', async () => {
+  it('does not leak draft releases or storage identities', async () => {
     const policy = defaultPolicy();
-    policy.platforms.android.releaseSelection.storeReleaseId = 'a'.repeat(24);
+    policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(24);
+    await expect(
+      setup(policy, { state: 'draft' }).service.snapshot('android', 'direct'),
+    ).rejects.toThrow();
     const release = {
       _id: 'a'.repeat(24),
       platform: 'android',
       state: 'published',
-      source: 'google_play',
+      source: 'direct_apk',
+      artifactState: 'verified',
       versionName: '1',
       buildNumber: 12,
-      changelogEn: 'Notes',
-      storeUrl:
-        'https://play.google.com/store/apps/details?id=com.example.fixture',
+      changelogEn: 'Changes',
+      storeUrl: null,
       artifact: {
         key: 'private-secret-key',
-        etag: '"private-version"',
+        versionId: 'private-version',
         bytes: 1,
+        sha256Hex: 'b'.repeat(64),
+        signerSha256Hex: 'c'.repeat(64),
       },
     };
     const snapshot = await setup(policy, release).service.snapshot(
       'android',
-      'play',
+      'direct',
     );
-    expect(snapshot.target?.artifact).toBeNull();
+    expect(snapshot.target?.artifact?.bytes).toBe(1);
     expect(JSON.stringify(snapshot)).not.toContain('private');
-    await expect(
-      setup(policy, { ...release, state: 'draft' }).service.snapshot(
-        'android',
-        'play',
-      ),
-    ).rejects.toThrow();
-    await expect(
-      setup(policy, { ...release, source: 'direct_apk' }).service.snapshot(
-        'android',
-        'play',
-      ),
-    ).rejects.toThrow();
-    await expect(
-      setup(policy, {
-        ...release,
-        storeUrl:
-          'https://play.google.com:443/store/apps/details?id=com.example.fixture',
-      }).service.snapshot('android', 'play'),
-    ).rejects.toMatchObject({ status: 503 });
   });
 
   it('rejects a selected target below the minimum build', async () => {
@@ -124,7 +99,7 @@ describe('public update snapshots', () => {
   it('allows a distinct Play target when direct APK is selected', async () => {
     const policy = defaultPolicy();
     policy.platforms.android.minimumBuild = 10;
-    policy.platforms.android.releaseSelection.storeReleaseId = 'a'.repeat(24);
+    policy.platforms.android.releaseSelection.directReleaseId = 'a'.repeat(24);
     policy.platforms.android.releaseSelection.storeReleaseId = 'b'.repeat(24);
     const release = {
       _id: 'b'.repeat(24),

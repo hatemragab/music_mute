@@ -12,10 +12,7 @@ import {
   symlink,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import {
-  verifyManagedMacRelease as verifyMacRelease,
-  publishMacAppRuntimeReference,
-} from "./app-installation-binding.js";
+import { verifyMacRelease } from "./release-manifest.js";
 import type { MacUserLayout } from "./user-paths.js";
 
 export interface MacUserReleaseInstallation {
@@ -91,10 +88,6 @@ export async function activateMacUserRelease(
   if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u.test(releaseVersion))
     throw new TypeError("macOS release version is unsafe");
   await verifyMacRelease(join(layout.releasesRoot, releaseVersion));
-  await publishMacAppRuntimeReference(
-    layout,
-    join(layout.releasesRoot, releaseVersion),
-  );
   const previousRelease = await currentRelease(layout);
   const relativeTarget = join("releases", releaseVersion);
   if (previousRelease === relativeTarget) return previousRelease;

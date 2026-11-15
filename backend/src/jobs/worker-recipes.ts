@@ -1,9 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-  WORKER_RECIPE_IDS,
-  WORKER_RECIPE_STEP_IDS,
-  type WorkerRecipeId,
-} from '../worker-fleet/protocol/v1/protocol.js';
+import type { WorkerRecipeId } from '../worker-fleet/protocol/v1/protocol.js';
 import type { WorkerRecipeSnapshot } from './job.types.js';
 
 export const QUALIFIED_MODEL_DIGEST =
@@ -31,86 +27,19 @@ function canonical(value: unknown): string {
   throw new TypeError('Recipe contains a noncanonical value');
 }
 
-const RECIPE_FIELDS = [
-  'recipeId',
-  'recipeRevision',
-  'protocolVersion',
-  'recipeDigest',
-  'modelFilename',
-  'modelDigest',
-  'modelBytes',
-  'inputProfileId',
-  'stepIds',
-  'trimEnabled',
-  'denoiseEnabled',
-  'denoisePresetId',
-  'trimProfileId',
-  'outputFormat',
-  'outputBitrateKbps',
-] as const satisfies readonly (keyof WorkerRecipeSnapshot)[];
-
-function recipeDigest(material: Omit<WorkerRecipeSnapshot, 'recipeDigest'>) {
-  return createHash('sha256').update(canonical(material)).digest('hex');
-}
-
-/** Validate persisted recipes without requiring the current deployment's revision. */
-export function isWorkerRecipeSnapshot(
-  value: unknown,
-): value is WorkerRecipeSnapshot {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const recipe = value as Record<string, unknown>;
-  if (
-    Object.keys(recipe).length !== RECIPE_FIELDS.length ||
-    RECIPE_FIELDS.some((key) => !Object.hasOwn(recipe, key)) ||
-    !WORKER_RECIPE_IDS.some((id) => id === recipe.recipeId) ||
-    typeof recipe.recipeRevision !== 'number' ||
-    !Number.isSafeInteger(recipe.recipeRevision) ||
-    recipe.recipeRevision < 1 ||
-    recipe.protocolVersion !== 1 ||
-    typeof recipe.recipeDigest !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(recipe.recipeDigest) ||
-    recipe.modelFilename !== 'Kim_Vocal_2.onnx' ||
-    typeof recipe.modelDigest !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(recipe.modelDigest) ||
-    typeof recipe.modelBytes !== 'number' ||
-    !Number.isSafeInteger(recipe.modelBytes) ||
-    recipe.modelBytes < 1 ||
-    recipe.inputProfileId !== 'direct-input-v1' ||
-    !Array.isArray(recipe.stepIds) ||
-    recipe.stepIds.length < 2 ||
-    recipe.stepIds.length > 6 ||
-    new Set(recipe.stepIds).size !== recipe.stepIds.length ||
-    !recipe.stepIds.every((step) =>
-      WORKER_RECIPE_STEP_IDS.some((id) => id === step),
-    ) ||
-    typeof recipe.trimEnabled !== 'boolean' ||
-    typeof recipe.denoiseEnabled !== 'boolean' ||
-    (recipe.denoisePresetId !== null &&
-      recipe.denoisePresetId !== 'afftdn-conservative-v1') ||
-    (recipe.trimProfileId !== null &&
-      recipe.trimProfileId !== 'trim-vocal-mp3-v1' &&
-      recipe.trimProfileId !== 'trim-vocal-wav-v1') ||
-    recipe.outputFormat !== 'mp3' ||
-    recipe.outputBitrateKbps !== 160
-  )
-    return false;
-  const { recipeDigest: digest, ...material } = value as WorkerRecipeSnapshot;
-  return digest === recipeDigest(material);
-}
-
 function createRecipe(
   recipeId: WorkerRecipeId,
-  trimEnabled = true,
 ): Readonly<WorkerRecipeSnapshot> {
+  const trimEnabled = true;
   const stepIds: WorkerRecipeSnapshot['stepIds'] = [
     'separate-kim-vocal-2-wav-v1',
-    ...(trimEnabled ? ['trim-vocal-wav-v1' as const] : []),
+    'trim-vocal-wav-v1',
     'encode-mp3-up-to-160k-v1',
     'validate-audio-v1',
   ];
   const material: Omit<WorkerRecipeSnapshot, 'recipeDigest'> = {
     recipeId,
-    recipeRevision: 6,
+    recipeRevision: 5,
     protocolVersion: 1,
     modelFilename: 'Kim_Vocal_2.onnx',
     modelDigest: QUALIFIED_MODEL_DIGEST,
@@ -120,7 +49,7 @@ function createRecipe(
     trimEnabled,
     denoiseEnabled: false,
     denoisePresetId: null,
-    trimProfileId: trimEnabled ? 'trim-vocal-wav-v1' : null,
+    trimProfileId: 'trim-vocal-wav-v1',
     outputFormat: 'mp3',
     outputBitrateKbps: 160,
   };
@@ -129,7 +58,9 @@ function createRecipe(
     stepIds: Object.freeze([
       ...stepIds,
     ]) as unknown as WorkerRecipeSnapshot['stepIds'],
-    recipeDigest: recipeDigest(material),
+    recipeDigest: createHash('sha256')
+      .update(canonical(material))
+      .digest('hex'),
   });
 }
 
@@ -142,10 +73,7 @@ export const WORKER_RECIPES: Readonly<
 
 export function workerRecipeSnapshot(
   recipeId: WorkerRecipeId,
-  trimEnabled = true,
 ): WorkerRecipeSnapshot {
-  const recipe = trimEnabled
-    ? WORKER_RECIPES[recipeId]
-    : createRecipe(recipeId, false);
+  const recipe = WORKER_RECIPES[recipeId];
   return { ...recipe, stepIds: [...recipe.stepIds] };
 }

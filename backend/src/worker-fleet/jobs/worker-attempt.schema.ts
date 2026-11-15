@@ -1,4 +1,3 @@
-import { MAX_AUDIO_DURATION_SECONDS } from '../../jobs/media-limits.js';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Schema as MongoSchema, type Types } from 'mongoose';
 import type {
@@ -68,7 +67,7 @@ const processingStageTiming = new MongoSchema<WorkerProcessingStageTiming>(
 const outputObject = new MongoSchema<ObjectIdentity>(
   {
     key: { type: String, required: true, maxlength: 1024 },
-    etag: { type: String, required: true, maxlength: 1024 },
+    versionId: { type: String, required: true, maxlength: 1024 },
     bytes: {
       type: Number,
       required: true,
@@ -97,7 +96,7 @@ const outputReservation = new MongoSchema<WorkerOutputReservation>(
       type: Number,
       required: true,
       min: 0.001,
-      max: MAX_AUDIO_DURATION_SECONDS,
+      max: 1200,
     },
     grantExpiresAt: { type: Date, required: true },
   },
@@ -184,6 +183,6 @@ WorkerAttemptSchema.index(
   { name: 'worker_attempt_lease_recovery' },
 );
 WorkerAttemptSchema.index(
-  { machineId: 1, createdAt: -1 },
-  { name: 'worker_attempt_machine_history' },
+  { machineId: 1, workerId: 1, createdAt: -1 },
+  { name: 'worker_attempt_slot_history' },
 );

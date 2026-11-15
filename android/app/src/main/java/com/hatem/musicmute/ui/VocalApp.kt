@@ -50,7 +50,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.hatem.musicmute.VocalApplication
 import com.hatem.musicmute.library.*
-import com.hatem.musicmute.playback.controls
 import com.hatem.musicmute.playback.QueueTrack
 import com.hatem.musicmute.ui.library.*
 import com.hatem.musicmute.ui.player.*
@@ -63,7 +62,6 @@ import com.hatem.musicmute.ui.design.CreativePage
 import com.hatem.musicmute.ui.design.CreativeFeedback
 import com.hatem.musicmute.ui.design.rememberCreativeMotionEnabled
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -89,24 +87,14 @@ fun VocalApp(
     model: VocalViewModel,
     processingModel: ProcessingViewModel,
     processingSession: ProcessingSession?,
-    artifactProgress: kotlinx.coroutines.flow.StateFlow<Map<String, ArtifactProgress>>,
+    artifactProgress: Map<String, ArtifactProgress>,
     openHistory: Boolean = false,
-    sharedUrlText: String? = null,
-    onSharedUrlConsumed: () -> Unit = {},
     openProcessing: Boolean = false,
     openProcessingJob: String? = null,
     openProcessingOperation: String? = null,
     onProcessingOpened: () -> Unit = {},
     onProcessingNotifications: () -> Unit = {},
     onAccount: () -> Unit = {},
-    playbackSearch: String? = null,
-    onPlaybackSearchConsumed: (String) -> Unit = {},
-    entryAction: String? = null,
-    sharedAudio: android.net.Uri? = null,
-    onEntryConsumed: () -> Unit = {},
-    onSharedAudioConsumed: (android.net.Uri) -> Unit = {},
-    openPlayer: Boolean = false,
-    onPlayerOpened: () -> Unit = {},
     onHistoryOpened: () -> Unit = {},
 ) {
     val nav = rememberNavController()
@@ -121,35 +109,11 @@ fun VocalApp(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val app = context.applicationContext as VocalApplication
-    val urlImports by app.urlImports.records.collectAsStateWithLifecycle()
-    val retryingUrlImports by app.urlImports.retrying.collectAsStateWithLifecycle()
-    val processingPolicy by app.processingPolicy.policy.collectAsStateWithLifecycle()
-    val linkImportVisible = processingPolicy.linkImportVisible
-    var linkRequest by rememberSaveable { mutableIntStateOf(0) }
-    var urlImportText by rememberSaveable { mutableStateOf("") }
-    var urlImportError by remember(processingSession) { mutableStateOf<String?>(null) }
-    var urlImportBusy by remember(processingSession) { mutableStateOf(false) }
-    var trimEnabled by rememberSaveable(processingSession) { mutableStateOf(true) }
-    var confirmUrlImport by remember(processingSession) { mutableStateOf(false) }
-    LaunchedEffect(linkImportVisible) {
-        if (!linkImportVisible) confirmUrlImport = false
-    }
-    LaunchedEffect(sharedUrlText) {
-        if (sharedUrlText != null) {
-            val extracted = UrlImportSource.sharedText(sharedUrlText)
-            if (extracted == null) urlImportError = "IMPORT_SINGLE_ITEM_REQUIRED"
-            else { urlImportText = extracted; urlImportError = null }
-            nav.navigate(Destination.Home.name) { launchSingleTop = true }
-            onSharedUrlConsumed()
-        }
-    }
     val libraryModel: LibraryViewModel = viewModel(key = "library:${processingSession?.uid}",
         factory = viewModelFactory { initializer { LibraryViewModel(app.libraryRepository) } })
-    // Delegated state is read inside route content/callbacks. Reading whole snapshots
-    // here would invalidate the navigation shell on search, transfers and job updates.
     val library by libraryModel.state.collectAsStateWithLifecycle()
     val libraryEntries by app.libraryRepository.entries.collectAsStateWithLifecycle()
-    val libraryTitles by remember { derivedStateOf { libraryEntries.associate { it.key to it.title } } }
+    val libraryTitles = remember(libraryEntries) { libraryEntries.associate { it.key to it.title } }
     LaunchedEffect(libraryTitles) { app.audioPlayback.updateLibraryTitles(libraryTitles) }
     val selectedLibraryId = when (route) {
         JobDetailRoute -> entry?.arguments?.getString("jobId")
@@ -158,41 +122,6 @@ fun VocalApp(
     var showPlaybackQueue by rememberSaveable(processingSession) { mutableStateOf(false) }
     val processing by processingModel.state.collectAsStateWithLifecycle()
     val jobs by processingModel.history.state.collectAsStateWithLifecycle()
-    LaunchedEffect(app.urlImports, processingModel) {
-        snapshotFlow { urlImports.filter { it.status == "submitted" }.mapNotNull { it.jobId } }
-            .collect { if (it.isNotEmpty()) processingModel.history.refreshAfterChange() }
-    }
-    LaunchedEffect(app.urlImports, processingModel.history) {
-        snapshotFlow { jobs.jobs.map { it.id }.toSet() to urlImports }
-            .collect { (ids, _) -> app.urlImports.observeJobs(ids) }
-    }
-    val submitUrlImport: () -> Unit = {
-        if (!urlImportBusy) {
-            val text = urlImportText
-            val trim = trimEnabled
-            urlImportBusy = true
-            scope.launch {
-                try {
-                    app.urlImports.submit(text, trim)
-                    urlImportText = ""
-                    urlImportError = null
-                } catch (error: kotlinx.coroutines.CancellationException) {
-                    throw error
-                } catch (error: UrlImportFailure) {
-                    urlImportError = error.code
-                } catch (_: Exception) {
-                    urlImportError = "SERVICE_UNAVAILABLE"
-                } finally { urlImportBusy = false }
-            }
-        }
-    }
-    val startUrlImport: () -> Unit = {
-        try {
-            UrlImportSource.canonical(urlImportText)
-            urlImportError = null
-            confirmUrlImport = true
-        } catch (error: UrlImportFailure) { urlImportError = error.code }
-    }
     LaunchedEffect(entry?.id, processingSession) {
         val operationId = entry?.arguments?.getString("operationId")
         if (route in setOf(JobDetailRoute, SourceDetailRoute) &&
@@ -201,23 +130,15 @@ fun VocalApp(
             processingModel.selectTask(operationId, selectedLibraryId)
         }
     }
-    val audioTasks by remember(processingModel, app.urlImports) {
-        derivedStateOf {
-            audioTaskPresentations(processing.operations, jobs.jobs, System.currentTimeMillis(), urlImports)
-        }
+    val audioTasks = audioTaskPresentations(processing.operations, jobs.jobs, System.currentTimeMillis())
+    val selectedTask = audioTasks.firstOrNull {
+        (processing.selectedOperationId != null && it.operationId == processing.selectedOperationId) ||
+            (jobs.selectedId != null && it.jobId == jobs.selectedId)
     }
-    // Navigation only needs a new job identity, not every byte/stage update.
-    val selectedTaskJobId by remember(processingModel, app.urlImports) {
-        derivedStateOf {
-            audioTasks.firstOrNull {
-                it.operationId != null && it.operationId == processing.selectedOperationId
-            }?.jobId
-        }
-    }
-    LaunchedEffect(route, selectedTaskJobId) {
-        if (route == SourceDetailRoute && selectedTaskJobId != null &&
-            processing.selectedOperationId == entry?.arguments?.getString("operationId")) {
-            nav.navigate(taskDetailRoute(processing.selectedOperationId, selectedTaskJobId)) {
+    LaunchedEffect(route, selectedTask?.jobId) {
+        if (route == SourceDetailRoute && selectedTask?.jobId != null &&
+            selectedTask.operationId == entry?.arguments?.getString("operationId")) {
+            nav.navigate(taskDetailRoute(selectedTask.operationId, selectedTask.jobId)) {
                 popUpTo(SourceDetailRoute) { inclusive = true }
                 launchSingleTop = true
             }
@@ -226,14 +147,12 @@ fun VocalApp(
     // Progress belongs to the active Player/mini-player, not the entire navigation
     // tree or the lazy Library. Queue and playback-mode changes still reach routes.
     val navigationPlayback = remember(app.audioPlayback) {
-        app.audioPlayback.state.controls()
+        app.audioPlayback.state.map { it.copy(positionMs = 0) }.distinctUntilChanged()
     }
     val voicePlayback by navigationPlayback.collectAsStateWithLifecycle(
         initialValue = com.hatem.musicmute.playback.PlaybackState())
     val currentTrackKey = voicePlayback.queue.getOrNull(voicePlayback.currentIndex)?.key
-    val currentLibraryEntry by remember(currentTrackKey) {
-        derivedStateOf { libraryEntries.firstOrNull { it.key == currentTrackKey } }
-    }
+    val currentLibraryEntry = libraryEntries.firstOrNull { it.key == currentTrackKey }
     val openAudioDetails: (LibraryKey) -> Unit = { key ->
         processingModel.clearMessage()
         processingModel.selectTask(null, key.jobId)
@@ -252,10 +171,9 @@ fun VocalApp(
     }
     val voiceTrackTitle = stringResource(R.string.voice_track)
     val lifecycleOwner = LocalLifecycleOwner.current
-    // History belongs to the authenticated app, not the selected navigation tab.
-    DisposableEffect(lifecycleOwner, processingSession, processingModel.history) {
+    DisposableEffect(route, lifecycleOwner, processingSession) {
         fun update() { processingModel.history.setVisible(
-            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+            (route == Destination.Home.name || route == Destination.Library.name || detail) && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
         val observer = LifecycleEventObserver { _, _ -> update() }
         lifecycleOwner.lifecycle.addObserver(observer)
         update()
@@ -271,50 +189,10 @@ fun VocalApp(
         }
     }
     val importVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) processingModel.importAudio(uri, trimEnabled)
+        if (uri != null) processingModel.importAudio(uri)
     }
     val importAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) processingModel.importAudio(uri, trimEnabled)
-    }
-    LaunchedEffect(entryAction) {
-        when (entryAction) {
-            "LIBRARY" -> nav.navigate(Destination.Library.name) { launchSingleTop = true }
-            "IMPORT_AUDIO" -> { nav.navigate(Destination.Home.name) { launchSingleTop = true }; importAudio.launch(arrayOf("audio/*")) }
-            "IMPORT_LINK" -> { if (linkImportVisible) linkRequest++; nav.navigate(Destination.Home.name) { launchSingleTop = true } }
-            else -> return@LaunchedEffect
-        }
-        onEntryConsumed()
-    }
-    LaunchedEffect(playbackSearch, processingSession) {
-        val query = playbackSearch ?: return@LaunchedEffect
-        val owner = processingSession ?: return@LaunchedEffect
-        try {
-            val tracks = app.processingStore.library(owner.uid).first().filter { !it.hidden && it.job.status == "ready" }
-                .map { QueueTrack(LibraryKey(owner.uid, it.job.id), it.job.displayName ?: it.job.sourceTitle ?: voiceTrackTitle) }
-                .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }.take(100)
-            if (app.processingSession() == owner) {
-                if (tracks.isNotEmpty()) {
-                    app.audioPlayback.playQueue(tracks, tracks.first().key)
-                    nav.navigate("player") { launchSingleTop = true }
-                } else snackbar.showSnackbar(context.getString(R.string.listen_search_empty))
-            }
-        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-        catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.listen_tools_error)) }
-        finally { onPlaybackSearchConsumed(query) }
-    }
-    LaunchedEffect(sharedAudio, processingSession) {
-        val uri = sharedAudio ?: return@LaunchedEffect
-        val owner = processingSession ?: return@LaunchedEffect
-        try {
-            val active = app.processingStore.operations(owner.uid).first().filter { it.phase != ProcessingPhase.COMPLETE }.mapNotNull { it.sourceUri }.toSet()
-            val staged = stageSharedAudio(context, uri, owner, app::processingSession, active)
-            if (app.processingSession() == owner) {
-                processingModel.importAudio(staged, trimEnabled)
-                nav.navigate(Destination.Home.name) { launchSingleTop = true }
-            }
-        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-        catch (_: Exception) { snackbar.showSnackbar(context.getString(R.string.listen_share_error)) }
-        finally { onSharedAudioConsumed(uri) }
+        if (uri != null) processingModel.importAudio(uri)
     }
     val processingNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { onProcessingNotifications() }
     var pendingOutput by remember { mutableStateOf<Pair<File, ProcessingSession>?>(null) }
@@ -323,37 +201,6 @@ fun VocalApp(
         pendingOutput = null
         if (uri != null && output != null && output.second == processingSession)
             processingModel.export(output.first, uri, output.second)
-    }
-    var pendingOriginal by remember { mutableStateOf<Pair<File, ProcessingSession>?>(null) }
-    val exportOriginal = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri ->
-        val original = pendingOriginal
-        pendingOriginal = null
-        if (uri != null && original != null && original.second == processingSession)
-            processingModel.export(original.first, uri, original.second)
-    }
-    val saveVoiceToDevice: (LibraryKey, String) -> Unit = { key, title ->
-        val onReady: (File, String) -> Unit = { file, name ->
-            processingSession?.let { pendingOutput = file to it; exportOutput.launch(name) }
-        }
-        processingModel.downloadLibraryTrack(key, title, onReady)
-    }
-    val saveOriginalToDevice: (LibraryKey) -> Unit = { key ->
-        val owner = app.processingSession()
-        if (owner != null) scope.launch {
-            try {
-                val job = app.comparisonJob(key)
-                val file = app.processingArtifacts.ensureOriginal(key.jobId)
-                if (app.processingSession() == owner) {
-                    pendingOriginal = file to owner
-                    val name = (job.displayName ?: job.sourceTitle ?: "Audio")
-                        .replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").take(100)
-                    exportOriginal.launch("$name-original.${job.input.extension}")
-                }
-            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-            catch (_: Exception) {
-                snackbar.showSnackbar(context.getString(R.string.original_unavailable))
-            }
-        }
     }
     val openImport: () -> Unit = {
         nav.navigate(Destination.Home.name) { launchSingleTop = true }
@@ -379,25 +226,38 @@ fun VocalApp(
             onHistoryOpened()
         }
     }
-    LaunchedEffect(openPlayer) {
-        if (openPlayer) {
-            nav.navigate("player") { launchSingleTop = true }
-            onPlayerOpened()
+    val noClipboardText = stringResource(R.string.clipboard_empty)
+    var confirmYoutube by remember { mutableStateOf(false) }
+    val start: () -> Unit = {
+        if (model.validateYoutubeUrl()) { confirmYoutube = true }
+    }
+    val downloadConfirmed: () -> Unit = {
+        if (model.validateYoutubeUrl()) {
+            val acceptedUrl = state.url
+            model.updateUrl("")
+            processingModel.submitUrl(acceptedUrl) {
+                nav.navigate(Destination.Home.name) { launchSingleTop = true }
+            }
         }
     }
-    if (confirmUrlImport && linkImportVisible) {
-        UrlImportConfirmationSheet(urlImportText, urlImportBusy,
-            onDismiss = { confirmUrlImport = false },
-            onConfirm = { confirmUrlImport = false; submitUrlImport() })
+    val pasteYoutube: () -> Unit = {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString() else null
+        if (text.isNullOrBlank()) scope.launch { snackbar.showSnackbar(noClipboardText) }
+        else model.updateUrl(text)
+    }
+    if (confirmYoutube) {
+        YoutubeConfirmationSheet(state.url, processing.busy,
+            onDismiss = { confirmYoutube = false },
+            onConfirm = { confirmYoutube = false; downloadConfirmed() })
     }
     if (showPlaybackQueue) {
         PlaybackQueueSheet(voicePlayback, libraryEntries,
             onDismiss = { showPlaybackQueue = false }, onSelect = app.audioPlayback::selectQueueTrack,
             onRemove = app.audioPlayback::removeTrack, onAutoNext = app.audioPlayback::setAutoNext,
             onShuffle = app.audioPlayback::setShuffle, onRepeat = app.audioPlayback::setRepeat,
-            orderedTracks = voicePlayback.orderedQueue, onToggle = app.audioPlayback::togglePlayback,
-            onMove = app.audioPlayback::moveQueueTrack, onPlayNext = app.audioPlayback::playNext,
-            onClear = app.audioPlayback::clearQueuedTracks)
+            orderedTracks = voicePlayback.orderedQueue, onToggle = app.audioPlayback::togglePlayback)
     }
     val backFromJob: () -> Unit = {
         processingModel.clearSelection()
@@ -407,7 +267,7 @@ fun VocalApp(
     BoxWithConstraints {
         val wide = maxWidth >= 600.dp
         val navigate: (Destination) -> Unit = { destination ->
-            if (route != destination.name) nav.navigate(destination.name) {
+            nav.navigate(destination.name) {
                 popUpTo(Destination.Home.name) { saveState = true }
                 launchSingleTop = true
                 // Home anchors the stack. Restoring its saved state can reopen the
@@ -477,65 +337,21 @@ fun VocalApp(
                     composable(Destination.Home.name) {
                         com.hatem.musicmute.ui.home.HomeScreen(
                             tasks = audioTasks, history = jobs, busy = processing.preparing,
-                            trimEnabled = trimEnabled, onTrimEnabled = { trimEnabled = it },
-                            linkRequest = linkRequest,
-                            linkImportVisible = linkImportVisible,
-                            urlImportText = urlImportText,
-                            urlImportError = urlImportError,
-                            urlImportBusy = urlImportBusy,
-                            retryingImports = retryingUrlImports,
-                            onUrlImportText = { urlImportText = it; urlImportError = null },
-                            onUrlImport = startUrlImport,
-                            onUrlImportPaste = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = clipboard.primaryClip
-                                val value = if (clip != null && clip.itemCount > 0)
-                                    clip.getItemAt(0).text?.toString() else null
-                                if (value.isNullOrBlank()) urlImportError = "IMPORT_INVALID_URL"
-                                else {
-                                    val extracted = UrlImportSource.sharedText(value)
-                                    if (extracted == null) urlImportError = "IMPORT_SINGLE_ITEM_REQUIRED"
-                                    else urlImportText = extracted
-                                    if (extracted != null) urlImportError = null
-                                }
+                            actionBusy = processing.busy,
+                            onDelete = { task, onDeleted ->
+                                processingModel.deleteTask(task.operationId, task.jobId, onDeleted)
                             },
-                            actionBusy = processing.busy || urlImportBusy,
                             message = processing.message?.let { stringResource(it) },
                             onNotifications = {
                                 if (Build.VERSION.SDK_INT >= 33) processingNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
                                 else onProcessingNotifications()
                             },
-                            onImport = openImport,
+                            onImport = openImport, onYoutube = start,
+                            youtubeUrl = state.url, invalidYoutubeUrl = state.invalidUrl,
+                            onYoutubeUrl = model::updateUrl, onPasteYoutube = pasteYoutube,
                             onPhotos = { importVideo.launch(arrayOf("video/*")) },
                             onRefresh = processingModel.history::refresh,
                             onLoadMore = processingModel.history::loadMore,
-                            onDelete = { task ->
-                                val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
-                                if (record != null) scope.launch {
-                                    try { app.urlImports.remove(record) }
-                                    catch (error: kotlinx.coroutines.CancellationException) { throw error }
-                                    catch (error: UrlImportFailure) { urlImportError = error.code }
-                                    catch (_: Exception) { urlImportError = "SERVICE_UNAVAILABLE" }
-                                }
-                            },
-                            onRetry = { task ->
-                                val record = urlImports.firstOrNull { it.requestId == task.importRequestId }
-                                if (!urlImportBusy && record?.retryable == true) {
-                                    urlImportBusy = true
-                                    scope.launch {
-                                        try {
-                                            app.urlImports.retry(record)
-                                            urlImportError = null
-                                        } catch (error: kotlinx.coroutines.CancellationException) {
-                                            throw error
-                                        } catch (error: UrlImportFailure) {
-                                            urlImportError = error.code
-                                        } catch (_: Exception) {
-                                            urlImportError = "SERVICE_UNAVAILABLE"
-                                        } finally { urlImportBusy = false }
-                                    }
-                                }
-                            },
                             onOpen = { task ->
                                 processingModel.selectTask(task.operationId, task.jobId)
                                 nav.navigate(taskDetailRoute(task.operationId, task.jobId)) { launchSingleTop = true }
@@ -545,24 +361,27 @@ fun VocalApp(
                                 if (task.operationId != null) processingModel.cancelOperation(task.operationId)
                                 else processingModel.cancelSelected()
                             },
-                            notificationsNeeded = !processingNotificationsPermitted(context),
+                            onRetry = { task ->
+                                processingModel.selectTask(task.operationId, task.jobId)
+                                if (task.jobId != null) processingModel.retrySelected()
+                                else task.operationId?.let(processingModel::resume)
+                            },
                             miniPlayer = {
-                                MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
+                                val miniPlayback by app.audioPlayback.state.collectAsStateWithLifecycle()
+                                MiniPlayer(miniPlayback, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
                                     app.audioPlayback::closePlayback, app.audioPlayback::seek,
-                                    Modifier.padding(horizontal = 16.dp), entry = currentLibraryEntry)
+                                    Modifier.padding(horizontal = 16.dp))
                             },
                         )
                     }
                     composable(Destination.Settings.name) {
                         val account by app.authSession.state.collectAsStateWithLifecycle()
-                        val usage by app.processingUsage.usage.collectAsStateWithLifecycle()
                         CreativeSettingsScreen(
                             state = state, onProfile = onAccount,
                             displayName = account.identity?.displayName?.takeIf { it.isNotBlank() } ?: account.profile?.displayName,
                             onAccent = { nav.navigate("accent") }, onAbout = { nav.navigate("about") },
                             onLanguage = model::setLanguage, onRetry = model::loadPreferences,
-                            usage = usage,
                         )
                     }
                     composable("accent") {
@@ -589,28 +408,23 @@ fun VocalApp(
                     composable(Destination.Library.name) {
                         LibraryScreen(library, LibraryActions(
                             query = libraryModel::setQuery, filter = libraryModel::setFilter,
-                            sort = libraryModel::setSort, starredOnly = libraryModel::setStarredOnly, play = playLibraryTrack,
+                            sort = libraryModel::setSort, play = playLibraryTrack,
                             star = libraryModel::toggleStar, details = openAudioDetails,
                             download = libraryModel::download, hidden = libraryModel::setHidden,
                             home = { navigate(Destination.Home) }, refresh = {
                                 libraryModel.clearProblem(); libraryModel.refreshLocal(); processingModel.history.refresh()
                             }, openPlayer = { nav.navigate("player") },
-                            togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next,
-                            rename = processingModel::renameLibraryTrack),
-                            hasMore = jobs.nextCursor != null,
-                            loadingMore = jobs.loading || jobs.loadingMore,
-                            loadMoreFailed = jobs.failure != null,
-                            onLoadMore = processingModel.history::loadMore,
-                            renameBusy = processing.busy,
-                            renameMessage = processing.message?.let { stringResource(it) },
+                            togglePlayback = app.audioPlayback::togglePlayback, next = app.audioPlayback::next),
                             miniPlayer = {
-                                MiniPlayer(app.audioPlayback.state, { nav.navigate("player") },
+                                val miniPlayback by app.audioPlayback.state.collectAsStateWithLifecycle()
+                                MiniPlayer(miniPlayback, { nav.navigate("player") },
                                     app.audioPlayback::togglePlayback, app.audioPlayback::next,
-                                    app.audioPlayback::closePlayback, app.audioPlayback::seek, entry = currentLibraryEntry)
+                                    app.audioPlayback::closePlayback, app.audioPlayback::seek)
                             })
                     }
                     composable("player") {
-                        PlayerScreen(app.audioPlayback.state, currentLibraryEntry, PlayerActions(
+                        val playerState by app.audioPlayback.state.collectAsStateWithLifecycle()
+                        PlayerScreen(playerState, currentLibraryEntry, PlayerActions(
                             back = {
                                 if (!nav.popBackStack(Destination.Library.name, false) &&
                                     !nav.popBackStack(Destination.Home.name, false)) navigate(Destination.Home)
@@ -619,17 +433,9 @@ fun VocalApp(
                             previous = app.audioPlayback::previous, shuffle = app.audioPlayback::setShuffle,
                             repeat = app.audioPlayback::setRepeat, autoNext = app.audioPlayback::setAutoNext,
                             speed = app.audioPlayback::setSpeed, volume = app.audioPlayback::setVolume,
-                            original = app.audioPlayback::selectOriginal,
-                            saveVoice = {
-                                currentTrackKey?.let { key ->
-                                    saveVoiceToDevice(key, currentLibraryEntry?.title ?: voiceTrackTitle)
-                                }
-                            },
-                            saveOriginal = { currentTrackKey?.let(saveOriginalToDevice) },
                             queue = { showPlaybackQueue = true },
                             info = { currentTrackKey?.let(openAudioDetails) },
-                            star = { currentTrackKey?.let(libraryModel::toggleStar) }),
-                            artifactProgress = artifactProgress)
+                            star = { currentTrackKey?.let(libraryModel::toggleStar) }))
                     }
                     composable(JobDetailRoute, arguments = listOf(navArgument("operationId") { nullable = true; defaultValue = null })) { jobBackStack ->
                         val jobId = jobBackStack.arguments?.getString("jobId")
@@ -648,15 +454,12 @@ fun VocalApp(
                             ?: detailState.detail?.let { audioTaskPresentations(emptyList(), listOf(it), System.currentTimeMillis()).firstOrNull() }
                         val resultKey = jobId?.let { id -> processingSession?.let { LibraryKey(it.uid, id) } }
                         val resultTitle = resultTrack?.title ?: jobTask?.displayName ?: voiceTrackTitle
-                        val transfer = remember(artifactProgress, jobId) {
-                            artifactProgress.map { it[jobId] }.distinctUntilChanged()
-                        }
-                        val progress by transfer.collectAsStateWithLifecycle(remember(artifactProgress, jobId) { artifactProgress.value[jobId] })
+                        val progress = jobId?.let { artifactProgress[it] }
                         val activeVoice = voicePlayback.queue.getOrNull(voicePlayback.currentIndex)?.key?.let {
                             it.ownerUid == processingSession?.uid && it.jobId == jobId
                         } == true
                         ProcessingDetailScreen(detailState, jobTask, processing.busy,
-                            progress?.let { transferProgress -> transferProgress.totalBytes?.takeIf { it > 0 }?.let { (transferProgress.bytes.toDouble() / it).toFloat().coerceIn(0f, 1f) } },
+                            progress?.totalBytes?.takeIf { it > 0 }?.let { (progress.bytes.toDouble() / it).toFloat().coerceIn(0f, 1f) },
                             processing.message, playing = activeVoice && voicePlayback.playing,
                             positionMs = if (activeVoice) voicePlayback.positionMs else 0,
                             durationMs = if (activeVoice) voicePlayback.durationMs else 0,
@@ -673,8 +476,12 @@ fun VocalApp(
                             }, onDownload = {
                                 resultKey?.let { processingModel.downloadLibraryTrack(it, resultTitle) }
                             },
-                            onSaveVoice = { resultKey?.let { saveVoiceToDevice(it, resultTitle) } },
-                            onSaveOriginal = { resultKey?.let(saveOriginalToDevice) },
+                            onSave = {
+                                val onReady: (File, String) -> Unit = { file, name ->
+                                    processingSession?.let { pendingOutput = file to it; exportOutput.launch(name) }
+                                }
+                                resultKey?.let { processingModel.downloadLibraryTrack(it, resultTitle, onReady) }
+                            },
                             onShare = {
                                 val onReady: (Intent) -> Unit = { context.startActivity(Intent.createChooser(it, null)) }
                                 resultKey?.let { processingModel.shareLibraryTrack(it, resultTitle, onReady) }

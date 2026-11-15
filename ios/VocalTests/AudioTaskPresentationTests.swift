@@ -4,71 +4,23 @@ import XCTest
 @testable import Vocal
 
 final class AudioTaskPresentationTests: XCTestCase {
-  func testHomeHidesTerminalJobsButRetainsTheirDetailAndLibraryPresentation() throws {
-    for status in ["ready", "failed", "cancelled"] {
-      let tasks = AudioTaskPresentation.merge(
-        pipelines: [], uploads: [], jobs: [processingJob(id: "finished", status: status)])
-      XCTAssertEqual(tasks.count, 1)
-      XCTAssertFalse(try XCTUnwrap(tasks.first).visibleOnHome)
-    }
-    for status in [
-      "awaiting_upload", "queued", "validating", "processing", "uploading_result", "interrupted",
-      "cancel_requested",
-    ] {
-      let tasks = AudioTaskPresentation.merge(
-        pipelines: [], uploads: [], jobs: [processingJob(id: "active", status: status)])
-      XCTAssertTrue(try XCTUnwrap(tasks.first).visibleOnHome)
-    }
-    let review = AudioPipelineIntent(
-      operationId: UUID(), ownerUid: "owner", sourceKind: .file,
-      sourceTitle: "Review", displayName: "Review", clientStartedAt: Date(), updatedAt: Date(),
-      phase: .awaitingConfirmation)
-    XCTAssertTrue(
-      try XCTUnwrap(AudioTaskPresentation.merge(pipelines: [review], uploads: [], jobs: []).first)
-        .visibleOnHome)
-  }
-
-  func testServerMeasurementsDriveTimelineAndDoNotTickOnTheClient() throws {
-    let fixture = processingJob(id: "68c000000000000000000001", status: "processing")
-    let job = Job(
-      id: fixture.id, status: fixture.status, createdAt: fixture.createdAt,
-      updatedAt: fixture.updatedAt, queuedAt: fixture.queuedAt, finishedAt: nil,
-      retryOfJobId: nil, input: fixture.input, error: nil, canDownloadInput: true,
-      canDownloadOutput: false, workerAvailable: nil,
-      serverStageTimings: ServerStageTimings(
-        totalMs: 6000, totalComplete: false,
-        stages: [
-          ServerStageMeasurement(stage: "queue", durationMs: 1000, complete: true),
-          ServerStageMeasurement(stage: "separation", durationMs: 3000, complete: false),
-        ]))
-    let task = try XCTUnwrap(
-      AudioTaskPresentation.merge(pipelines: [], uploads: [], jobs: [job]).first)
-    XCTAssertEqual(task.totalSeconds, 6)
-    XCTAssertEqual(task.processingSeconds, 3)
-    XCTAssertEqual(
-      task.timeline.first { $0.titleKey == "processing_processing" }?.measurement?.durationMs, 3000)
-    XCTAssertEqual(
-      audioTaskTotalSeconds(task, at: Date(timeIntervalSince1970: 99999), sampledAt: .distantPast),
-      6)
-  }
-
   func testPreJobUsesReferenceAndActualLocalPhase() {
     let id = UUID()
     let intent = AudioPipelineIntent(
-      operationId: id, ownerUid: "owner", sourceKind: .file, sourceTitle: "Interview",
-      displayName: "My interview",
+      operationId: id, ownerUid: "owner", sourceKind: .url, sourceVideoID: "jNQXAC9IVRw",
+      sourceTitle: "Interview", displayName: "My interview",
       clientStartedAt: Date(timeIntervalSince1970: 100),
       updatedAt: Date(timeIntervalSince1970: 110),
-      phase: .preparingInput)
+      phase: .downloadingSource)
 
     let task = AudioTaskPresentation.merge(pipelines: [intent], uploads: [], jobs: []).first
 
     XCTAssertEqual(task?.title, "My interview")
     XCTAssertEqual(task?.reference, id.uuidString.lowercased())
     XCTAssertNil(task?.jobID)
-    XCTAssertEqual(task?.statusKey, "processing_preparing")
+    XCTAssertEqual(task?.statusKey, "processing_finding_downloading")
     XCTAssertEqual(
-      task?.timeline.map(\.state), [.active] + Array(repeating: .pending, count: 8))
+      task?.timeline.map(\.state), [.complete, .active] + Array(repeating: .pending, count: 9))
   }
 
   func testMergedReadyJobKeepsNameIDsAndSeparateTiming() {
@@ -94,7 +46,7 @@ final class AudioTaskPresentationTests: XCTestCase {
     XCTAssertEqual(task.reference, id.uuidString.lowercased())
     XCTAssertEqual(task.statusKey, "processing_ready")
     XCTAssertEqual(task.processingSeconds, 20)
-    XCTAssertNil(task.totalSeconds)
+    XCTAssertEqual(task.totalSeconds, 70)
     XCTAssertTrue(task.totalApproximate)
     XCTAssertTrue(task.timeline.allSatisfy { $0.state == .complete })
   }
@@ -215,11 +167,12 @@ final class AudioTaskPresentationTests: XCTestCase {
     XCTAssertEqual(task.statusKey, "processing_ready")
   }
 
-  func testElapsedTotalNeverUsesClientIntakeOrLegacyClientTiming() {
+  func testElapsedTotalTicksFromIntakeAndFreezesAtTerminalWithoutInventingLegacyTiming() {
     let active = AudioTaskPresentation.merge(
       pipelines: [intent(phase: .preparingInput, job: nil)], uploads: [], jobs: [])[0]
-    XCTAssertNil(
-      audioTaskTotalSeconds(active, at: Date(timeIntervalSince1970: 130), sampledAt: .distantPast))
+    XCTAssertEqual(
+      audioTaskTotalSeconds(active, at: Date(timeIntervalSince1970: 130), sampledAt: .distantPast),
+      30)
     let job = processingJob(id: "68c000000000000000000001", status: "ready")
     let ready = AudioTaskPresentation.merge(
       pipelines: [], uploads: [],
@@ -230,7 +183,7 @@ final class AudioTaskPresentationTests: XCTestCase {
             processingElapsedMs: 20_000, processingElapsedApproximate: false,
             totalElapsedMs: 70_000, totalElapsedApproximate: true))
       ])[0]
-    XCTAssertNil(audioTaskTotalSeconds(ready, at: .distantFuture, sampledAt: .distantPast))
+    XCTAssertEqual(audioTaskTotalSeconds(ready, at: .distantFuture, sampledAt: .distantPast), 70)
     let legacy = AudioTaskPresentation.merge(pipelines: [], uploads: [], jobs: [job])[0]
     XCTAssertNil(audioTaskTotalSeconds(legacy, at: .distantFuture, sampledAt: .distantPast))
   }

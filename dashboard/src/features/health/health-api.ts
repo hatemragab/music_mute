@@ -47,7 +47,7 @@ export const acknowledgeAlert = (
     operationId: input.operationId,
     submit: () =>
       client.post<AlertRecord>(
-        `/admin/alerts/${encodeURIComponent(id)}/acknowledgements`,
+        `/admin/alerts/${encodeURIComponent(id)}/acknowledge`,
         input,
       ),
     readResult: (receipt) => readAlert(client, receipt.resourceId ?? id),

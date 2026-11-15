@@ -1,4 +1,3 @@
-import { isStorageEtag } from '../storage/object-identity.js';
 import { ProcessingUsageService } from '../processing-usage/processing-usage.service.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -19,8 +18,6 @@ import { WorkerSlot } from '../worker-fleet/machines/worker-slot.schema.js';
 import { adminError } from '../admin/admin-errors.js';
 import type { AdminActor } from '../admin/admin.types.js';
 import { WorkerHintService } from '../worker-hints/worker-hint.service.js';
-import { assertJobRequestNotPurged } from './purged-job-request.js';
-import { SharedMediaResult } from '../shared-media/shared-media.schema.js';
 
 type JobActionPrincipal =
   | { kind: 'owner'; userId: Types.ObjectId }
@@ -58,39 +55,6 @@ export class JobActionsService {
       this.cancelInTransaction(principal, objectId(jobId), session),
     );
     return { id: job._id.toHexString(), status: job.status };
-  }
-
-  /** Release only an unsubmitted server import reservation; never cancel accepted work. */
-  async cancelPendingUpload(userId: string, requestId: string): Promise<void> {
-    await this.transactions.run(async (session) => {
-      const current = await this.jobs
-        .findOne({
-          userId: objectId(userId),
-          requestId,
-          status: 'awaiting_upload',
-          inputObject: null,
-        })
-        .session(session)
-        .lean();
-      if (!current) return;
-      const updated = await this.jobs
-        .findOneAndUpdate(
-          {
-            _id: current._id,
-            revision: current.revision,
-            status: 'awaiting_upload',
-            inputObject: null,
-          },
-          {
-            $set: { status: 'cancelled', finishedAt: new Date() },
-            $inc: { revision: 1 },
-          },
-          { session, runValidators: true, returnDocument: 'after' },
-        )
-        .lean();
-      if (!updated) throw jobError('JOB_STATE_CONFLICT');
-      await this.usage.settleJob(updated, session);
-    });
   }
 
   /** Internal cleanup path. The account is already durably fenced, so owner access must not be re-asserted. */
@@ -224,13 +188,6 @@ export class JobActionsService {
           .session(session)
           .lean();
         if (repeated) return this.presentRetry(repeated, hash);
-        await assertJobRequestNotPurged(
-          this.jobs,
-          owner,
-          requestId,
-          hash,
-          session,
-        );
         const original = await this.jobs
           .findOne({ _id: originalId, userId: owner })
           .session(session)
@@ -258,48 +215,11 @@ export class JobActionsService {
             userId: owner,
             deletedAt: null,
             revision: original.revision,
-            reservationCleanupScheduledAt: null,
           },
           { $inc: { revision: 1 } },
           { session },
         );
         if (touched.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
-
-        if (original.sharedSourceKey || original.sharedResultKey) {
-          if (!original.sharedSourceKey || !original.sharedResultKey)
-            throw jobError('JOB_STATE_CONFLICT');
-          // Claim the shared result in the same transaction as the retry. A
-          // completed result or another producer must never start duplicate work.
-          const rebound = await this.jobs.db
-            .model<SharedMediaResult>(SharedMediaResult.name)
-            .updateOne(
-              {
-                _id: original.sharedResultKey,
-                sourceKey: original.sharedSourceKey,
-                'recipeSnapshot.recipeDigest':
-                  original.recipeSnapshot!.recipeDigest,
-                $or: [
-                  { state: 'failed' },
-                  { state: 'processing', producerJobId: original._id },
-                ],
-              },
-              {
-                $set: {
-                  state: 'processing',
-                  producerJobId: newJobId,
-                  pendingOutput: null,
-                  outputObject: null,
-                  outputKey: null,
-                  publicationToken: null,
-                  publicationLeaseUntil: null,
-                  comparisonRanges: null,
-                  completedAt: null,
-                },
-              },
-              { session, runValidators: true },
-            );
-          if (rebound.modifiedCount !== 1) throw jobError('JOB_STATE_CONFLICT');
-        }
 
         const queuedAt = new Date();
         const [created] = await this.jobs.create(
@@ -312,18 +232,11 @@ export class JobActionsService {
               requestHash: hash,
               retryOfJobId: original._id,
               sourceTitle: original.sourceTitle ?? null,
-              extra_data: original.extra_data ?? null,
               displayName: original.displayName ?? original.sourceTitle ?? null,
               sourceKind: original.sourceKind ?? null,
               sourceUrl: original.sourceUrl ?? null,
-              sharedSourceKey: original.sharedSourceKey ?? null,
-              sharedResultKey: original.sharedResultKey ?? null,
               clientStartedAt: queuedAt,
               processingAccumulatedMs: 0,
-              serverTimingStartedAt: queuedAt,
-              queueTimingStartedAt: queuedAt,
-              queueAccumulatedMs: 0,
-              retryWaitAccumulatedMs: 0,
               status: 'queued',
               inputReservation: { ...original.inputReservation },
               admissionSnapshot,
@@ -444,8 +357,8 @@ export class JobActionsService {
     const input = job.inputObject;
     if (
       !input ||
-      job.reservationCleanupScheduledAt != null ||
-      !isStorageEtag(input.etag) ||
+      !input.versionId ||
+      input.versionId === 'null' ||
       input.key !== job.inputReservation.key ||
       input.bytes !== job.inputReservation.bytes ||
       input.sha256 !== job.inputReservation.sha256 ||

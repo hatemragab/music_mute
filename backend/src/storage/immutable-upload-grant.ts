@@ -1,15 +1,16 @@
-import { PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { StorageClient } from '../infrastructure/storage.module.js';
 import type { UploadGrant } from '../jobs/job.types.js';
-import { validateObjectReservation } from './object-identity.js';
 
 interface ImmutableUpload {
-  storage: S3Client;
+  storage: StorageClient;
   bucket: string;
   key: string;
   bytes: number;
   contentType: string;
   checksumSha256: string;
+  storageClass?: 'INTELLIGENT_TIERING';
   expiresIn: number;
   expiresAt: Date;
 }
@@ -18,25 +19,12 @@ interface ImmutableUpload {
 export async function createImmutableUploadGrant(
   input: ImmutableUpload,
 ): Promise<UploadGrant> {
-  validateObjectReservation({
-    key: input.key,
-    bytes: input.bytes,
-    contentType: input.contentType,
-    sha256: input.checksumSha256,
-  });
-  if (
-    !Number.isInteger(input.expiresIn) ||
-    input.expiresIn < 1 ||
-    input.expiresIn > 600 ||
-    !Number.isFinite(input.expiresAt.getTime())
-  )
-    throw new TypeError('Invalid upload expiration');
   const headers: Record<string, string> = {
     'Content-Type': input.contentType,
     'x-amz-checksum-sha256': input.checksumSha256,
-    'x-amz-meta-sha256': input.checksumSha256,
     'If-None-Match': '*',
   };
+  if (input.storageClass) headers['x-amz-storage-class'] = input.storageClass;
   const url = await getSignedUrl(
     input.storage,
     new PutObjectCommand({
@@ -45,8 +33,8 @@ export async function createImmutableUploadGrant(
       ContentLength: input.bytes,
       ContentType: input.contentType,
       ChecksumSHA256: input.checksumSha256,
-      Metadata: { sha256: input.checksumSha256 },
       IfNoneMatch: '*',
+      StorageClass: input.storageClass,
     }),
     {
       expiresIn: input.expiresIn,
@@ -54,11 +42,11 @@ export async function createImmutableUploadGrant(
         'content-type',
         'if-none-match',
         'x-amz-checksum-sha256',
-        'x-amz-meta-sha256',
+        ...(input.storageClass ? ['x-amz-storage-class'] : []),
       ]),
       unhoistableHeaders: new Set([
         'x-amz-checksum-sha256',
-        'x-amz-meta-sha256',
+        ...(input.storageClass ? ['x-amz-storage-class'] : []),
       ]),
     },
   );

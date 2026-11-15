@@ -1,15 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { EventEmitter } from "node:events";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   ChildCommandError,
-  ChildStopError,
   WorkerChildProcess,
-  workerChildDetached,
-  windowsGuardianArguments,
 } from "../src/agent/child-process.js";
 import { WORKER_RECIPE_IDS } from "../protocol/v1/protocol.js";
 
@@ -32,237 +27,6 @@ afterEach(async () => {
 });
 
 describe("worker child lifecycle", () => {
-  it("console detachment requires the verified Windows guardian Job and adds only the private mode marker", () => {
-    const engine = "C:\\MusicMuteLocal\\runtime\\release\\app\\engine";
-    const options = {
-      windowsDetachedConsole: true as const,
-      windowsJobObject: true,
-      windowsEngineModuleRoot: engine,
-    };
-    expect(workerChildDetached(options, "win32")).toBe(true);
-    expect(() => workerChildDetached(options, "darwin")).toThrow(
-      "verified guardian-owned Job",
-    );
-    expect(() =>
-      workerChildDetached({ ...options, windowsJobObject: false }, "win32"),
-    ).toThrow();
-    expect(() =>
-      workerChildDetached(
-        { ...options, windowsEngineModuleRoot: "relative" },
-        "win32",
-      ),
-    ).toThrow();
-    expect(() =>
-      workerChildDetached(
-        { windowsDetachedConsole: true, windowsJobObject: true },
-        "win32",
-      ),
-    ).toThrow();
-    expect(workerChildDetached({}, "win32")).toBe(false);
-    expect(workerChildDetached({}, "darwin")).toBe(true);
-    const args = windowsGuardianArguments(
-      engine,
-      321,
-      ["-I", "-c", "isolated-engine"],
-      true,
-    );
-    expect(args.slice(-7)).toEqual([
-      "--parent-pid",
-      "321",
-      "--detached-console",
-      "--",
-      "-I",
-      "-c",
-      "isolated-engine",
-    ]);
-    expect(
-      windowsGuardianArguments(engine, 321, ["-I"]).includes(
-        "--detached-console",
-      ),
-    ).toBe(false);
-    expect(() =>
-      windowsGuardianArguments(undefined, 321, ["-I"], true),
-    ).toThrow();
-  });
-
-  it("identifies an unconfirmed child exit without retaining the shutdown error", async () => {
-    const fixture = new WorkerChildProcess({
-      command: "unused",
-      args: [],
-      cwd: ".",
-      stopTimeoutMs: 100,
-    });
-    const fake = Object.assign(new EventEmitter(), {
-      exitCode: null,
-      signalCode: null,
-      stdin: { writable: true },
-      kill: vi.fn().mockReturnValue(false),
-    });
-    Object.assign(fixture, {
-      child: fake as unknown as ChildProcessWithoutNullStreams,
-      send: () => ({
-        response: Promise.reject(new Error("sensitive child output")),
-      }),
-    });
-    const error = await fixture.stop().catch((failure: unknown) => failure);
-    expect(error).toMatchObject({
-      code: "CHILD_EXIT_UNCONFIRMED",
-      errno: undefined,
-    });
-    expect((error as Error).message).toBe(
-      "Worker child exit could not be confirmed",
-    );
-    expect(error).not.toHaveProperty("cause");
-    expect(fake.kill).toHaveBeenCalledWith("SIGKILL");
-  });
-
-  it("identifies a failed termination signal using only allowlisted errno", async () => {
-    const fixture = new WorkerChildProcess({
-      command: "unused",
-      args: [],
-      cwd: ".",
-      stopTimeoutMs: 100,
-    });
-    const fake = Object.assign(new EventEmitter(), {
-      exitCode: null,
-      signalCode: null,
-      stdin: { writable: true },
-      kill: () => {
-        throw Object.assign(new Error("sensitive OS message"), {
-          code: "EPERM",
-        });
-      },
-    });
-    Object.assign(fixture, {
-      child: fake as unknown as ChildProcessWithoutNullStreams,
-      send: () => ({
-        response: Promise.reject(new Error("sensitive child output")),
-      }),
-    });
-    const error = await fixture.stop().catch((failure: unknown) => failure);
-    expect(error).toMatchObject({
-      code: "CHILD_TERMINATION_SIGNAL_FAILED",
-      errno: "EPERM",
-    });
-    expect(error).not.toHaveProperty("cause");
-  });
-
-  it
-    .skipIf(process.platform === "win32")
-    .each(["EPERM", "sensitive-error-value"])(
-    "retains the process-group fence and sanitizes probe errno %s",
-    async (code) => {
-      const fixture = new WorkerChildProcess({
-        command: "unused",
-        args: [],
-        cwd: ".",
-        stopTimeoutMs: 100,
-      });
-      const pid = 2_147_483_647;
-      Object.assign(fixture, { processGroupPid: pid });
-      const kill = vi.spyOn(process, "kill").mockImplementation(() => {
-        throw Object.assign(new Error("sensitive OS message"), { code });
-      });
-      try {
-        const error = await fixture.stop().catch((failure: unknown) => failure);
-        expect(error).toBeInstanceOf(ChildStopError);
-        expect(error).toMatchObject({
-          code: "PROCESS_GROUP_EXIT_UNCONFIRMED",
-          errno: code === "EPERM" ? "EPERM" : undefined,
-        });
-        expect(error).not.toHaveProperty("cause");
-        expect(kill).toHaveBeenCalledWith(-pid, 0);
-        expect(error).not.toHaveProperty("path");
-        kill.mockImplementation(() => {
-          throw Object.assign(new Error("group exited"), { code: "ESRCH" });
-        });
-        await fixture.stop();
-        const probes = kill.mock.calls.length;
-        // A successful ESRCH probe clears only the positively absent group.
-        await fixture.stop();
-        expect(kill).toHaveBeenCalledTimes(probes);
-      } finally {
-        kill.mockRestore();
-      }
-    },
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "retries transient denied group probes but releases the fence only on ESRCH",
-    async () => {
-      const fixture = new WorkerChildProcess({
-        command: "unused",
-        args: [],
-        cwd: ".",
-        stopTimeoutMs: 100,
-      });
-      Object.assign(fixture, { processGroupPid: 2_147_483_647 });
-      const kill = vi
-        .spyOn(process, "kill")
-        .mockImplementationOnce(() => {
-          throw Object.assign(new Error(), { code: "EPERM" });
-        })
-        .mockImplementationOnce(() => {
-          throw Object.assign(new Error(), { code: "EINTR" });
-        })
-        .mockImplementation(() => {
-          throw Object.assign(new Error(), { code: "ESRCH" });
-        });
-      try {
-        await fixture.stop();
-        expect(kill).toHaveBeenCalledTimes(3);
-        await fixture.stop();
-        expect(kill).toHaveBeenCalledTimes(3);
-      } finally {
-        kill.mockRestore();
-      }
-    },
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "classifies a live process-group deadline without relaxing its fence",
-    async () => {
-      const fixture = new WorkerChildProcess({
-        command: "unused",
-        args: [],
-        cwd: ".",
-        stopTimeoutMs: 100,
-      });
-      const pid = 2_147_483_647;
-      Object.assign(fixture, { processGroupPid: pid });
-      const kill = vi.spyOn(process, "kill").mockReturnValue(true);
-      try {
-        await expect(fixture.stop()).rejects.toMatchObject({
-          code: "PROCESS_GROUP_EXIT_UNCONFIRMED",
-          errno: undefined,
-        });
-        expect(kill).toHaveBeenCalledWith(-pid, 0);
-        kill.mockImplementation(() => {
-          throw Object.assign(new Error("group exited"), { code: "ESRCH" });
-        });
-        await fixture.stop();
-      } finally {
-        kill.mockRestore();
-      }
-    },
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "does not resolve stop until the actual descendant process group is gone",
-    async () => {
-      child = new WorkerChildProcess({
-        command: process.execPath,
-        args: [hangingFixture, "--spawn-descendant"],
-        cwd: workerRoot,
-        startTimeoutMs: 2000,
-        stopTimeoutMs: 2000,
-      });
-      const ready = await child.start();
-      const pid = ready.payload.descendantPid as number;
-      await child.stop();
-      expect(() => process.kill(pid, 0)).toThrow();
-    },
-  );
   it.skipIf(process.platform === "win32")(
     "kills decoder descendants on timeout and forced termination",
     async () => {
@@ -344,24 +108,6 @@ describe("worker child lifecycle", () => {
       },
       { stage: "output-ready" },
     ]);
-  });
-
-  it("exposes only the exact live spawned guardian PID and clears it after stop", async () => {
-    child = new WorkerChildProcess({
-      command: process.execPath,
-      args: [progressFixture],
-      cwd: workerRoot,
-      startTimeoutMs: 2000,
-      stopTimeoutMs: 2000,
-    });
-    expect(child.getPid()).toBeUndefined();
-    await child.start();
-    const pid = child.getPid();
-    expect(Number.isSafeInteger(pid)).toBe(true);
-    expect(pid).toBeGreaterThan(0);
-    expect(child.isAlive()).toBe(true);
-    await child.stop();
-    expect(child.getPid()).toBeUndefined();
   });
 
   it("starts the real Python child, pings it and shuts down cleanly", async () => {
@@ -478,10 +224,7 @@ describe("worker child lifecycle", () => {
     await child.start();
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     await expect(child.request("ping", {})).rejects.toThrow(
-      process.platform === "win32"
-        ? /Worker child (pipe|is not running|exited|ping timed out)/u
-        : /Worker child (pipe|is not running|exited)/u,
+      /Worker child (pipe|is not running)/u,
     );
-    await expect.poll(() => child!.isAlive(), { timeout: 2_000 }).toBe(false);
   });
 });

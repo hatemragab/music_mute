@@ -8,8 +8,8 @@ class UpdatePolicyTest {
     private fun snapshot(
         minimumBuild: Int? = 10,
         targetBuild: Int? = 12,
-        distribution: String = "play",
-        source: String = "google_play",
+        distribution: String = "direct",
+        source: String = "direct_apk",
     ) =
         UpdatePolicySnapshot(
             schemaVersion = 1,
@@ -54,7 +54,7 @@ class UpdatePolicyTest {
     @Test
     fun malformedOrIncompatibleSnapshotsCannotBecomeGateAuthority() {
         assertThrows(UpdateFailure::class.java) { decideUpdate(9, snapshot(minimumBuild = 12, targetBuild = 10)) }
-        assertThrows(UpdateFailure::class.java) { decideUpdate(9, snapshot(distribution = "direct")) }
+        assertThrows(UpdateFailure::class.java) { decideUpdate(9, snapshot(distribution = "play")) }
         assertThrows(UpdateFailure::class.java) {
             decideUpdate(9, snapshot(distribution = "direct", source = "app_store"))
         }
@@ -64,7 +64,7 @@ class UpdatePolicyTest {
     @Test
     fun playBuildNeverResolvesToTheDirectApkInstaller() {
         assertEquals("google_play", resolveUpdateSource("play", "direct_apk"))
-        assertThrows(UpdateFailure::class.java) { resolveUpdateSource("direct", "direct_apk") }
+        assertEquals("direct_apk", resolveUpdateSource("direct", "direct_apk"))
         assertThrows(UpdateFailure::class.java) { resolveUpdateSource("ios", "direct_apk") }
         val play = snapshot(distribution = "play", source = "google_play").target!!
         validateGooglePlayTarget(play, "com.hatem.musicmute")

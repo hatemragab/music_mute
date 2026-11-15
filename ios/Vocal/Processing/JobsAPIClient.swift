@@ -1,13 +1,7 @@
 import Foundation
 
 @MainActor protocol JobsAPI {
-  var realtime: ProcessingRealtime? { get }
-  func createURLImport(url: String, requestId: UUID) async throws -> URLImportView
-  func createURLImport(url: String, requestId: UUID, trimEnabled: Bool?) async throws
-    -> URLImportView
-  func urlImport(id: String) async throws -> URLImportView
   func processingPolicy() async throws -> ProcessingPolicyResponse
-  func watchProcessingPolicy() -> AsyncThrowingStream<Data, Error>?
   func processingUsage() async throws -> ProcessingUsage
   func create(requestId: UUID, input: InputDeclaration) async throws -> CreateReservation
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
@@ -28,18 +22,7 @@ import Foundation
 }
 
 extension JobsAPI {
-  var realtime: ProcessingRealtime? { nil }
-  func createURLImport(url: String, requestId: UUID, trimEnabled: Bool?) async throws
-    -> URLImportView
-  {
-    try await createURLImport(url: url, requestId: requestId)
-  }
-  func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
-    throw JobsFailure.serviceUnavailable
-  }
-  func urlImport(id: String) async throws -> URLImportView { throw JobsFailure.serviceUnavailable }
   func processingPolicy() async throws -> ProcessingPolicyResponse { throw JobsFailure.notFound }
-  func watchProcessingPolicy() -> AsyncThrowingStream<Data, Error>? { realtime?.watch("policy") }
   func processingUsage() async throws -> ProcessingUsage { throw JobsFailure.notFound }
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
@@ -65,14 +48,6 @@ extension JobsAPI {
 }
 
 @MainActor final class JobsAPIClient: JobsAPI {
-  private let configuration: AuthConfiguration
-  private lazy var realtimeClient = ProcessingRealtime(configuration: configuration) {
-    [weak self] in
-    guard let self else { throw AuthFailure.sessionExpired }
-    return try await self.send(
-      "POST", "/realtime-tickets", body: Data("{}".utf8), installation: true)
-  }
-  var realtime: ProcessingRealtime? { realtimeClient }
   private struct Empty: Encodable {}
   private struct ServerError: Decodable { let code: String? }
   private weak var tokenSource: IDTokenSource?
@@ -107,7 +82,6 @@ extension JobsAPI {
     sessionConfiguration: URLSessionConfiguration? = nil,
     now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
-    self.configuration = configuration
     self.tokenSource = tokenSource
     self.installationId = installationId
     self.now = now
@@ -116,51 +90,8 @@ extension JobsAPI {
       sessionConfiguration: sessionConfiguration, rejectRedirects: true)
   }
 
-  func createURLImport(url: String, requestId: UUID) async throws -> URLImportView {
-    try await createURLImport(url: url, requestId: requestId, trimEnabled: nil)
-  }
-  func createURLImport(url: String, requestId: UUID, trimEnabled: Bool?) async throws
-    -> URLImportView
-  {
-    _ = try SupportedAudioSites.canonical(url)
-    struct Body: Encodable {
-      let url: String
-      let requestId: String
-      let trimEnabled: Bool?
-    }
-    let result: URLImportView = try await send(
-      "POST", "/media-imports",
-      body: encoder.encode(
-        Body(url: url, requestId: try requestUUID(requestId), trimEnabled: trimEnabled)),
-      installation: true)
-    return try result.validated()
-  }
-  func urlImport(id: String) async throws -> URLImportView {
-    guard id.range(of: #"^[a-f0-9]{24}$"#, options: .regularExpression) != nil
-    else { throw JobsFailure.invalidInput }
-    let result: URLImportView = try await send("GET", "/media-imports/\(id)")
-    return try result.validated()
-  }
   func processingPolicy() async throws -> ProcessingPolicyResponse {
-    try Task.checkCancellation()
-    try checkCooldown()
-    if tokenSource?.tokenSession != nil {
-      return try await send("GET", "/processing-policy?schema_version=2")
-    }
-    let (data, response) = try await transport.perform(
-      method: "GET", path: "/processing-policy?schema_version=2",
-      body: nil, bearer: nil, headers: [:])
-    try Task.checkCancellation()
-    switch response.statusCode {
-    case 200...299:
-      do { return try decoder.decode(ProcessingPolicyResponse.self, from: data) } catch {
-        throw JobsFailure.malformedResponse
-      }
-    case 300...399: throw JobsFailure.redirectRejected
-    case 404: throw JobsFailure.notFound
-    case 429: throw rateLimited(response)
-    default: throw JobsFailure.serviceUnavailable
-    }
+    try await send("GET", "/processing-policy?schemaVersion=2")
   }
   func processingUsage() async throws -> ProcessingUsage {
     try await send("GET", "/processing-usage")
@@ -171,12 +102,7 @@ extension JobsAPI {
   func create(requestId: UUID, input: InputDeclaration, metadata: JobSourceMetadata) async throws
     -> CreateReservation
   {
-    guard metadata.sourceKind != .url, metadata.sourceURL == nil, metadata.source != "youtube"
-    else {
-      throw JobsFailure.invalidInput
-    }
     struct Body: Encodable {
-      let trimEnabled: Bool
       let policyVersion: Int?
       let preparationProfileId: String?
       let source: String?
@@ -184,6 +110,7 @@ extension JobsAPI {
       let input: InputDeclaration
       let sourceTitle: String?
       let sourceKind: JobSourceKind?
+      let sourceUrl: String?
       let clientStartedAt: String?
     }
     let title = try normalizedName(metadata.sourceTitle, optional: true)
@@ -191,21 +118,20 @@ extension JobsAPI {
       "POST", "/jobs",
       body: encoder.encode(
         Body(
-          trimEnabled: metadata.trimEnabled,
           policyVersion: metadata.policyVersion ?? 2,
           preparationProfileId: metadata.preparationProfileId
             ?? ProcessingMediaPolicy.standard.profileID,
-          source: metadata.source ?? "audio_file",
+          source: metadata.source ?? (metadata.sourceKind == .url ? "youtube" : "audio_file"),
           requestId: try requestUUID(requestId), input: input,
           sourceTitle: title,
-          sourceKind: metadata.sourceKind,
+          sourceKind: metadata.sourceKind, sourceUrl: metadata.sourceURL,
           clientStartedAt: metadata.clientStartedAt.map(Self.iso8601))),
       installation: true)
   }
   func renewUpload(id: String, requestId: UUID) async throws -> UploadGrant {
     struct Body: Encodable { let requestId: String }
     return try await send(
-      "POST", route(id, "upload-grants"),
+      "POST", route(id, "upload-url"),
       body: encoder.encode(Body(requestId: try requestUUID(requestId))), installation: true)
   }
   func renewUpload(id: String) async throws -> UploadGrant {
@@ -213,7 +139,7 @@ extension JobsAPI {
   }
   func confirmUpload(id: String) async throws -> JobMutation {
     try await send(
-      "POST", route(id, "upload-completions"), body: encoder.encode(Empty()), installation: true)
+      "POST", route(id, "upload-complete"), body: encoder.encode(Empty()), installation: true)
   }
   func list(cursor: String? = nil, status: String? = nil) async throws -> JobPage {
     guard cursor == nil || cursor!.count <= 512 else { throw JobsFailure.invalidInput }
@@ -227,13 +153,12 @@ extension JobsAPI {
   }
   func detail(id: String) async throws -> Job { try await send("GET", route(id)) }
   func cancel(id: String) async throws -> JobMutation {
-    try await send("POST", route(id, "cancellations"), body: encoder.encode(Empty()))
+    try await send("POST", route(id, "cancel"), body: encoder.encode(Empty()))
   }
   func retry(id: String, requestId: UUID) async throws -> JobMutation {
     struct Body: Encodable { let requestId: String }
     return try await send(
-      "POST", route(id, "retry-attempts"),
-      body: encoder.encode(Body(requestId: try requestUUID(requestId))),
+      "POST", route(id, "retry"), body: encoder.encode(Body(requestId: try requestUUID(requestId))),
       installation: true)
   }
   func download(id: String, artifact: String) async throws -> DownloadGrant {
@@ -246,7 +171,7 @@ extension JobsAPI {
       let requestId: String
     }
     return try await send(
-      "POST", route(id, "download-grants"),
+      "POST", route(id, "download-url"),
       body: encoder.encode(Body(artifact: artifact, requestId: try requestUUID(requestId))))
   }
   func rename(id: String, displayName: String) async throws -> Job {
@@ -302,7 +227,6 @@ extension JobsAPI {
     try checkCooldown()
     guard let tokenSource else { throw AuthFailure.sessionExpired }
     let capturedSession = tokenSource.tokenSession
-    let loggingTraceID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
     var headers: [String: String] = [:]
     if installation {
       guard let id = installationId(), let uuid = UUID(uuidString: id) else {
@@ -318,8 +242,7 @@ extension JobsAPI {
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       try checkCooldown()
       let (data, response) = try await transport.perform(
-        method: method, path: path, body: body, bearer: token, headers: headers,
-        userID: capturedSession?.uid, traceID: loggingTraceID)
+        method: method, path: path, body: body, bearer: token, headers: headers)
       try Task.checkCancellation()
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       if response.statusCode == 401 && attempt == 0 { continue }
@@ -340,19 +263,6 @@ extension JobsAPI {
       if let rawCode, ProcessingMediaMessage.serverCodes.contains(rawCode) {
         throw JobsFailure.conflict(code: rawCode)
       }
-      if let rawCode,
-        [
-          "IMPORT_INVALID_URL", "IMPORT_UNSUPPORTED_PROVIDER", "IMPORT_SINGLE_ITEM_REQUIRED",
-          "IMPORT_UNSUPPORTED_AUDIO_SOURCE", "IMPORT_TOO_LARGE", "IMPORT_TOO_LONG",
-          "IMPORT_INVALID_AUDIO", "IMPORT_QUEUE_FULL", "IMPORT_DISABLED", "IMPORT_NOT_FOUND",
-          "IMPORT_REQUEST_CONFLICT", "IMPORT_SOURCE_UNAVAILABLE", "IMPORT_UPSTREAM_REFUSED",
-        ].contains(rawCode)
-      {
-        if response.statusCode == 429 || response.value(forHTTPHeaderField: "Retry-After") != nil {
-          _ = rateLimited(response)
-        }
-        throw URLImportFailure.server(rawCode)
-      }
       let code = rawCode.flatMap { safeCodes.contains($0) ? $0 : nil }
       switch response.statusCode {
       case 300...399: throw JobsFailure.redirectRejected
@@ -372,15 +282,13 @@ extension JobsAPI {
     try checkCooldown()
     guard let tokenSource else { throw AuthFailure.sessionExpired }
     let capturedSession = tokenSource.tokenSession
-    let loggingTraceID = LocalDiagnostics.enabled ? UUID().uuidString.lowercased() : nil
     for attempt in 0...1 {
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       let token = try await tokenSource.idToken(forceRefresh: attempt == 1)
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       try checkCooldown()
       let (data, response) = try await transport.perform(
-        method: method, path: path, body: nil, bearer: token, headers: [:],
-        userID: capturedSession?.uid, traceID: loggingTraceID)
+        method: method, path: path, body: nil, bearer: token, headers: [:])
       guard tokenSource.tokenSession == capturedSession else { throw AuthFailure.sessionExpired }
       if response.statusCode == 401 && attempt == 0 { continue }
       if response.statusCode == 204 { return }

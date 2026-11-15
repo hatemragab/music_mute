@@ -1,3 +1,0 @@
-Improved Google Play update handling and recovery.
-Removed Android Auto support.
-Updated privacy information and marked the upcoming macOS app clearly.

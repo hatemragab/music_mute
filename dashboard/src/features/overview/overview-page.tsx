@@ -1,10 +1,9 @@
-import { useLiveQuery } from "@/realtime/hooks";
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
-import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
 
-import { useAdminSession } from "@/auth/admin-session";
+import { useAdminSession, useApiClient } from "@/auth/admin-session";
 import { withQuery } from "@/api/query-string";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { DateRangeFilter } from "@/components/date-range-filter";
 import {
   createRange,
@@ -17,10 +16,13 @@ import {
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime, formatDuration } from "@/lib/format";
+import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { JobSeriesChart } from "./job-series-chart";
+import { getOverview } from "./overview-api";
 import { OverviewCards } from "./overview-cards";
 
 const readRange = (): DateRange => {
@@ -32,13 +34,22 @@ const readRange = (): DateRange => {
 };
 
 export function OverviewPage() {
+  const client = useApiClient();
   const { can } = useAdminSession();
   const [range, setRange] = useState(readRange);
-  const overview = useLiveQuery({
+  const overview = useQuery({
     queryKey: ["overview", range],
-    resource: "admin.overview",
-    params: { ...range, bucket: "day" },
+    queryFn: ({ signal }) =>
+      getOverview(client, range).then((data) =>
+        signal.aborted
+          ? Promise.reject(new DOMException("Aborted", "AbortError"))
+          : data,
+      ),
   });
+  useVisibleInterval(
+    () => void overview.refetch(),
+    DASHBOARD_POLL_INTERVAL_MS.background,
+  );
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("from", range.from);
@@ -53,6 +64,10 @@ export function OverviewPage() {
         description="Job activity and outcomes for the selected UTC interval."
         actions={
           <div className="flex flex-wrap items-start justify-end gap-2">
+            <RefreshButton
+              refreshing={overview.isFetching}
+              onRefresh={() => void overview.refetch()}
+            />
             <DateRangeFilter range={range} onChange={setRange} />
             {can("exports.read") ? (
               <ExportCsvButton
@@ -76,39 +91,6 @@ export function OverviewPage() {
       ) : overview.data ? (
         <>
           <OverviewCards data={overview.data} />
-          <nav
-            aria-label="Operations shortcuts"
-            className="flex flex-wrap gap-2"
-          >
-            {can("jobs.read") && (
-              <Button variant="outline" asChild>
-                <Link
-                  to={withQuery("/jobs", {
-                    status: "failed",
-                    from: range.from.slice(0, 10),
-                    to: range.to.slice(0, 10),
-                  })}
-                >
-                  Review failed jobs
-                </Link>
-              </Button>
-            )}
-            {can("workers.read") && (
-              <Button variant="outline" asChild>
-                <Link to="/workers">Inspect worker capacity</Link>
-              </Button>
-            )}
-            {can("health.read") && (
-              <Button variant="outline" asChild>
-                <Link to="/health">Review system health</Link>
-              </Button>
-            )}
-            {can("notifications.read") && (
-              <Button variant="outline" asChild>
-                <Link to="/notifications">Review push history</Link>
-              </Button>
-            )}
-          </nav>
           <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
             <Card>
               <CardContent className="p-5">

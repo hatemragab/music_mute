@@ -19,12 +19,13 @@ class UpdateCoordinatorTest {
             versionName = "0.1.1",
             buildNumber = build,
             changelogEn = "test",
-            source = "google_play",
-            storeUrl = "https://play.google.com/store/apps/details?id=com.hatem.musicmute",
+            source = "direct_apk",
+            storeUrl = null,
+            artifact = ReleaseArtifact(100, "a".repeat(64), "b".repeat(64)),
         )
 
     private fun policy(revision: Long = 1, minimum: Int? = 2, target: ReleaseTarget? = target()) =
-        UpdatePolicySnapshot(1, revision, "android", "play", minimum, target, "2026-09-12T00:00:00.000Z")
+        UpdatePolicySnapshot(1, revision, "android", "direct", minimum, target, "2026-09-12T00:00:00.000Z")
 
     private class MemoryStore(initial: StoredUpdateState = StoredUpdateState()) : UpdateStateStore {
         var value = initial
@@ -38,6 +39,7 @@ class UpdateCoordinatorTest {
             calls++
             return response.getOrThrow()
         }
+        override suspend fun downloadGrant(releaseId: String): ReleaseDownloadGrant = error("unused")
     }
 
     private fun TestScope.coordinator(
@@ -45,7 +47,7 @@ class UpdateCoordinatorTest {
         store: MemoryStore,
         now: () -> Long,
         online: () -> Boolean = { true },
-    ) = UpdateCoordinator(this, api, store, installedBuild = { 1 }, distribution = "play", now = now, online = online)
+    ) = UpdateCoordinator(this, api, store, installedBuild = { 1 }, distribution = "direct", now = now, online = online)
 
     @Test
     fun knownRequiredSnapshotRestoresBeforeAFailedRefreshAndStaysBlocking() = runTest {
@@ -58,22 +60,6 @@ class UpdateCoordinatorTest {
         assertFalse(coordinator.state.value.restoring)
         assertEquals(UpdateDecision.REQUIRED, coordinator.state.value.decision)
         assertEquals(UpdateProblem.OFFLINE, coordinator.state.value.failure)
-    }
-
-    @Test
-    fun actualInstalledBuildAfterRestartClearsRequiredAdmissionToOptional() = runTest {
-        val snapshot = policy(minimum = 12, target = target(build = 15))
-        val store = MemoryStore(StoredUpdateState(snapshot = snapshot))
-        val before = UpdateCoordinator(this, FakeApi(Result.success(snapshot)), store,
-            installedBuild = { 10 }, distribution = "play", now = { 1_000 })
-        before.initialize()
-        assertTrue(UpdateAdmission(before.state).isBlocked())
-        // The same policy and retained cache become optional only with the actual new installed build.
-        val after = UpdateCoordinator(this, FakeApi(Result.success(snapshot)), store,
-            installedBuild = { 14 }, distribution = "play", now = { 2_000 })
-        after.initialize()
-        assertEquals(UpdateDecision.OPTIONAL, after.state.value.decision)
-        assertFalse(UpdateAdmission(after.state).isBlocked())
     }
 
     @Test
@@ -239,6 +225,8 @@ class UpdateCoordinatorTest {
                     return policy(minimum = null)
                 }
 
+                override suspend fun downloadGrant(releaseId: String): ReleaseDownloadGrant =
+                    error("unused")
             }
         var now = 1_000L
         val coordinator =
@@ -247,7 +235,7 @@ class UpdateCoordinatorTest {
                 api,
                 MemoryStore(),
                 installedBuild = { 1 },
-                distribution = "play",
+                distribution = "direct",
                 now = { now },
             )
         coordinator.initialize()

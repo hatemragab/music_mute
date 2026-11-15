@@ -1,137 +1,9 @@
 import XCTest
 
 final class ProcessingUITests: XCTestCase {
-  func testOriginalThumbnailLibraryAndPlayerInEnglishAndArabic() {
-    artworkScreenshots(state: "loaded")
-  }
-
-  func testFailedThumbnailKeepsLibraryAndPlayerPlaceholderInEnglishAndArabic() {
-    artworkScreenshots(state: "failed")
-  }
-
-  private func artworkScreenshots(state: String) {
-    continueAfterFailure = false
-    for language in ["en", "ar"] {
-      let app = XCUIApplication()
-      app.launchArguments = [
-        "--processing-ui-fixture", "--processing-fixture-id", UUID().uuidString,
-        "--processing-fixture-artwork", state, "-language", language,
-        "-appearance", language == "ar" ? "dark" : "light",
-      ]
-      app.launch()
-      XCTAssertTrue(app.buttons["homeImportAudio"].waitForExistence(timeout: 10))
-      app.tabBars.buttons[language == "ar" ? "المكتبة" : "Library"].tap()
-      let jobID = String(format: "%024d", 1)
-      let play = app.buttons["libraryPlay-\(jobID)"]
-      XCTAssertTrue(play.waitForExistence(timeout: 10))
-      attach(app, "artwork-\(language)-\(state)-library")
-      play.tap()
-      let open = app.buttons["miniPlayerOpen"]
-      XCTAssertTrue(open.waitForExistence(timeout: 10))
-      app.buttons["miniPlayerTogglePlayback"].tap()
-      attach(app, "artwork-\(language)-\(state)-mini-player")
-      open.tap()
-      XCTAssertTrue(app.buttons["playerFavorite"].waitForExistence(timeout: 5))
-      attach(app, "artwork-\(language)-\(state)-player")
-      reveal(
-        app.staticTexts[language == "ar" ? "قائمة التشغيل" : "Queue"],
-        app: app, scrollID: "playerScroll")
-      attach(app, "artwork-\(language)-\(state)-queue")
-      app.terminate()
-    }
-  }
-
-  func testHomeHidesNewLinkControlsForMissingFalseAndUncachedOfflinePolicy() {
-    for flag in [
-      "--processing-fixture-legacy-policy", "--processing-fixture-link-hidden",
-      "--processing-fixture-offline",
-    ] {
-      let app = launchPolicyHome(flags: [flag])
-      XCTAssertFalse(app.textFields["urlImportSource"].exists)
-      XCTAssertFalse(app.buttons["submitURLImport"].exists)
-      XCTAssertTrue(app.buttons["homeImportAudio"].exists)
-      XCTAssertTrue(app.buttons["homeImportVideo"].exists)
-      if flag == "--processing-fixture-link-hidden" {
-        attach(app, "English Home with file controls and hidden link form")
-      }
-      app.terminate()
-    }
-  }
-
-  func testPolicySnapshotsShowAndHideTheFormWhileExistingImportsContinue() {
-    let app = launchPolicyHome(flags: [
-      "--processing-fixture-link-hidden", "--processing-fixture-policy-controls",
-    ])
-    XCTAssertFalse(app.textFields["urlImportSource"].exists)
-    app.buttons["fixtureToggleLinkImport"].tap()
-    let source = app.textFields["urlImportSource"]
-    XCTAssertTrue(source.waitForExistence(timeout: 5))
-    source.tap()
-    source.typeText("https://www.youtube.com/watch?v=abcdefghijk\n")
-    reveal(app.switches["urlImportRights"], app: app, scrollID: nil).tap()
-    reveal(app.buttons["submitURLImport"], app: app, scrollID: nil).tap()
-    XCTAssertTrue(app.staticTexts["existingURLImport"].waitForExistence(timeout: 5))
-    assertMetric("fixtureImportRequests", equals: 1, app: app)
-    app.buttons["fixtureToggleLinkImport"].tap()
-    expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: source)
-    waitForExpectations(timeout: 5)
-    XCTAssertTrue(app.staticTexts["existingURLImport"].exists)
-    XCTAssertTrue(app.buttons["homeImportAudio"].exists)
-    XCTAssertTrue(app.buttons["homeImportVideo"].exists)
-    reveal(app.buttons["retryExistingURLImport"], app: app, scrollID: nil).tap()
-    assertMetric("fixtureImportReads", equals: 2, app: app)
-    assertMetric("fixtureImportRequests", equals: 1, app: app)
-    attach(app, "Hidden link form retains existing downloading import and file controls")
-  }
-
-  func testCachedVisiblePolicySurvivesKilledOfflineRelaunch() {
-    let id = UUID().uuidString
-    let app = launchPolicyHome(id: id)
-    XCTAssertTrue(app.textFields["urlImportSource"].waitForExistence(timeout: 5))
-    app.terminate()
-    let offline = launchPolicyHome(id: id, flags: ["--processing-fixture-offline"])
-    XCTAssertTrue(offline.textFields["urlImportSource"].waitForExistence(timeout: 5))
-    XCTAssertTrue(offline.buttons["homeImportAudio"].exists)
-    XCTAssertTrue(offline.buttons["homeImportVideo"].exists)
-  }
-
-  func testArabicHomeKeepsFileControlsWhenLinkHidden() {
-    let app = launchPolicyHome(
-      flags: ["--processing-fixture-link-hidden", "--processing-fixture-empty-history"],
-      arabic: true, largeText: true)
-    XCTAssertFalse(app.textFields["urlImportSource"].exists)
-    reveal(app.buttons["homeImportAudio"], app: app, scrollID: nil)
-    reveal(app.buttons["homeImportVideo"], app: app, scrollID: nil)
-    attach(app, "Arabic Home with file controls and hidden link form")
-  }
-
-  private func launchPolicyHome(
-    id: String = UUID().uuidString, flags: [String] = [], arabic: Bool = false,
-    largeText: Bool = false
-  )
-    -> XCUIApplication
-  {
-    continueAfterFailure = false
-    let app = XCUIApplication()
-    app.launchArguments =
-      [
-        "--processing-ui-fixture", "--processing-fixture-id", id, "-language", arabic ? "ar" : "en",
-        "-appearance",
-        arabic ? "dark" : "light",
-      ] + flags
-    if largeText {
-      app.launchArguments += [
-        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL",
-      ]
-    }
-    app.launch()
-    XCTAssertTrue(app.buttons["homeImportAudio"].waitForExistence(timeout: 10))
-    return app
-  }
-
   private func launch(
     id: String = UUID().uuidString, arabic: Bool = false, offline: Bool = false,
-    offlineAfterCache: Bool = false, paginated: Bool = false, linkHidden: Bool = false
+    pasteURL: String? = nil
   )
     -> XCUIApplication
   {
@@ -147,124 +19,12 @@ final class ProcessingUITests: XCTestCase {
       ]
     }
     if offline { app.launchArguments += ["--processing-fixture-offline"] }
-    if offlineAfterCache { app.launchArguments += ["--processing-fixture-offline-after-cache"] }
-    if paginated { app.launchArguments += ["--processing-fixture-paginated"] }
-    if linkHidden { app.launchArguments += ["--processing-fixture-link-hidden"] }
+    if let pasteURL { app.launchArguments += ["--processing-fixture-paste-url", pasteURL] }
     app.launch()
-    let processing = app.buttons["openProcessing"]
-    XCTAssertTrue(processing.waitForExistence(timeout: 10))
-    for _ in 0..<8 where !processing.isHittable { app.scrollViews.firstMatch.swipeUp() }
-    XCTAssertTrue(processing.isHittable)
-    processing.tap()
+    let tab = app.tabBars.buttons[arabic ? "معالجة الصوت" : "Voice processing"]
+    XCTAssertTrue(tab.waitForExistence(timeout: 10))
+    tab.tap()
     return app
-  }
-
-  func testOriginalVoiceComparisonUsesSeparateArtifacts() {
-    let app = launch(offlineAfterCache: true)
-    openLibraryDetails(1, app)
-    reveal(app.buttons["processingPlay"], app: app).tap()
-    let original = app.segmentedControls["comparisonSource"].buttons["Original"]
-    XCTAssertTrue(original.waitForExistence(timeout: 5))
-    original.tap()
-    expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: original)
-    waitForExpectations(timeout: 10)
-    assertMetric("fixtureOutputRequests", equals: 2, app: app)
-    let voice = app.segmentedControls["comparisonSource"].buttons["Voice"]
-    voice.tap()
-    expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: voice)
-    waitForExpectations(timeout: 10)
-    assertMetric("fixtureOutputRequests", equals: 2, app: app)
-    attach(app, "Original and voice comparison uses separate cached audio")
-  }
-
-  func testLibraryDownloadAndPlayerActionsMatchAndroid() {
-    let app = launch()
-    let jobID = String(format: "%024d", 1)
-    app.tabBars.buttons["Library"].tap()
-
-    let download = app.buttons["libraryDownload-\(jobID)"]
-    XCTAssertTrue(download.waitForExistence(timeout: 5))
-    download.tap()
-    XCTAssertTrue(app.staticTexts["Available offline"].waitForExistence(timeout: 10))
-
-    let play = app.buttons["libraryPlay-\(jobID)"]
-    XCTAssertTrue(play.isHittable)
-    play.tap()
-    let openPlayer = app.buttons["miniPlayerOpen"]
-    XCTAssertTrue(openPlayer.waitForExistence(timeout: 10))
-    openPlayer.tap()
-
-    let favorite = app.buttons["playerFavorite"]
-    XCTAssertTrue(favorite.waitForExistence(timeout: 5))
-    XCTAssertTrue(app.buttons["playerSaveOriginal"].isHittable)
-    XCTAssertTrue(app.buttons["playerInfo"].isHittable)
-    favorite.tap()
-    let updatedFavorite = app.buttons["playerFavorite"]
-    expectation(
-      for: NSPredicate(format: "label == %@", "Remove from favorites"),
-      evaluatedWith: updatedFavorite
-    )
-    waitForExpectations(timeout: 5)
-    attach(app, "Library download and Android player actions")
-
-    app.buttons["playerInfo"].tap()
-    XCTAssertTrue(app.scrollViews["processingDetail"].waitForExistence(timeout: 10))
-  }
-
-  func testLibraryStarredCheckboxAndMostPlayedPersistOnDevice() {
-    let fixtureID = UUID().uuidString
-    let app = launch(id: fixtureID)
-    let jobID = String(format: "%024d", 1)
-    app.tabBars.buttons["Library"].tap()
-    let play = app.buttons["libraryPlay-\(jobID)"]
-    XCTAssertTrue(play.waitForExistence(timeout: 5))
-    let starred = app.switches["libraryShowStarred"]
-    XCTAssertTrue(starred.exists)
-    starred.tap()
-    XCTAssertFalse(play.exists)
-    starred.tap()
-    app.buttons["libraryFavorite-\(jobID)"].tap()
-    starred.tap()
-    XCTAssertTrue(play.exists)
-    let mostPlayed = app.buttons["libraryFilter-mostPlayed"]
-    XCTAssertEqual(mostPlayed.label, "Most played")
-    mostPlayed.tap()
-    XCTAssertFalse(play.exists)
-    app.buttons["libraryFilter-all"].tap()
-    play.tap()
-    XCTAssertTrue(app.buttons["miniPlayerOpen"].waitForExistence(timeout: 10))
-    mostPlayed.tap()
-    XCTAssertTrue(play.waitForExistence(timeout: 5))
-    XCTAssertFalse(app.buttons["librarySort"].isEnabled)
-    attach(app, "Starred tracks in Most Played")
-    app.terminate()
-
-    let reopened = launch(id: fixtureID, offline: true)
-    reopened.tabBars.buttons["Library"].tap()
-    reopened.buttons["libraryFilter-mostPlayed"].tap()
-    XCTAssertTrue(
-      reopened.buttons["libraryPlay-\(jobID)"].waitForExistence(timeout: 5))
-    reopened.switches["libraryShowStarred"].tap()
-    XCTAssertTrue(reopened.buttons["libraryPlay-\(jobID)"].exists)
-    attach(reopened, "Offline device keeps stars and Most Played")
-  }
-
-  func testUnsupportedLinkIsRejectedOnHome() {
-    let app = launch()
-    app.tabBars.buttons["Home"].tap()
-    let source = app.textFields["urlImportSource"]
-    XCTAssertTrue(source.waitForExistence(timeout: 5))
-    source.tap()
-    source.typeText("https://unknown.example/audio\n")
-    let rights = app.switches["urlImportRights"]
-    XCTAssertTrue(rights.waitForExistence(timeout: 5))
-    for _ in 0..<3 where !rights.isHittable { app.swipeUp() }
-    rights.tap()
-    app.buttons["submitURLImport"].tap()
-    let error = app.staticTexts["urlImportError"]
-    XCTAssertTrue(error.waitForExistence(timeout: 5))
-    XCTAssertTrue(error.label.contains("not supported"))
-    XCTAssertEqual(app.otherElements["fixtureCreatedJobs"].label, "0")
   }
 
   func testAccountDeletionFinalConfirmationCanBeCancelled() {
@@ -284,7 +44,7 @@ final class ProcessingUITests: XCTestCase {
     XCTAssertTrue(deletion.exists)
   }
 
-  func testListDetailCancellationHidesTerminalHistory() {
+  func testListDetailCancellationAndRetryNewJob() {
     let app = launch()
     row(2, app).tap()
     reveal(app.buttons["processingCancel"], app: app).tap()
@@ -293,9 +53,11 @@ final class ProcessingUITests: XCTestCase {
     XCTAssertFalse(app.buttons["processingDelete"].exists)
     attach(app, "Processing cancellation remains pending")
     app.navigationBars.buttons.firstMatch.tap()
-    XCTAssertFalse(app.buttons["audioTask-job:" + String(format: "%024d", 1)].exists)
-    XCTAssertFalse(app.buttons["audioTask-job:" + String(format: "%024d", 3)].exists)
-
+    row(3, app).tap()
+    reveal(app.buttons["processingRetry"], app: app).tap()
+    XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["processingRetry"].exists)
+    attach(app, "Retry opens newly queued job")
   }
 
   func testArabicDarkLargeTextInterruptedAndReady() throws {
@@ -306,33 +68,27 @@ final class ProcessingUITests: XCTestCase {
     attach(app, "Arabic dark large text interrupted job")
     app.navigationBars.buttons.firstMatch.tap()
     for _ in 0..<4 { app.scrollViews["processingHistory"].swipeDown() }
-    openLibraryDetails(1, app)
+    row(1, app).tap()
     reveal(app.buttons["processingPlay"], app: app)
     XCTAssertTrue(app.buttons["processingSave"].exists)
     attach(app, "Arabic dark large text ready output")
     try app.performAccessibilityAudit(for: [.dynamicType, .textClipped])
   }
 
-  func testFinishedJobsStayInLibraryAcrossOfflineRelaunch() {
+  func testCachedHistorySurvivesOfflineRelaunch() {
     let id = UUID().uuidString
     let app = launch(id: id)
-    XCTAssertTrue(row(2, app).exists)
-    XCTAssertFalse(app.buttons["audioTask-job:" + String(format: "%024d", 1)].exists)
-    openLibraryDetails(1, app)
+    XCTAssertTrue(row(1, app).exists)
     app.terminate()
     let offline = launch(id: id, offline: true)
-    XCTAssertFalse(offline.buttons["audioTask-job:" + String(format: "%024d", 1)].exists)
-    XCTAssertFalse(offline.buttons["audioTask-job:" + String(format: "%024d", 3)].exists)
-    offline.tabBars.buttons.element(boundBy: 1).tap()
-    XCTAssertTrue(
-      offline.buttons["libraryPlay-" + String(format: "%024d", 1)].waitForExistence(timeout: 5))
-    attach(offline, "Finished audio remains in Library after offline relaunch")
+    XCTAssertTrue(row(1, offline).exists)
+    XCTAssertTrue(row(3, offline).exists)
+    attach(offline, "Processing safe cache after offline relaunch")
   }
 
   func testReadyRenameOnDemandSharePlaybackSaveAndConfirmedDelete() {
-    let renamedTitle = "Readiness fixture " + UUID().uuidString
     let app = launch()
-    openLibraryDetails(1, app)
+    row(1, app).tap()
     assertMetric("fixtureOutputRequests", equals: 0, app: app)
     reveal(app.buttons["processingRename"], app: app).tap()
     let name = app.textFields["processingName"]
@@ -340,9 +96,9 @@ final class ProcessingUITests: XCTestCase {
     name.tap()
     let currentName = name.value as? String ?? ""
     name.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentName.count))
-    name.typeText(renamedTitle)
+    name.typeText("Studio interview")
     app.navigationBars.buttons["Save"].tap()
-    XCTAssertTrue(app.staticTexts[renamedTitle].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Studio interview"].waitForExistence(timeout: 5))
     assertMetric("fixtureOutputRequests", equals: 0, app: app)
     attach(app, "Renamed ready audio before any output request")
 
@@ -367,16 +123,8 @@ final class ProcessingUITests: XCTestCase {
       app.navigationBars.buttons["Export"].waitForExistence(timeout: 10)
         || app.buttons["Move"].exists || app.buttons["Save"].exists)
     attach(app, "Processing output native Save to Files picker")
-    let save = app.buttons["Save"].firstMatch
-    if save.exists, save.isHittable {
-      save.tap()
-      XCTAssertTrue(app.buttons["processingPlay"].waitForExistence(timeout: 5))
-    } else {
-      dismissNativeSheet(app)
-    }
-    // This fixture counts all artifact grants. Playback prefetches the original
-    // once for comparison; saving the cached voice must not request a third grant.
-    assertMetric("fixtureOutputRequests", equals: 2, app: app)
+    dismissNativeSheet(app)
+    assertMetric("fixtureOutputRequests", equals: 1, app: app)
     reveal(play, app: app).tap()
     expectation(for: NSPredicate(format: "label CONTAINS 'Pause'"), evaluatedWith: play)
     waitForExpectations(timeout: 5)
@@ -386,35 +134,55 @@ final class ProcessingUITests: XCTestCase {
     attach(app, "Terminal audio deletion requires confirmation")
     confirmation.tap()
     XCTAssertTrue(app.scrollViews["processingHistory"].waitForExistence(timeout: 5))
-    app.tabBars.buttons.element(boundBy: 1).tap()
-    let deleted = app.buttons["libraryPlay-" + String(format: "%024d", 1)]
+    let deleted = app.buttons["audioTask-job:" + String(format: "%024d", 1)]
     expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: deleted)
     waitForExpectations(timeout: 5)
     attach(app, "Deleted processed audio removed from library")
   }
 
-  func testNativeFileRequiresRightsAndCloudConfirmation() {
+  func testExplicitDownloadAndNativeFileRequireRightsAndCloudConfirmation() {
     let fixtureID = "00000000-0000-4000-8000-" + UUID().uuidString.suffix(12)
-    let app = launch(id: fixtureID, linkHidden: true)
-    assertMetric("fixtureNativeInputReady", equals: 1, app: app)
+    let app = launch(id: fixtureID, pasteURL: "https://youtu.be/jNQXAC9IVRw")
+    for number in 5...6 {
+      app.tabBars.buttons["Home"].tap()
+      if number == 5 {
+        reveal(app.buttons["YouTube (secondary option)"], app: app, scrollID: nil).tap()
+      }
+      reveal(app.buttons["pasteURL"], app: app, scrollID: nil).tap()
+      XCTAssertTrue(app.textFields["youtubeURL"].exists || app.textViews["youtubeURL"].exists)
+      reveal(app.buttons["downloadAudio"], app: app, scrollID: nil).tap()
+      confirmReview(app)
+      XCTAssertTrue(app.scrollViews["processingHistory"].waitForExistence(timeout: 5))
+      XCTAssertTrue(row(number, app).exists)
+    }
+    assertMetric("fixtureCreatedJobs", equals: 2, app: app)
+    row(5, app).tap()
+    for label in [
+      "Find source", "Download audio", "Preparing audio…", "Creating the processing job…",
+      "Uploading audio…", "Confirming the upload…", "Checking audio", "Removing music",
+      "Saving voice result",
+    ] {
+      XCTAssertTrue(app.scrollViews["processingDetail"].staticTexts[label].exists, label)
+    }
+    attach(app, "Confirmed URL task exposes all transfer and worker stages")
+    app.navigationBars.buttons.firstMatch.tap()
     reveal(app.buttons["processingImport"], app: app, scrollID: "processingHistory").tap()
     let browse = app.buttons["Browse"].firstMatch
     if browse.waitForExistence(timeout: 3), browse.isHittable { browse.tap() }
     tapPickerItem("On My iPhone", app: app)
-    openPickerFolder("MusicMute", containingAnyOf: ["UITestImports"], app: app)
+    openPickerFolder("MusicMute", containing: "UITestImports", app: app)
     tapPickerItem("UITestImports", app: app)
-    openPickerFolder(
-      fixtureID, containingAnyOf: ["Fixture input", "Fixture input.mp3"], app: app)
+    tapPickerItem(fixtureID, app: app)
     attach(app, "Native Files picker shows synthetic fixture audio")
     tapPickerItem("Fixture input", app: app, alternate: "Fixture input.mp3")
     confirmReview(app)
-    assertMetric("fixtureCreatedJobs", equals: 1, app: app)
+    assertMetric("fixtureCreatedJobs", equals: 3, app: app)
     if app.scrollViews["processingDetail"].exists {
       app.navigationBars.buttons.firstMatch.tap()
     }
     XCTAssertTrue(app.scrollViews["processingHistory"].waitForExistence(timeout: 5))
-    XCTAssertTrue(row(5, app).exists)
-    row(5, app).tap()
+    XCTAssertTrue(row(7, app).exists)
+    row(7, app).tap()
     XCTAssertTrue(app.staticTexts["Queued"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.scrollViews["processingDetail"].staticTexts["Find source"].exists)
     XCTAssertFalse(app.scrollViews["processingDetail"].staticTexts["Download audio"].exists)
@@ -427,41 +195,11 @@ final class ProcessingUITests: XCTestCase {
     if !appeared { attach(app, "Missing audio review after native selection") }
     XCTAssertTrue(appeared)
     XCTAssertFalse(confirm.isEnabled)
-    let trim = app.switches["importTrimSilence"]
-    XCTAssertTrue(trim.exists)
-    XCTAssertEqual(trim.value as? String, "1", "Trimming should be enabled by default")
-    trim.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-    XCTAssertEqual(trim.value as? String, "0")
-    trim.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-    XCTAssertEqual(trim.value as? String, "1")
     app.switches["importRightsConfirmation"].coordinate(
       withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)
     ).tap()
     XCTAssertTrue(confirm.isEnabled)
     confirm.tap()
-  }
-
-  private func openLibraryDetails(_ number: Int, _ app: XCUIApplication) {
-    app.tabBars.buttons.element(boundBy: 1).tap()
-    let details = app.buttons["libraryDetails-" + String(format: "%024d", number)]
-    XCTAssertTrue(details.waitForExistence(timeout: 5))
-    reveal(details, app: app, scrollID: nil).tap()
-  }
-
-  func testLibraryLoadsOlderAudioAndHomeHidesFinishedJobs() {
-    let app = launch(paginated: true)
-    XCTAssertTrue(row(2, app).exists)
-    XCTAssertFalse(app.buttons["audioTask-job:" + String(format: "%024d", 1)].exists)
-    app.tabBars.buttons.element(boundBy: 1).tap()
-    XCTAssertTrue(
-      app.buttons["libraryPlay-" + String(format: "%024d", 1)].waitForExistence(timeout: 5))
-    let more = app.buttons["libraryLoadMore"]
-    XCTAssertTrue(more.waitForExistence(timeout: 5))
-    reveal(more, app: app, scrollID: nil).tap()
-    XCTAssertTrue(
-      app.buttons["libraryPlay-" + String(format: "%024d", 6)].waitForExistence(timeout: 5))
-    XCTAssertFalse(more.exists)
-    attach(app, "Library retains earlier audio and loads the next page")
   }
 
   private func row(_ number: Int, _ app: XCUIApplication) -> XCUIElement {
@@ -503,9 +241,9 @@ final class ProcessingUITests: XCTestCase {
       for name in names {
         let cell = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
         if cell.waitForExistence(timeout: 1), cell.isHittable {
-          // Let XCTest choose a hittable point: a partially scrolled grid cell's
-          // upper icon can sit behind the Files search/navigation overlay.
-          cell.tap()
+          // Files grid captions can have a separate hit region. Activate the
+          // icon in the upper part of the matched cell, including wrapped names.
+          cell.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
           return
         }
         for item in app.staticTexts.matching(identifier: name).allElementsBoundByIndex
@@ -526,7 +264,7 @@ final class ProcessingUITests: XCTestCase {
   }
 
   private func openPickerFolder(
-    _ label: String, containingAnyOf children: [String], app: XCUIApplication
+    _ label: String, containing child: String, app: XCUIApplication
   ) {
     let candidates = app.cells.containing(.staticText, identifier: label)
     XCTAssertTrue(candidates.firstMatch.waitForExistence(timeout: 5))
@@ -534,46 +272,23 @@ final class ProcessingUITests: XCTestCase {
     for index in 0..<candidateCount {
       let candidate = candidates.element(boundBy: index)
       guard candidate.exists, candidate.isHittable else { continue }
-      for _ in 0..<2 {
-        candidate.tap()
-        if revealPickerChild(children, app: app) {
-          return
-        }
-        // Files can ignore a grid tap while its scroll view is settling. If the
-        // same folder is still visible, retry it instead of navigating backward.
-        if candidate.exists, candidate.isHittable { continue }
-        break
+      candidate.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+      let expectedChild = app.staticTexts.matching(identifier: child).firstMatch
+      if expectedChild.waitForExistence(timeout: 2), expectedChild.isHittable {
+        return
       }
-      // The app's navigation bar remains behind the system picker. Query the
-      // picker bar directly and wait for its cross-process accessibility update.
-      let back = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"]
-        .buttons["BackButton"]
-      guard back.waitForExistence(timeout: 5) else {
+      guard
+        let back = app.navigationBars.buttons.allElementsBoundByIndex.first(where: { $0.isHittable }
+        )
+      else {
         XCTFail("Native picker back button is not available")
         return
       }
       back.tap()
       XCTAssertTrue(candidates.firstMatch.waitForExistence(timeout: 5))
     }
-    let childDescription = children.joined(separator: " or ")
-    attach(app, "Missing native picker folder containing: " + childDescription)
-    XCTFail("Native picker did not expose " + label + " containing " + childDescription)
-  }
-
-  private func revealPickerChild(_ children: [String], app: XCUIApplication) -> Bool {
-    let files = app.collectionViews["File View"]
-    guard files.waitForExistence(timeout: 5) else { return false }
-    for _ in 0..<6 {
-      if children.contains(where: { name in
-        let text = app.staticTexts[name]
-        let cell = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
-        return (text.exists && text.isHittable) || (cell.exists && cell.isHittable)
-      }) {
-        return true
-      }
-      files.swipeUp()
-    }
-    return false
+    attach(app, "Missing native picker folder containing: " + child)
+    XCTFail("Native picker did not expose " + label + " containing " + child)
   }
 
   private func dismissNativeSheet(_ app: XCUIApplication) {

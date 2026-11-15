@@ -21,7 +21,7 @@ export class AuthController {
     private readonly logout: LogoutService,
   ) {}
 
-  @Post('sessions')
+  @Post('session')
   @HttpCode(200)
   @AllowUnprovisioned()
   @LimitOperation('profile')
@@ -29,14 +29,14 @@ export class AuthController {
     return this.auth.bootstrap(req.identity, report);
   }
 
-  @Post('profile-synchronizations')
+  @Post('profile-sync')
   @HttpCode(200)
   @LimitOperation('profile')
   profile(@Req() req: AuthRequest, @Body(EmptyBodyPipe) _body: unknown) {
     return this.auth.syncProfile(req.user!._id.toHexString(), req.identity);
   }
 
-  @Post('verification-emails')
+  @Post('verification-email')
   @HttpCode(202)
   async verification(
     @Req() req: AuthRequest,
@@ -56,14 +56,14 @@ export class AuthController {
   }
 
   @Public()
-  @Post('password-reset-requests')
+  @Post('password-reset')
   @HttpCode(202)
   async passwordReset(@Req() req: AuthRequest, @Body() dto: PasswordResetDto) {
     await this.mail.requestPasswordReset(dto.email, req.ip ?? '');
     return { status: 'accepted' };
   }
 
-  @Post('session-revocations')
+  @Post('logout-all')
   @HttpCode(204)
   @LimitOperation('logout')
   async logoutAll(

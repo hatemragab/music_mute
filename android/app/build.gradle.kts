@@ -35,8 +35,6 @@ fun buildConfigString(value: String) =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
-    sourceSets.getByName("test").resources.srcDir("../../web-client/src/site-policy/fixtures")
-    sourceSets.getByName("main").resources.srcDir("../../web-client/src/site-policy/data")
     namespace = "com.hatem.musicmute"
     compileSdk = 36
 
@@ -45,21 +43,19 @@ android {
     defaultConfig {
         fun publicPage(property: String): String {
             val value = providers.gradleProperty(property).orElse("").get()
-            require(value.isNotBlank() && runCatching {
+            require(value.isBlank() || runCatching {
                 URI(value).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.rawUserInfo == null && it.rawQuery == null && it.rawFragment == null }
-            }.getOrDefault(false)) { "$property must be a nonempty HTTPS public page URL" }
+            }.getOrDefault(false)) { "$property must be an HTTPS public page URL" }
             return buildConfigString(value)
         }
         buildConfigField("String", "PRIVACY_URL", publicPage("privacyUrl"))
         buildConfigField("String", "DELETION_URL", publicPage("deletionUrl"))
-        buildConfigField("String", "SUPPORT_URL", publicPage("supportUrl"))
         applicationId = "com.hatem.musicmute"
-        resValue("string", "shortcut_target_package", "com.hatem.musicmute")
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "com.hatem.musicmute.processing.MediaPreparationTestRunner"
-        versionCode = 23
-        versionName = "1.0.3"
+        versionCode = 9
+        versionName = "0.1.8"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 
@@ -94,9 +90,6 @@ android {
             )
         }
         getByName("release") {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             buildConfigField("boolean", "SENTRY_ENABLED", sentryEnabled.get())
             buildConfigField("String", "SENTRY_DSN", buildConfigString(sentryDsn.get()))
             signingConfig = signingConfigs.getByName("upload")
@@ -108,7 +101,6 @@ android {
             initWith(getByName("debug"))
             buildConfigField("boolean", "SENTRY_ENABLED", "false")
             applicationIdSuffix = ".authtest"
-            resValue("string", "shortcut_target_package", "com.hatem.musicmute.authtest")
             matchingFallbacks += "debug"
             buildConfigField("String", "AUTH_API_URL", "\"http://127.0.0.1:48080\"")
             buildConfigField("String", "AUTH_EMULATOR_HOST", "\"127.0.0.1\"")
@@ -117,6 +109,10 @@ android {
     }
 
     productFlavors {
+        create("direct") {
+            dimension = "distribution"
+            buildConfigField("String", "UPDATE_DISTRIBUTION", "\"direct\"")
+        }
         create("play") {
             dimension = "distribution"
             buildConfigField("String", "UPDATE_DISTRIBUTION", "\"play\"")
@@ -133,13 +129,14 @@ android {
     }
     packaging {
         jniLibs.useLegacyPackaging = true
+        // Upstream stores the Python archive under a .so name; it is a ZIP, not an ELF library.
+        jniLibs.keepDebugSymbols += "**/libpython.zip.so"
     }
 }
 
 kotlin { jvmToolchain(17) }
 
 dependencies {
-    implementation(libs.okhttp)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.common)
     implementation(libs.firebase.auth)
@@ -164,7 +161,9 @@ dependencies {
     implementation(libs.work.runtime)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
-    implementation(libs.sentry.android.core)
+    implementation(libs.youtubedl)
+    implementation(libs.sentry.android)
+    "directImplementation"(libs.azhon.appupdate)
     "playImplementation"(libs.play.appupdate)
     "playImplementation"(libs.play.appupdate.ktx)
     debugImplementation(libs.compose.tooling)

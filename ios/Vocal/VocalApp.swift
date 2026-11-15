@@ -8,23 +8,7 @@ import UserNotifications
 
 @main struct VocalApp: App {
   @UIApplicationDelegateAdaptor(ProcessingAppDelegate.self) private var appDelegate
-  init() {
-    SentryMonitoring.start()
-    LocalDiagnostics.installErrorObserver()
-    LocalDiagnostics.emit("lifecycle.process_started", category: "lifecycle")
-    #if DEBUG
-      if ProcessInfo.processInfo.arguments.contains("--local-logging-smoke") {
-        LocalDiagnostics.emit(
-          "diagnostics.smoke", category: "diagnostics",
-          data: [
-            "password": "MUSICMUTE_NATIVE_SECRET_CANARY",
-            "nested": ["authorization": "Bearer MUSICMUTE_NATIVE_SECRET_CANARY"],
-            "result": "synthetic",
-          ])
-        Task { await LocalDiagnosticsSmoke.run() }
-      }
-    #endif
-  }
+  init() { SentryMonitoring.start() }
   var body: some Scene {
     WindowGroup {
       #if DEBUG
@@ -49,19 +33,27 @@ private struct ProductionVocalView: View {
 @MainActor private final class ProductionAppGraph: ObservableObject {
   let preferences = AppPreferences()
   let player: AudioPlayer
+  let downloads: DownloadModel
   let auth: AuthSessionModel
   let processing: ProcessingModel
   let artifacts: JobArtifactRepository
   let push: PushRegistrationCoordinator
   let notificationDelegate: NotificationDelegate
+  let files: AudioFiles
 
   init() {
     if FirebaseApp.app() == nil { FirebaseApp.configure() }
-    // Cancel outstanding transfers scheduled by the retired device downloader.
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
       0
     ]
     .appendingPathComponent("Vocal", isDirectory: true)
+    let files = AudioFiles(root: support.appendingPathComponent("Audio", isDirectory: true))
+    self.files = files
+    let audioService = YouTubeAudioService(
+      files: files, sourceTransfers: BackgroundSourceTransferCoordinator.shared)
+    downloads = DownloadModel(
+      service: audioService,
+      history: HistoryStore(file: support.appendingPathComponent("history.json")))
     let firebase = FirebaseAuthGateway()
     let installationStore = InstallationStore.applicationStore()
     let configuration = try? AuthConfiguration.load()
@@ -106,18 +98,26 @@ private struct ProductionVocalView: View {
     let preparer = AudioInputPreparer(root: staging)
     let pipeline = AudioPipelineCoordinator(
       store: repository.store, repository: repository, preparer: preparer,
+      download: { videoID, operationID, ownerUid, stage, progress in
+        let saved = try await audioService.downloadForProcessing(
+          videoID: videoID, id: operationID, ownerUid: ownerUid,
+          policy: await preparer.currentPolicy(), stage: stage, progress: progress)
+        guard let url = files.url(for: saved.relativePath) else { throw AudioFailure.storage }
+        return PipelineSourceFile(url: url, title: saved.title)
+      },
       reportFailure: reportFailure,
       flushDiagnostics: { fence in
         await diagnostics.flush(
           fence: fence, api: jobs, currentSession: { [weak repository] in repository?.session })
+      },
+      sourceSessionChanged: { await BackgroundSourceTransferCoordinator.shared.bind(ownerUid: $0) },
+      cancelSourceTransfer: {
+        await BackgroundSourceTransferCoordinator.shared.cancel(ownerUid: $0, operationId: $1)
       })
     let artifacts = JobArtifactRepository(
       api: jobs,
       root: support.appendingPathComponent("ProcessingOutputs", isDirectory: true),
       sessionProvider: { [weak repository] in repository?.session })
-    let originals = JobArtifactRepository(
-      api: jobs, root: support.appendingPathComponent("ProcessingOriginals", isDirectory: true),
-      sessionProvider: { [weak repository] in repository?.session }, original: true)
     let pushAPI: PushRegistrationAPI =
       configuration.map {
         PushRegistrationAPIClient(
@@ -147,24 +147,18 @@ private struct ProductionVocalView: View {
       api: jobs, repository: repository,
       preparer: preparer, pipeline: pipeline, player: player,
       outputFile: { try await artifacts.preparedOutput(jobId: $0, displayName: $1) },
-      originalFile: { try await originals.preparedOutput(jobId: $0, displayName: $1) },
-      removeOutput: {
-        await artifacts.removeCached(jobId: $0)
-        await originals.removeCached(jobId: $0)
-      },
+      removeOutput: { await artifacts.removeCached(jobId: $0) },
       sessionDidChange: {
         artifacts.onSessionChanged()
-        originals.onSessionChanged()
         push.sessionChanged()
-      }, policyCacheFile: support.appendingPathComponent("ProcessingPolicy/policy.json"),
-      reportFailure: reportFailure)
+      }, reportFailure: reportFailure)
     let processing = self.processing
     auth.purgeAccountData = { uid in
       var owned: [AudioPipelineIntent] = []
       var jobs: [Job] = []
       do {
         owned = try await repository.store.pipelines(ownerUid: uid)
-        jobs = try await repository.store.libraryJobs(ownerUid: uid)
+        jobs = try await repository.store.cachedJobs(ownerUid: uid)
       } catch ProcessingStoreFailure.missingOperation {
         owned = []
         jobs = []
@@ -184,8 +178,11 @@ private struct ProductionVocalView: View {
         }.map(\.identifier))
       if repository.session?.uid == uid { await processing.bindOwner(nil) }
       if repository.session == nil { player.stopAndClear() }
+      try await BackgroundSourceTransferCoordinator.shared.purge(ownerUid: uid)
       try await artifacts.purge(ownerUid: uid)
-      try await originals.purge(ownerUid: uid)
+      for intent in owned where intent.sourceKind == .url {
+        try await files.purgePrivateAttempt(intent.operationId)
+      }
       try await preparer.purge(ownerUid: uid)
       try await diagnostics.purge(ownerUid: uid)
       try await repository.store.purge(ownerUid: uid)
@@ -196,28 +193,32 @@ private struct ProductionVocalView: View {
 
 private struct ProductionContentView: View {
   @ObservedObject private var preferences: AppPreferences
-  private let player: AudioPlayer
+  @ObservedObject private var player: AudioPlayer
+  @ObservedObject private var downloads: DownloadModel
   @ObservedObject private var auth: AuthSessionModel
   @ObservedObject private var processing: ProcessingModel
   @ObservedObject private var artifacts: JobArtifactRepository
   @ObservedObject private var push: PushRegistrationCoordinator
   private let notificationDelegate: NotificationDelegate
+  private let files: AudioFiles
   @Environment(\.scenePhase) private var scenePhase
 
   init(graph: ProductionAppGraph) {
     preferences = graph.preferences
     player = graph.player
+    downloads = graph.downloads
     auth = graph.auth
     processing = graph.processing
     artifacts = graph.artifacts
     push = graph.push
     notificationDelegate = graph.notificationDelegate
+    files = graph.files
   }
 
   var body: some View {
     AuthGate(model: auth) {
       VocalRootView(
-        preferences: preferences, player: player, auth: auth,
+        preferences: preferences, downloads: downloads, player: player, files: files, auth: auth,
         processing: processing, artifacts: artifacts, push: push,
         requestNotifications: { Task { await notificationDelegate.requestPermission() } })
     }
@@ -226,7 +227,7 @@ private struct ProductionContentView: View {
     .preferredColorScheme(preferences.colorScheme)
     .task {
       auth.start()
-      await processing.refreshAvailability()
+      await downloads.load()
       await notificationDelegate.refreshAuthorization()
     }
     .task(id: "\(auth.phase):\(auth.identity?.uid ?? "")") {
@@ -239,12 +240,10 @@ private struct ProductionContentView: View {
       }
     }
     .onChange(of: scenePhase) { _, phase in
-      if phase != .active { processing.urlImports.pause() }
       if phase == .active {
         auth.validateOnForeground()
         Task {
           await notificationDelegate.refreshAuthorization()
-          await processing.refreshAvailability()
           await processing.resumePending()
         }
       }
@@ -256,80 +255,62 @@ private struct ProductionContentView: View {
 
 struct VocalRootView: View {
   @ObservedObject var preferences: AppPreferences
-  let player: AudioPlayer
+  @ObservedObject var downloads: DownloadModel
+  @ObservedObject var player: AudioPlayer
+  let files: AudioFiles
   @ObservedObject var auth: AuthSessionModel
   @ObservedObject var processing: ProcessingModel
   @ObservedObject var artifacts: JobArtifactRepository
   @ObservedObject var push: PushRegistrationCoordinator
   var requestNotifications: () -> Void
-  var libraryOwnerUID: String? = nil
   @Environment(\.colorScheme) private var scheme
   @Environment(\.scenePhase) private var scenePhase
   @State private var tab = 0
-  @State private var showingProcessing = false
-  @State private var showingPlayer = false
-  private var libraryPreferences: LibraryPreferencesStore { processing.libraryPreferences }
   var body: some View {
     TabView(selection: $tab) {
       NavigationStack {
         HomeView(
-          urlImports: processing.urlImports,
-          linkImportVisible: processing.linkImportVisible,
-          openImportedJob: { id in
-            processing.selectedJobID = id
-            Task { await processing.history.select(id) }
-            showingProcessing = true
-          },
+          model: downloads, acceptURL: processing.acceptURL,
           beginImport: processing.beginSourceImport,
           importAudio: { processing.importAudio($0) },
           photoSourceLimit: processing.photoSourceLimit, importPhoto: processing.importPhoto,
           reportImportFailure: processing.reportImportFailure,
-          showProcessing: { showingProcessing = true },
-          tasks: AudioTaskPresentation.merge(
-            pipelines: processing.pipeline.pipelines,
-            uploads: processing.repository.operations, jobs: processing.history.jobs),
-          jobs: processing.history.jobs, connection: processing.history.connection,
-          onSelectTask: { task in
-            processing.select(task)
-            showingProcessing = true
-          }, onCancelTask: processing.cancel, onRetryTask: processing.retry
-        ) { showingProcessing = true }
+          showProcessing: { tab = 2 }
+        ) { tab = 1 }
         .background(
-          VocalStyle.background(scheme)
-        )
-        .navigationDestination(isPresented: $showingProcessing) { processingView }
+          VocalStyle.background(scheme))
       }
       .tabItem { Label("home_tab", systemImage: "house") }.tag(0)
       NavigationStack {
-        LibraryView(
-          history: processing.history, model: processing, artifacts: artifacts,
-          preferences: libraryPreferences, onOpenDetails: openDetails
-        )
-        .background(VocalStyle.background(scheme))
+        HistoryView(
+          model: downloads, player: player, files: files,
+          removeMusic: {
+            if let url = files.url(for: $0.relativePath) {
+              processing.removeMusic(from: url)
+              tab = 2
+            }
+          }
+        ) { tab = 0 }.background(
+          VocalStyle.background(scheme))
       }
-      .tabItem { Label("library_title", systemImage: "music.note.list") }.tag(1)
+      .tabItem { Label("history_tab", systemImage: "music.note.list") }.tag(1)
       NavigationStack {
-        SettingsView(
-          preferences: preferences, auth: auth,
-          usageRepository: processing.usageRepository
+        ProcessingRootView(
+          model: processing, repository: processing.repository, player: player,
+          outputProgress: artifacts.progress.mapValues { progress in
+            progress.totalBytes.map { Double(progress.receivedBytes) / Double($0) }
+          }, requestNotifications: requestNotifications
         )
         .background(VocalStyle.background(scheme))
       }
-      .tabItem { Label("settings_tab", systemImage: "slider.horizontal.3") }.tag(2)
-    }.tint(preferences.accentColor)
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        MiniPlayerView(model: processing, player: player) { showingPlayer = true }
+      .tabItem { Label("processing_title", systemImage: "waveform") }.tag(2)
+      NavigationStack {
+        SettingsView(preferences: preferences, auth: auth).background(VocalStyle.background(scheme))
       }
-      .sheet(isPresented: $showingPlayer) {
-        PlayerView(
-          model: processing, player: player, preferences: libraryPreferences,
-          onOpenDetails: openDetails)
-      }
-      .task(id: libraryOwnerUID ?? auth.identity?.uid ?? "") {
-        libraryPreferences.bind(libraryOwnerUID ?? auth.identity?.uid ?? "")
-      }
-      .task(id: scenePhase == .active) {
-        processing.history.setVisible(scenePhase == .active)
+      .tabItem { Label("settings_tab", systemImage: "slider.horizontal.3") }.tag(3)
+    }.tint(scheme == .dark ? VocalStyle.mint : VocalStyle.teal)
+      .task(id: tab == 2 && scenePhase == .active) {
+        processing.history.setVisible(tab == 2 && scenePhase == .active)
       }
       .onDisappear { processing.history.setVisible(false) }
       .task(
@@ -339,38 +320,12 @@ struct VocalRootView: View {
         guard processing.sessionReady, scenePhase == .active, !auth.isOffline else { return }
         if let job = try? await push.resolvePendingTap() {
           processing.selectedJobID = job.id
-          await processing.history.select(job.id)
-          tab = 0
-          showingProcessing = true
+          tab = 2
         }
       }
       .onChange(of: push.refreshHint) { _, _ in
-        guard scenePhase == .active else { return }
+        guard tab == 2, scenePhase == .active else { return }
         Task { await processing.history.refreshAfterChange() }
       }
-  }
-
-  private func openDetails(_ job: Job) {
-    if let task = AudioTaskPresentation.merge(
-      pipelines: processing.pipeline.pipelines,
-      uploads: processing.repository.operations, jobs: processing.history.jobs
-    ).first(where: { $0.jobID == job.id }) {
-      processing.select(task)
-    } else {
-      processing.selectedJobID = job.id
-      Task { await processing.history.select(job.id) }
-    }
-    tab = 0
-    showingProcessing = true
-  }
-
-  private var processingView: some View {
-    ProcessingRootView(
-      model: processing, repository: processing.repository, player: player,
-      outputProgress: artifacts.progress.mapValues { progress in
-        progress.totalBytes.map { Double(progress.receivedBytes) / Double($0) }
-      }, requestNotifications: requestNotifications
-    )
-    .background(VocalStyle.background(scheme))
   }
 }

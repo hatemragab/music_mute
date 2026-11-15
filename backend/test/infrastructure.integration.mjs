@@ -40,10 +40,11 @@ test(
       const redis = probe.get(SECURITY_REDIS);
       assert.equal(await redis.ping(), 'PONG');
       assert.equal(redis.options.db, 2);
-      assert.equal(await probe.get(StorageClient).config.region(), 'auto');
+      assert.equal(await probe.get(StorageClient).config.region(), 'us-east-1');
       await redis.set('isolated:restart-probe', 'retained', 'EX', 120);
 
-      const endpoint = (name) => `http://127.0.0.1:${apiPort}/health/${name}`;
+      const endpoint = (name) =>
+        `http://127.0.0.1:${apiPort}/api/v1/health/${name}`;
       const ready = async () => {
         try {
           return (
@@ -67,16 +68,11 @@ test(
         signal: AbortSignal.timeout(7000),
       });
       assert.equal(unavailable.status, 503);
-      const problem = await unavailable.json();
-      assert.equal(
-        unavailable.headers.get('content-type'),
-        'application/problem+json; charset=utf-8',
-      );
-      assert.equal(problem.type, 'about:blank');
-      assert.equal(problem.status, 503);
-      assert.equal(problem.code, 'SERVICE_UNAVAILABLE');
-      assert.equal(problem.detail, 'Service unavailable');
-      assert.equal(problem.request_id, unavailable.headers.get('x-request-id'));
+      assert.deepEqual(await unavailable.json(), {
+        statusCode: 503,
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Service unavailable',
+      });
       assert.equal((await fetch(endpoint('live'))).status, 200);
       databases.startRedis();
       await until(ready, 'API reconnects after external Redis restarts');

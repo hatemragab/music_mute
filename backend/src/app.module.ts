@@ -1,5 +1,3 @@
-import { LocalMediaSyncsModule } from './local-media-syncs/local-media-syncs.module.js';
-import { AdminNotificationsModule } from './admin-notifications/admin-notifications.module.js';
 import { Module } from '@nestjs/common';
 import { InfrastructureModule } from './infrastructure/infrastructure.module.js';
 import { SecurityModule } from './http/security.module.js';
@@ -10,7 +8,6 @@ import { AudioProcessingModule } from './processing/processing.module.js';
 import { PublicPagesModule } from './public-pages/public-pages.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { ReleasesModule } from './releases/releases.module.js';
-import { MacosUpdatesModule } from './macos-updates/macos-updates.module.js';
 import { AdminUsersModule } from './admin-users/admin-users.module.js';
 import { AdminJobsModule } from './admin-jobs/admin-jobs.module.js';
 import { AdminMediaModule } from './admin-jobs/admin-media.module.js';
@@ -20,8 +17,6 @@ import { AdminHealthModule } from './admin-observability/admin-health.module.js'
 import { WorkerFleetModule } from './worker-fleet/worker-fleet.module.js';
 import { AbuseProtectionModule } from './abuse-protection/abuse-protection.module.js';
 import { WorkerHintsModule } from './worker-hints/worker-hints.module.js';
-import { RealtimeModule } from './realtime/realtime.module.js';
-import { YouTubeCommunityModule } from './youtube-community/youtube-community.module.js';
 
 @Module({
   imports: [
@@ -32,12 +27,9 @@ import { YouTubeCommunityModule } from './youtube-community/youtube-community.mo
     AbuseProtectionModule,
     OperationsModule,
     AudioProcessingModule,
-    LocalMediaSyncsModule,
-    YouTubeCommunityModule,
     PublicPagesModule,
     AdminModule,
     ReleasesModule,
-    MacosUpdatesModule,
     AdminUsersModule,
     AdminJobsModule,
     AdminMediaModule,
@@ -45,8 +37,6 @@ import { YouTubeCommunityModule } from './youtube-community/youtube-community.mo
     AdminExportsModule,
     AdminHealthModule,
     WorkerFleetModule,
-    RealtimeModule,
-    AdminNotificationsModule,
   ],
   controllers: [HealthController],
 })

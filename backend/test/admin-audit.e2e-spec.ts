@@ -62,12 +62,12 @@ describe('admin audit HTTP boundary', () => {
       .request('get', '/admin/audit?limit=10', undefined, token)
       .expect(200);
     expect(response.headers['cache-control']).toBe('no-store');
-    expect(response.body).toMatchObject({ items: [], next_cursor: null });
+    expect(response.body).toMatchObject({ items: [], nextCursor: null });
     const invalid = await harness
       .request('get', '/admin/audit?limit=101', undefined, token)
       .expect(400);
     expect(invalid.body.code).toBe('INVALID_REQUEST');
-    expect(invalid.body.request_id).toBeTruthy();
+    expect(invalid.body.requestId).toBeTruthy();
   });
 
   it('passes only the authenticated actor to receipt lookup and rejects extra query fields', async () => {

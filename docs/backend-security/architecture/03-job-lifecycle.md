@@ -8,14 +8,10 @@ the execution boundary.
 
 ## Account capacity
 
-By default, an account may hold:
+An account may hold:
 
 - one processing job; and
-- twenty waiting jobs.
-
-The default applies when no global account policy has been saved. Existing stored
-policies remain authoritative; update their `max_waiting_jobs` through the
-administrator account-policy settings to adopt the new limit.
+- three waiting jobs.
 
 Waiting capacity includes `awaiting_upload` and verified `queued` jobs. Processing
 capacity includes claim/validation, inference, result upload, and exact finalization.
@@ -26,12 +22,12 @@ fence/transaction pattern so simultaneous requests cannot exceed the limits.
 
 ## State groups
 
-| Group        | Public states                                                                     | Capacity                    |
-| ------------ | --------------------------------------------------------------------------------- | --------------------------- |
-| Preparing    | `awaiting_upload`                                                                 | One of twenty waiting slots |
-| Ready to run | `queued`                                                                          | One of twenty waiting slots |
-| Processing   | `validating`, `processing`, `uploading_result`, `interrupted`, `cancel_requested` | Single processing slot      |
-| Terminal     | `ready`, `failed`, `cancelled`, deleted                                           | No queue slot               |
+| Group        | Public states                                                                     | Capacity                   |
+| ------------ | --------------------------------------------------------------------------------- | -------------------------- |
+| Preparing    | `awaiting_upload`                                                                 | One of three waiting slots |
+| Ready to run | `queued`                                                                          | One of three waiting slots |
+| Processing   | `validating`, `processing`, `uploading_result`, `interrupted`, `cancel_requested` | Single processing slot     |
+| Terminal     | `ready`, `failed`, `cancelled`, deleted                                           | No queue slot              |
 
 The exact public status names remain compatible where possible. Internal attempt
 state does not leak through public serializers.

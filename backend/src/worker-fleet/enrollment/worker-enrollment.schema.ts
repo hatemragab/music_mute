@@ -52,7 +52,7 @@ const qualificationReservation =
 const qualificationObject = new MongoSchema<ObjectIdentity>(
   {
     key: { type: String, required: true, maxlength: 1024 },
-    etag: { type: String, required: true, maxlength: 1024 },
+    versionId: { type: String, required: true, maxlength: 1024 },
     bytes: {
       type: Number,
       required: true,
@@ -84,14 +84,6 @@ export class WorkerEnrollmentInvitation {
   codeDigest!: string;
   @Prop({ required: true, immutable: true, maxlength: 128 })
   createdByUid!: string;
-  /** Registration provenance only; never a machine authorization dependency. */
-  @Prop({
-    type: String,
-    immutable: true,
-    default: null,
-    match: /^[a-f0-9]{24}$/,
-  })
-  registeredByUserId!: string | null;
   @Prop({ type: String, default: null, maxlength: 100 })
   initialPolicyId!: string | null;
   @Prop({ type: String, required: true, enum: WORKER_INVITATION_STATES })
@@ -124,6 +116,10 @@ WorkerEnrollmentInvitationSchema.index(
   { codeDigest: 1 },
   { unique: true, name: 'worker_invitation_digest_unique' },
 );
+WorkerEnrollmentInvitationSchema.index(
+  { state: 1, expiresAt: 1 },
+  { name: 'worker_invitation_lifecycle' },
+);
 
 @Schema({
   collection: 'worker_installation_sessions',
@@ -141,13 +137,6 @@ export class WorkerInstallationSession {
   _id!: string;
   @Prop({ required: true, immutable: true, match: UUID_V4_PATTERN })
   invitationId!: string;
-  @Prop({
-    type: String,
-    immutable: true,
-    default: null,
-    match: /^[a-f0-9]{24}$/,
-  })
-  registeredByUserId!: string | null;
   @Prop({ required: true, immutable: true, match: SHA256_HEX_PATTERN })
   credentialDigest!: string;
   @Prop({ required: true, immutable: true, match: UUID_V4_PATTERN })
@@ -216,6 +205,6 @@ WorkerInstallationSessionSchema.index(
   { unique: true, name: 'worker_installation_credential_unique' },
 );
 WorkerInstallationSessionSchema.index(
-  { machineId: 1 },
-  { name: 'worker_installation_machine' },
+  { phase: 1, expiresAt: 1 },
+  { name: 'worker_installation_lifecycle' },
 );

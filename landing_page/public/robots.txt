@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://music-mute.com/sitemap.xml

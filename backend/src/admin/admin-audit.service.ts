@@ -53,8 +53,6 @@ export class AdminAuditService implements OnModuleInit {
     }
     const records = await this.events
       .find(filter)
-      // The single-field TTL index cannot provide the cursor's _id tie-breaker.
-      .hint('admin_audit_time')
       .sort({ at: -1, _id: -1 })
       .limit(query.limit + 1)
       .maxTimeMS(5000)

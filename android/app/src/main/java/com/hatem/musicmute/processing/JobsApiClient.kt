@@ -15,7 +15,6 @@ import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.json.*
 
 interface JobsApi {
-    val realtime: RealtimeClient? get() = null
     suspend fun create(requestId: String, input: InputDeclaration): CreateReservation
     suspend fun createWithMetadata(
         requestId: String,
@@ -48,7 +47,6 @@ class JobsApiClient(
     private val installationId: () -> String,
     private val onUpdateRequired: () -> Unit = {},
     private val nowNanos: () -> Long = System::nanoTime,
-    override val realtime: RealtimeClient? = null,
 ) : JobsApi {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val requests = Mutex()
@@ -63,14 +61,12 @@ class JobsApiClient(
         input: InputDeclaration,
         metadata: CreateJobMetadata,
     ): CreateReservation {
-        if (metadata.sourceKind == SourceKind.URL || metadata.sourceUrl != null || metadata.source == "youtube")
-            throw JobsFailure(JobsProblem.INVALID_INPUT)
         uuid(requestId)
         val body = buildJsonObject {
             put("requestId", requestId)
-            put("trimEnabled", metadata.trimEnabled)
             metadata.sourceTitle?.let { put("sourceTitle", validatedName(it)) }
             metadata.sourceKind?.let { put("sourceKind", it.wireValue) }
+            metadata.sourceUrl?.let { put("sourceUrl", it) }
             metadata.clientStartedAt?.let { put("clientStartedAt", wireInstant(it)) }
             metadata.policyVersion?.let { put("policyVersion", it) }
             metadata.preparationProfileId?.let { put("preparationProfileId", it) }
@@ -83,12 +79,8 @@ class JobsApiClient(
         }
     }
 
-    /** Successful checkouts only; the UI cache must survive a failed/offline request. */
-    suspend fun checkoutMediaPolicy(authenticated: Boolean = true): ProcessingMediaPolicy =
-        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schema_version=2", authenticated = authenticated))
-
     override suspend fun mediaPolicy(): ProcessingMediaPolicy = try {
-        checkoutMediaPolicy()
+        ProcessingMediaPolicy.parse(request("GET", "/processing-policy?schemaVersion=2"))
     } catch (error: JobsFailure) {
         if (error.problem in setOf(JobsProblem.JOB_NOT_FOUND, JobsProblem.OFFLINE)) ProcessingMediaPolicy.STANDARD else throw error
     }
@@ -98,18 +90,17 @@ class JobsApiClient(
 
     override suspend fun renewUpload(id: String, requestId: String): UploadGrant {
         uuid(requestId)
-        return decode<UploadGrant>(request("POST", "${path(id)}/upload-grants",
+        return decode<UploadGrant>(request("POST", "${path(id)}/upload-url",
             buildJsonObject { put("requestId", requestId) }.toString(), true)).also(::validateUpload)
     }
 
     override suspend fun confirmUpload(id: String): JobMutation =
-        decode(request("POST", "${path(id)}/upload-completions", "{}", true))
+        decode(request("POST", "${path(id)}/upload-complete", "{}", true))
 
     override suspend fun list(cursor: String?, status: String?): JobPage {
         if (cursor != null && cursor.length > 512) invalidInput()
         if (status != null && JobStatus.entries.none { it.wireValue == status }) invalidInput()
-        val query = "?limit=${jobHistoryPageSize(cursor)}" +
-            (cursor?.let { "&cursor=${encode(it)}" } ?: "") +
+        val query = "?limit=20" + (cursor?.let { "&cursor=${encode(it)}" } ?: "") +
             (status?.let { "&status=${encode(it)}" } ?: "")
         return decode(request("GET", "/jobs$query"))
     }
@@ -117,11 +108,11 @@ class JobsApiClient(
     override suspend fun detail(id: String): Job = decode(request("GET", path(id)))
 
     override suspend fun cancel(id: String): JobMutation =
-        decode(request("POST", "${path(id)}/cancellations", "{}"))
+        decode(request("POST", "${path(id)}/cancel", "{}"))
 
     override suspend fun retry(id: String, requestId: String): JobMutation {
         uuid(requestId)
-        return decode(request("POST", "${path(id)}/retry-attempts", buildJsonObject { put("requestId", requestId) }.toString(), true))
+        return decode(request("POST", "${path(id)}/retry", buildJsonObject { put("requestId", requestId) }.toString(), true))
     }
 
     override suspend fun download(id: String, artifact: String): DownloadGrant {
@@ -131,7 +122,7 @@ class JobsApiClient(
     override suspend fun download(id: String, artifact: String, requestId: String): DownloadGrant {
         if (artifact !in setOf("input", "output")) invalidInput()
         uuid(requestId)
-        return decode<DownloadGrant>(request("POST", "${path(id)}/download-grants", buildJsonObject {
+        return decode<DownloadGrant>(request("POST", "${path(id)}/download-url", buildJsonObject {
             put("artifact", artifact)
             put("requestId", requestId)
         }.toString())).also { validateUrl(it.url) }
@@ -159,12 +150,12 @@ class JobsApiClient(
         )))
     }
 
-    private suspend fun request(method: String, path: String, body: String? = null, processingAccess: Boolean = false, authenticated: Boolean = true): String = requests.withLock {
+    private suspend fun request(method: String, path: String, body: String? = null, processingAccess: Boolean = false): String = requests.withLock {
         val remaining = retryNotBeforeNanos?.minus(nowNanos()) ?: 0
         if (remaining > 0) throw JobsFailure(JobsProblem.RATE_LIMITED, (remaining + 999_999_999) / 1_000_000_000)
         val headers = if (processingAccess) mapOf("X-Installation-Id" to installationId().also(::uuid)) else emptyMap()
         try {
-            auth.request(method, path, body, authenticated = authenticated, additionalHeaders = headers, responseFailure = ::failure)
+            auth.request(method, path, body, additionalHeaders = headers, responseFailure = ::failure)
         } catch (failure: AuthFailure) {
             throw JobsFailure(when (failure.problem) {
                 AuthProblem.UNAUTHENTICATED, AuthProblem.REAUTH_REQUIRED -> JobsProblem.UNAUTHENTICATED

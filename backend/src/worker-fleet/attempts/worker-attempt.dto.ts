@@ -1,8 +1,5 @@
-import { MAX_AUDIO_DURATION_SECONDS } from '../../jobs/media-limits.js';
-import { EXECUTION_TIMING_STAGES } from '../../jobs/job-stage-timing.js';
 import {
   ArrayMaxSize,
-  IsArray,
   ArrayUnique,
   Equals,
   IsBoolean,
@@ -36,12 +33,6 @@ export class WorkerProcessingStageTimingDto {
   @IsInt() @Min(0) @Max(7_200_000) durationMs!: number;
 }
 
-export class ExecutionStageTimingDto {
-  @IsIn(EXECUTION_TIMING_STAGES) stage!: string;
-  @IsInt() @Min(0) @Max(7_200_000) durationMs!: number;
-  @IsBoolean() complete!: boolean;
-}
-
 export class WorkerAttemptOwnershipDto {
   @IsUUID('4') requestId!: string;
   @IsUUID('4') workerId!: string;
@@ -51,16 +42,7 @@ export class WorkerAttemptOwnershipDto {
 
 export class WorkerInputGrantDto extends WorkerAttemptOwnershipDto {}
 
-export class TimedWorkerAttemptDto extends WorkerAttemptOwnershipDto {
-  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
-  @ArrayMaxSize(EXECUTION_TIMING_STAGES.length)
-  @ArrayUnique((timing: ExecutionStageTimingDto) => timing.stage)
-  @ValidateNested({ each: true })
-  @Type(() => ExecutionStageTimingDto)
-  executionTimings?: ExecutionStageTimingDto[];
-}
-
-export class UpdateWorkerAttemptProgressDto extends TimedWorkerAttemptDto {
+export class UpdateWorkerAttemptProgressDto extends WorkerAttemptOwnershipDto {
   @IsInt() @Min(1) @Max(1_000_000) sequence!: number;
   @IsIn(WORKER_PROGRESS_PHASES) phase!: WorkerProgressPhase;
   @ValidateIf((_object: unknown, value: unknown) => value !== null)
@@ -76,19 +58,12 @@ export class WorkerOutputGrantDto extends WorkerAttemptOwnershipDto {
   @Equals('audio/mpeg') contentType!: 'audio/mpeg';
   @IsNumber({ maxDecimalPlaces: 6 })
   @Min(0.001)
-  @Max(MAX_AUDIO_DURATION_SECONDS)
+  @Max(1200)
   measuredDurationSeconds!: number;
 }
 
-export class CompleteWorkerAttemptDto extends TimedWorkerAttemptDto {
-  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
-  @IsArray()
-  @ArrayMaxSize(3001)
-  comparisonRanges?: number[][];
-  @IsString()
-  @MaxLength(1024)
-  @Matches(/^"[\x21\x23-\x7e]{1,1022}"$/u)
-  etag!: string;
+export class CompleteWorkerAttemptDto extends WorkerAttemptOwnershipDto {
+  @IsString() @MaxLength(1024) versionId!: string;
   @IsIn(WORKER_RECIPE_IDS) recipeId!: WorkerRecipeId;
   @IsInt() @Min(0) recipeRevision!: number;
   @Matches(/^[a-f0-9]{64}$/) recipeDigest!: string;
@@ -114,7 +89,7 @@ const WORKER_FAILURE_CODES: readonly JobFailureCode[] = [
   'OUTPUT_UPLOAD_FAILED',
 ];
 
-export class FailWorkerAttemptDto extends TimedWorkerAttemptDto {
+export class FailWorkerAttemptDto extends WorkerAttemptOwnershipDto {
   @IsIn(WORKER_FAILURE_CODES) code!: JobFailureCode;
   @IsString() @MaxLength(500) summary!: string;
 }

@@ -1,7 +1,3 @@
-import {
-  initializeLocalDiagnostics,
-  localDiagnostics,
-} from "./diagnostics/local-debug";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ErrorBoundary } from "@sentry/react";
 import { StrictMode } from "react";
@@ -16,15 +12,11 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { initializeSentry } from "./observability/sentry";
 import "./styles.css";
 
-initializeLocalDiagnostics();
 initializeSentry();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary
-      onError={(error) =>
-        localDiagnostics.emit("runtime.caught", error, "error")
-      }
       fallback={<p>The dashboard encountered an error. Reload to retry.</p>}
     >
       <QueryClientProvider client={queryClient}>

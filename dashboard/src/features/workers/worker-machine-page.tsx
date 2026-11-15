@@ -1,6 +1,5 @@
-import { useLiveQuery } from "@/realtime/hooks";
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowLeft,
@@ -12,17 +11,15 @@ import {
 } from "lucide-react";
 import { Link, useParams } from "react-router";
 
-import {
-  createOperationId,
-  OperationOutcomeUnknownError,
-} from "@/api/api-client";
+import { createOperationId } from "@/api/api-client";
+import { DASHBOARD_POLL_INTERVAL_MS } from "@/app/polling";
 import { useAdminSession, useApiClient } from "@/auth/admin-session";
-import { CursorPagination } from "@/components/cursor-pagination";
 import {
   ErrorState,
   LoadingState,
   PageHeader,
   PageSection,
+  RefreshButton,
 } from "@/components/page";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatusBadge } from "@/components/status-badge";
@@ -36,10 +33,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useVisibleInterval } from "@/hooks/use-visible-interval";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import {
-  approveWorkerCapacity,
   changeWorkerMachineState,
+  getWorkerDiagnostics,
+  getWorkerMachine,
   requestWorkerBenchmark,
   requestWorkerDoctor,
 } from "./worker-api";
@@ -49,23 +48,10 @@ import {
   workerContactState,
 } from "./worker-status";
 import { workerRecipeLabel } from "./worker-recipes";
-import {
-  WorkerCommandHistory,
-  WorkerReadinessPanel,
-} from "./worker-insight-panels";
 import type { WorkerMachineDetail } from "./worker-types";
-import { DeleteWorkerMachineControl } from "./delete-worker-machine-control";
-import { workerInstallationProfile } from "./worker-platform";
 
 type MachineAction =
-  | "pause"
-  | "drain"
-  | "resume"
-  | "revoke"
-  | "doctor"
-  | "runtime"
-  | "engine"
-  | "benchmark";
+  "pause" | "drain" | "resume" | "revoke" | "doctor" | "benchmark";
 
 const actionCopy: Record<
   MachineAction,
@@ -100,22 +86,10 @@ const actionCopy: Record<
       "Queue bounded service, storage, model, provider and FFmpeg checks for this machine.",
     label: "Request doctor",
   },
-  runtime: {
-    title: "Request runtime snapshot",
-    description:
-      "Check the supervisor and scratch storage. Updated workers also report uptime, process memory, host memory and disk capacity. No inference benchmark is started.",
-    label: "Request runtime snapshot",
-  },
-  engine: {
-    title: "Request engine checks",
-    description:
-      "Run the packaged model, GPU provider and FFmpeg probe. These components are validated together; a shared failure may leave individual checks incomplete.",
-    label: "Request engine checks",
-  },
   benchmark: {
     title: "Request one benchmark",
     description:
-      "Queue one Kim Vocal 2 qualification pass. The command defers while a slot is busy.",
+      "Queue one iteration of the first qualified recipe. The command defers while a slot is busy.",
     label: "Request benchmark",
   },
 };
@@ -125,34 +99,23 @@ export function WorkerMachinePage() {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const { can, reauthenticate } = useAdminSession();
-  const [uncertain, setUncertain] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [deletionBlocked, setDeletionBlocked] = useState(false);
   const [pendingAction, setPendingAction] = useState<MachineAction | null>(
     null,
   );
-  const [capacityTarget, setCapacityTarget] = useState<{
-    gpuId: string;
-    revision: number;
-  } | null>(null);
-  const [diagnosticPage, setDiagnosticPage] = useState<{
-    machineId: string;
-    cursor: string | null;
-  }>({ machineId: id, cursor: null });
-  const diagnosticCursor =
-    diagnosticPage.machineId === id ? diagnosticPage.cursor : null;
-  const machine = useLiveQuery({
+  const machine = useQuery({
     queryKey: ["worker-machine", id],
-    resource: "admin.worker",
-    params: { id },
+    queryFn: () => getWorkerMachine(client, id),
     enabled: Boolean(id),
   });
-  const diagnostics = useLiveQuery({
-    queryKey: ["worker-diagnostics", id, diagnosticCursor],
-    resource: "admin.diagnostics",
-    params: { id, cursor: diagnosticCursor, limit: 10 },
+  const diagnostics = useQuery({
+    queryKey: ["worker-diagnostics", id],
+    queryFn: () => getWorkerDiagnostics(client, id),
     enabled: Boolean(id) && can("workers.logs.read"),
   });
+  useVisibleInterval(() => {
+    void machine.refetch();
+    if (can("workers.logs.read")) void diagnostics.refetch();
+  }, DASHBOARD_POLL_INTERVAL_MS.live);
   const mutation = useMutation({
     mutationFn: async ({
       action,
@@ -168,24 +131,15 @@ export function WorkerMachinePage() {
         expectedRevision: current.machine.revision,
         reason,
       };
-      if (uncertain || deletionBlocked)
-        throw new Error(
-          "Resolve the previous operation before issuing another command.",
-        );
-      if (["doctor", "runtime", "engine"].includes(action))
+      if (action === "doctor")
         return requestWorkerDoctor(client, id, {
           ...command,
-          checks:
-            action === "runtime"
-              ? ["service", "storage"]
-              : action === "engine"
-                ? ["model", "provider", "ffmpeg"]
-                : ["service", "storage", "model", "provider", "ffmpeg"],
+          checks: ["service", "storage", "model", "provider", "ffmpeg"],
         });
       if (action === "benchmark") {
         const recipeId = current.machine.capabilities
           .flatMap((capability) => capability.recipeIds)
-          .find((recipe) => recipe === "kim-vocals-v2");
+          .at(0);
         if (!recipeId)
           throw new Error("This machine has no qualified benchmark recipe.");
         return requestWorkerBenchmark(client, id, {
@@ -194,63 +148,21 @@ export function WorkerMachinePage() {
           iterations: 1,
         });
       }
-      if (
-        action === "pause" ||
-        action === "drain" ||
-        action === "resume" ||
-        action === "revoke"
-      )
-        return changeWorkerMachineState(client, id, action, command);
-      throw new Error("Unknown worker action.");
+      return changeWorkerMachineState(client, id, action, command);
     },
-    onError: (error) => {
-      if (error instanceof OperationOutcomeUnknownError) {
-        setUncertain(error.operationId);
-        setPendingAction(null);
-      }
-    },
-    onSuccess: async (result) => {
-      setNotice(
-        "commandId" in result
-          ? `Command ${result.commandId} accepted. Follow its result in Recent commands.`
-          : "Worker state updated.",
-      );
-      setDiagnosticPage({ machineId: id, cursor: null });
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["worker-machine", id] });
       await queryClient.invalidateQueries({ queryKey: ["worker-machines"] });
-      await queryClient.invalidateQueries({
-        queryKey: ["worker-diagnostics", id],
-      });
       setPendingAction(null);
     },
   });
 
-  const deletionControl = (
-    <DeleteWorkerMachineControl
-      key={id}
-      machine={machine.data?.machine ?? null}
-      disabled={mutation.isPending || Boolean(uncertain)}
-      onBlockedChange={setDeletionBlocked}
-    />
-  );
-  if (machine.isLoading)
-    return (
-      <div className="space-y-6">
-        {deletionControl}
-        <LoadingState />
-      </div>
-    );
+  if (machine.isLoading) return <LoadingState />;
   if (machine.isError)
     return (
-      <div className="space-y-6">
-        {deletionControl}
-        <ErrorState
-          error={machine.error}
-          retry={() => void machine.refetch()}
-        />
-      </div>
+      <ErrorState error={machine.error} retry={() => void machine.refetch()} />
     );
-  if (!machine.data) return <div className="space-y-6">{deletionControl}</div>;
+  if (!machine.data) return null;
   const data = machine.data;
   const currentAttempt = data.attempts.find((attempt) =>
     ["claimed", "running", "uploading"].includes(attempt.state),
@@ -262,7 +174,6 @@ export function WorkerMachinePage() {
 
   return (
     <div className="space-y-6">
-      {deletionControl}
       <Link
         to="/workers"
         className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
@@ -272,80 +183,37 @@ export function WorkerMachinePage() {
       <PageHeader
         title={data.machine.label}
         description={`${data.machine.machineId} · revision ${data.machine.revision}`}
+        actions={
+          <>
+            <RefreshButton
+              refreshing={machine.isFetching || diagnostics.isFetching}
+              onRefresh={() => {
+                void machine.refetch();
+                if (can("workers.logs.read")) void diagnostics.refetch();
+              }}
+            />
+            {can("workers.manage") && data.machine.status !== "revoked" ? (
+              <MachineActions data={data} onAction={setPendingAction} />
+            ) : null}
+          </>
+        }
       />
-      {can("workers.manage") && data.machine.status !== "revoked" ? (
-        <MachineActions
-          data={data}
-          disabled={mutation.isPending || Boolean(uncertain) || deletionBlocked}
-          onAction={setPendingAction}
-        />
-      ) : null}
-      {notice && (
-        <p role="status" className="break-words text-sm">
-          {notice}
-        </p>
-      )}
-      {uncertain && (
-        <p role="alert" className="break-words text-sm text-destructive">
-          Command outcome is unresolved. Further commands are disabled in this
-          page session to prevent duplicates. Check recent history and operation{" "}
-          {uncertain} before returning to this page.
-        </p>
-      )}
-      <WorkerReadinessPanel data={data} />
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardContent className="space-y-6 p-5">
             <PageSection title="Identity and runtime">
               <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <Datum label="Registered through account">
-                  {data.machine.registeredByUserId ? (
-                    can("users.read") ? (
-                      <Link
-                        className="break-all font-mono text-xs text-primary hover:underline"
-                        to={`/users/${encodeURIComponent(data.machine.registeredByUserId)}`}
-                      >
-                        {data.machine.registeredByUserId}
-                      </Link>
-                    ) : (
-                      <span className="break-all font-mono text-xs">
-                        {data.machine.registeredByUserId}
-                      </span>
-                    )
-                  ) : (
-                    "Legacy registration"
-                  )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Registration history only. This machine runs independently
-                    of that account.
-                  </p>
-                </Datum>
                 <Datum label="Machine state">
                   <StatusBadge value={data.machine.status} />
                 </Datum>
                 <Datum label="Contact">
-                  <StatusBadge
-                    value={
-                      data.asOf
-                        ? workerContactState(
-                            data.machine,
-                            Date.parse(data.asOf),
-                          )
-                        : "unknown"
-                    }
-                  />
+                  <StatusBadge value={workerContactState(data.machine)} />
                 </Datum>
                 <Datum label="Last contact">
                   {formatDateTime(data.machine.lastSeenAt)}
                 </Datum>
                 <Datum label="Release">
                   {data.machine.runtime?.workerVersion ?? "Not reported"}
-                </Datum>
-                <Datum label="Installation profile">
-                  {workerInstallationProfile(data.machine).label}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {workerInstallationProfile(data.machine).detail}
-                  </p>
                 </Datum>
                 <Datum label="Protocol">
                   {data.machine.runtime?.protocolVersion ?? "Not reported"}
@@ -363,12 +231,6 @@ export function WorkerMachinePage() {
                   {data.installation?.phase ?? "Not available"}
                 </Datum>
               </dl>
-              <p className="text-xs text-muted-foreground">
-                Hardware and runtime fields are reported by the installation.
-                Backend qualification outcome and current machine policy remain
-                separate; a displayed local benchmark or profile does not grant
-                processing capacity.
-              </p>
             </PageSection>
             <PageSection title="Session and capacity">
               {data.machine.session ? (
@@ -386,11 +248,7 @@ export function WorkerMachinePage() {
                   No active supervisor session.
                 </p>
               )}
-              <Table
-                tabIndex={0}
-                aria-label="Worker slots"
-                className="focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
-              >
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Slot</TableHead>
@@ -471,22 +329,6 @@ export function WorkerMachinePage() {
                         </li>
                       ))}
                     </ul>
-                    {can("workers.manage") &&
-                    data.machine.status !== "revoked" &&
-                    capability.maxSlots === 1 ? (
-                      <Button
-                        className="mt-3"
-                        variant="outline"
-                        onClick={() =>
-                          setCapacityTarget({
-                            gpuId: capability.gpuId,
-                            revision: data.machine.revision,
-                          })
-                        }
-                      >
-                        Approve two workers
-                      </Button>
-                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -528,46 +370,10 @@ export function WorkerMachinePage() {
             ) : (
               <DiagnosticList data={diagnostics.data?.items ?? []} />
             )}
-            {can("workers.logs.read") ? (
-              <CursorPagination
-                key={id}
-                cursor={diagnosticCursor}
-                nextCursor={diagnostics.data?.nextCursor ?? null}
-                pending={diagnostics.isFetching}
-                onCursorChange={(cursor) =>
-                  setDiagnosticPage({ machineId: id, cursor })
-                }
-              />
-            ) : null}
-            <WorkerCommandHistory commands={data.commands} />
+            <CommandHistory commands={data.commands} />
           </PageSection>
         </CardContent>
       </Card>
-      <ReasonDialog
-        open={capacityTarget !== null}
-        onOpenChange={(open) => !open && setCapacityTarget(null)}
-        title="Approve two workers"
-        description="Confirm that you reviewed a passing two-worker qualification for this installed machine. Include the benchmark evidence in the reason. This approves the backend ceiling; the local runtime must still validate and enable two workers."
-        confirmLabel="Approve two workers"
-        freshAuth
-        onReauthenticate={reauthenticate}
-        summary={
-          <p>
-            {data.machine.label} · GPU {capacityTarget?.gpuId} · 1 → 2 workers
-          </p>
-        }
-        onConfirm={async (reason) => {
-          if (!capacityTarget) return;
-          await approveWorkerCapacity(client, id, {
-            operationId: createOperationId(),
-            expectedRevision: capacityTarget.revision,
-            gpuId: capacityTarget.gpuId,
-            qualificationConfirmed: true,
-            reason,
-          });
-          setCapacityTarget(null);
-        }}
-      />
       <ReasonDialog
         open={Boolean(pendingAction)}
         onOpenChange={(open) => !open && setPendingAction(null)}
@@ -598,29 +404,13 @@ export function WorkerMachinePage() {
 function MachineActions({
   data,
   onAction,
-  disabled,
 }: {
   data: WorkerMachineDetail;
-  disabled: boolean;
   onAction(action: MachineAction): void;
 }) {
   const status = data.machine.status;
-  const doctorPending = data.commands.some(
-    (command) => command.kind === "doctor" && command.state === "pending",
-  );
-  const benchmarkUnavailable =
-    data.commands.some(
-      (command) => command.kind === "benchmark" && command.state === "pending",
-    ) ||
-    !data.machine.capabilities.some((capability) =>
-      capability.recipeIds.includes("kim-vocals-v2"),
-    );
   return (
-    <fieldset
-      disabled={disabled}
-      className="flex flex-wrap gap-2"
-      aria-label="Worker commands"
-    >
+    <>
       {status === "active" ? (
         <>
           <Button variant="outline" onClick={() => onAction("pause")}>
@@ -635,44 +425,16 @@ function MachineActions({
           <Play aria-hidden="true" /> Resume
         </Button>
       ) : null}
-      <Button
-        variant="outline"
-        disabled={doctorPending}
-        onClick={() => onAction("runtime")}
-      >
-        <Activity aria-hidden="true" /> Runtime snapshot
-      </Button>
-      <Button
-        variant="outline"
-        disabled={doctorPending}
-        onClick={() => onAction("engine")}
-      >
-        <HeartPulse aria-hidden="true" /> Engine checks
-      </Button>
-      <Button
-        variant="outline"
-        disabled={doctorPending}
-        onClick={() => onAction("doctor")}
-      >
+      <Button variant="outline" onClick={() => onAction("doctor")}>
         <HeartPulse aria-hidden="true" /> Doctor
       </Button>
-      <Button
-        variant="outline"
-        disabled={benchmarkUnavailable}
-        onClick={() => onAction("benchmark")}
-      >
+      <Button variant="outline" onClick={() => onAction("benchmark")}>
         <Gauge aria-hidden="true" /> Benchmark
       </Button>
       <Button variant="destructive" onClick={() => onAction("revoke")}>
         <Ban aria-hidden="true" /> Revoke
       </Button>
-      {(doctorPending || benchmarkUnavailable) && (
-        <p className="basis-full text-xs text-muted-foreground">
-          A pending command blocks another of the same kind. Benchmark also
-          requires the Kim Vocal 2 capability.
-        </p>
-      )}
-    </fieldset>
+    </>
   );
 }
 
@@ -735,11 +497,7 @@ function AttemptCard({
 function AttemptHistory({ data }: { data: WorkerMachineDetail }) {
   return (
     <div className="overflow-x-auto">
-      <Table
-        tabIndex={0}
-        aria-label="Worker attempt history"
-        className="focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
-      >
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Attempt</TableHead>
@@ -810,6 +568,42 @@ function DiagnosticList({
           ) : null}
         </details>
       ))}
+    </div>
+  );
+}
+
+function CommandHistory({
+  commands,
+}: {
+  commands: WorkerMachineDetail["commands"];
+}) {
+  const ordered = useMemo(() => commands.slice(0, 20), [commands]);
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-medium">Recent commands</h3>
+      {ordered.length ? (
+        <ul className="space-y-2">
+          {ordered.map((command) => (
+            <li
+              key={command.commandId}
+              className="rounded-lg border p-3 text-sm"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium capitalize">{command.kind}</span>
+                <StatusBadge value={command.state} />
+                <span className="text-xs text-muted-foreground">
+                  {formatDateTime(command.requestedAt)}
+                </span>
+              </div>
+              {command.summary ? (
+                <p className="mt-2 text-muted-foreground">{command.summary}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">No commands requested.</p>
+      )}
     </div>
   );
 }

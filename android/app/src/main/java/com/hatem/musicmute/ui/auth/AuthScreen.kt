@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
@@ -23,6 +24,7 @@ import com.hatem.musicmute.R
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.ui.design.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class FormMode {
@@ -46,6 +48,18 @@ internal fun AuthScreen(
     var password by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(state.resetCooldownUntil) {
+        now = android.os.SystemClock.elapsedRealtime()
+        while (now < state.resetCooldownUntil) {
+            delay(1000)
+            now = android.os.SystemClock.elapsedRealtime()
+        }
+    }
+    val cooldown =
+        if (state.resetEmail == email.trim())
+            ((state.resetCooldownUntil - now + 999) / 1000).coerceAtLeast(0)
+        else 0
     val enabled = !state.busy && auth.configured()
     fun switch(next: FormMode) {
         mode = next
@@ -163,43 +177,39 @@ internal fun AuthScreen(
                 Text(stringResource(R.string.auth_forgot_password))
             }
         }
-        CooldownContent(
-            if (visibleMode == FormMode.RESET && state.resetEmail == email.trim()) state.resetCooldownUntil else 0,
-        ) { cooldown ->
-            CreativePrimaryButton(
-                onClick = {
-                    keyboard?.hide()
-                    scope.launch {
-                        if (visibleMode == FormMode.RESET) auth.requestPasswordReset(email)
-                        else auth.signInEmail(email, password, visibleMode == FormMode.REGISTER, fullName)
-                        password = ""
-                        confirmation = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth-submit"),
-                busy = state.busy,
-                enabled =
-                    enabled &&
-                        validAuthEmail(email.trim()) &&
-                        (if (visibleMode == FormMode.RESET) cooldown == 0L
-                        else
-                            password.isNotEmpty() &&
-                                (visibleMode != FormMode.REGISTER ||
-                                    (password == confirmation && runCatching { validatedFullName(fullName) }.isSuccess))),
-            ) {
-                Text(
-                    if (visibleMode == FormMode.RESET && cooldown > 0)
-                        stringResource(R.string.auth_retry_seconds, cooldown)
+        CreativePrimaryButton(
+            onClick = {
+                keyboard?.hide()
+                scope.launch {
+                    if (visibleMode == FormMode.RESET) auth.requestPasswordReset(email)
+                    else auth.signInEmail(email, password, visibleMode == FormMode.REGISTER, fullName)
+                    password = ""
+                    confirmation = ""
+                }
+            },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth-submit"),
+            busy = state.busy,
+            enabled =
+                enabled &&
+                    validAuthEmail(email.trim()) &&
+                    (if (visibleMode == FormMode.RESET) cooldown == 0L
                     else
-                        stringResource(
-                            when (visibleMode) {
-                                FormMode.LOGIN -> R.string.auth_sign_in
-                                FormMode.REGISTER -> R.string.auth_create_account
-                                FormMode.RESET -> R.string.auth_send_reset
-                            }
-                        )
-                )
-            }
+                        password.isNotEmpty() &&
+                            (visibleMode != FormMode.REGISTER ||
+                                (password == confirmation && runCatching { validatedFullName(fullName) }.isSuccess))),
+        ) {
+            Text(
+                if (visibleMode == FormMode.RESET && cooldown > 0)
+                    stringResource(R.string.auth_retry_seconds, cooldown)
+                else
+                    stringResource(
+                        when (visibleMode) {
+                            FormMode.LOGIN -> R.string.auth_sign_in
+                            FormMode.REGISTER -> R.string.auth_create_account
+                            FormMode.RESET -> R.string.auth_send_reset
+                        }
+                    )
+            )
         }
         if (visibleMode != FormMode.RESET) {
             Row(
@@ -222,7 +232,14 @@ internal fun AuthScreen(
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth-google"),
             ) {
-                GoogleActionLabel(stringResource(R.string.auth_continue_google))
+                Icon(
+                    painterResource(R.drawable.google_g),
+                    null,
+                    Modifier.size(20.dp),
+                    tint = androidx.compose.ui.graphics.Color.Unspecified,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(stringResource(R.string.auth_continue_google))
             }
         }
         if (visibleMode == FormMode.LOGIN) {

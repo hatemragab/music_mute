@@ -9,8 +9,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,7 +21,6 @@ import androidx.compose.ui.unit.dp
 import com.hatem.musicmute.R
 import com.hatem.musicmute.library.LibraryEntry
 import com.hatem.musicmute.playback.*
-import com.hatem.musicmute.processing.ArtifactProgress
 import com.hatem.musicmute.ui.design.*
 import com.hatem.musicmute.ui.library.*
 
@@ -33,51 +30,11 @@ data class PlayerActions(
     val repeat: (RepeatMode) -> Unit, val autoNext: (Boolean) -> Unit,
     val queue: () -> Unit, val info: () -> Unit, val star: () -> Unit,
     val speed: (Float) -> Unit, val volume: (Float) -> Unit,
-    val original: (Boolean) -> Unit = {},
-    val saveVoice: () -> Unit = {},
-    val saveOriginal: () -> Unit = {},
 )
 
 @Composable
 fun PlayerScreen(state: PlaybackState, entry: LibraryEntry?, actions: PlayerActions) {
     FullPlayer(state, entry, actions)
-}
-
-// Only controls subscribe here; ticking position is collected by PlaybackProgress.
-@Composable
-fun PlayerScreen(
-    playback: StateFlow<PlaybackState>,
-    entry: LibraryEntry?,
-    actions: PlayerActions,
-    artifactProgress: StateFlow<Map<String, ArtifactProgress>>? = null,
-) {
-    val controls = remember(playback) { playback.controls() }
-    val state by controls.collectAsStateWithLifecycle(remember(playback) { playback.value.withoutPosition() })
-    val jobId = state.queue.getOrNull(state.currentIndex)?.key?.jobId
-    FullPlayer(
-        state,
-        entry,
-        actions,
-        progress = { WaveformProgress(playback, actions.seek) },
-        activityProgress = { PlayerDownloadProgress(jobId, artifactProgress, state.buffering || state.switching) },
-    )
-}
-
-@Composable
-fun MiniPlayer(
-    playback: StateFlow<PlaybackState>,
-    onOpen: () -> Unit,
-    onToggle: () -> Unit,
-    onNext: () -> Unit,
-    onClose: () -> Unit,
-    onSeek: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-    entry: LibraryEntry? = null,
-) {
-    val controls = remember(playback) { playback.controls() }
-    val state by controls.collectAsStateWithLifecycle(remember(playback) { playback.value.withoutPosition() })
-    MiniPlayer(state, onOpen, onToggle, onNext, onClose, onSeek, modifier,
-        progress = { PlaybackProgress(playback, onSeek, compact = true) }, entry = entry)
 }
 
 @Composable
@@ -89,11 +46,8 @@ fun MiniPlayer(
     onClose: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    progress: @Composable () -> Unit = { PlaybackProgress(state, onSeek, compact = true) },
-    entry: LibraryEntry? = null,
 ) {
-    if (!state.shouldShowMiniPlayer()) return
-    val currentEntry = state.matchingLibraryEntry(entry)
+    if (state.trackId == null) return
     Surface(
         modifier.widthIn(max = CreativeTokens.ContentWidth).fillMaxWidth()
             .padding(top = 8.dp, bottom = 20.dp),
@@ -110,12 +64,9 @@ fun MiniPlayer(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    LibraryThumbnail(currentEntry?.thumbnailUrl, Modifier.size(36.dp),
-                        shape = RoundedCornerShape(12.dp)) {
-                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                            Icon(Icons.Outlined.MusicNote, null,
-                                Modifier.padding(8.dp).size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                        Icon(Icons.Outlined.MusicNote, null,
+                            Modifier.padding(8.dp).size(20.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
                     Column(Modifier.weight(1f)) {
                         Text(state.queue.getOrNull(state.currentIndex)?.title?.takeIf { it.isNotBlank() }
@@ -134,15 +85,27 @@ fun MiniPlayer(
                     Icon(Icons.Outlined.Close, stringResource(R.string.creative_library_close))
                 }
             }
-            PlaybackActivityIndicator(state.buffering)
+            if (state.buffering) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (state.failed) Text(stringResource(R.string.creative_library_failed),
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-            progress()
+            var seeking by remember(state.trackId) { mutableStateOf<Float?>(null) }
+            val seekLabel = stringResource(R.string.creative_library_seek)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(audioTime(seeking?.toLong() ?: state.positionMs), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = seeking ?: state.positionMs.toFloat().coerceIn(0f, state.durationMs.coerceAtLeast(1).toFloat()),
+                    onValueChange = { seeking = it },
+                    onValueChangeFinished = { seeking?.let { onSeek(it.toLong()) }; seeking = null },
+                    valueRange = 0f..state.durationMs.coerceAtLeast(1).toFloat(),
+                    enabled = state.canSeekAudio(),
+                    modifier = Modifier.weight(1f).semantics { contentDescription = seekLabel },
+                )
+                Text(audioTime(state.durationMs),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
-
-internal fun PlaybackState.shouldShowMiniPlayer(): Boolean = trackId != null
 
 @Composable internal fun AutoNextRow(enabled: Boolean, onChange: (Boolean) -> Unit) {
     val description = stringResource(R.string.creative_library_auto_next)
@@ -152,5 +115,4 @@ internal fun PlaybackState.shouldShowMiniPlayer(): Boolean = trackId != null
     }
 }
 internal fun RepeatMode.nextMode() = when (this) { RepeatMode.OFF -> RepeatMode.ALL; RepeatMode.ALL -> RepeatMode.ONE; RepeatMode.ONE -> RepeatMode.OFF }
-internal fun RepeatMode.toggleCurrentTrackRepeat() = if (this == RepeatMode.ONE) RepeatMode.OFF else RepeatMode.ONE
 internal fun RepeatMode.label() = when (this) { RepeatMode.OFF -> R.string.creative_library_repeat_off; RepeatMode.ALL -> R.string.creative_library_repeat_all; RepeatMode.ONE -> R.string.creative_library_repeat_one }

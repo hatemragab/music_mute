@@ -20,9 +20,7 @@ import { workerError } from '../worker-errors.js';
 import { sanitizeWorkerDiagnosticLine } from '../telemetry/worker-diagnostic-sanitizer.js';
 import { WorkerCommand } from './worker-command.schema.js';
 import type {
-  ApproveWorkerCapacityDto,
   AdminWorkerListQueryDto,
-  AdminWorkerPageQueryDto,
   ApplyWorkerConfigDto,
   CompleteWorkerCommandDto,
   RequestWorkerBenchmarkDto,
@@ -89,42 +87,6 @@ export class WorkerControlService {
       .maxTimeMS(2000)
       .lean();
     if (!policy) throw workerError('WORKER_DEPENDENCY_UNAVAILABLE');
-    // Machines enrolled after a policy change start with revision zero. Reconcile
-    // their desired policy here as well as at API startup, without acknowledging
-    // it on the worker's behalf. Fence concurrent policy/session changes.
-    if (
-      machine.policyRevision > policy.revision ||
-      machine.desiredRevision > policy.revision ||
-      machine.appliedRevision > policy.revision
-    )
-      throw workerError('WORKER_CONFLICT');
-    if (
-      machine.policyRevision !== policy.revision ||
-      machine.desiredRevision !== policy.revision
-    ) {
-      const reconciled = await this.machines.updateOne(
-        {
-          _id: machine._id,
-          revision: machine.revision,
-          status: trusted({ $ne: 'revoked' }),
-          policyRevision: machine.policyRevision,
-          desiredRevision: machine.desiredRevision,
-          'currentSession.sessionId': query.sessionId,
-          'currentSession.incarnation': query.incarnation,
-        },
-        {
-          $set: {
-            policyRevision: policy.revision,
-            desiredRevision: policy.revision,
-          },
-          $inc: { revision: 1 },
-        },
-        { runValidators: true },
-      );
-      if (reconciled.modifiedCount !== 1) throw workerError('WORKER_CONFLICT');
-      machine.policyRevision = policy.revision;
-      machine.desiredRevision = policy.revision;
-    }
     const commands = await this.commands
       .find({
         machineId: machine._id,
@@ -194,7 +156,6 @@ export class WorkerControlService {
   async listMachines(_actor: AdminActor, query: AdminWorkerListQueryDto) {
     const scope = workerListScope(query);
     const filter: Record<string, unknown> = {
-      deletedAt: null,
       ...(query.status ? { status: query.status } : {}),
       ...(query.groupId ? { groupId: query.groupId } : {}),
       ...(query.platform
@@ -264,7 +225,7 @@ export class WorkerControlService {
 
   async machineDetail(_actor: AdminActor, id: string) {
     const machine = await this.machines.findById(id).maxTimeMS(2000).lean();
-    if (!machine || machine.deletedAt) throw adminError('RESOURCE_NOT_FOUND');
+    if (!machine) throw adminError('RESOURCE_NOT_FOUND');
     const [slots, attempts, diagnostics, installation, commands] =
       await Promise.all([
         this.slots
@@ -290,7 +251,6 @@ export class WorkerControlService {
           .lean(),
       ]);
     return {
-      asOf: new Date(),
       machine: presentMachine(machine),
       slots,
       attempts: attempts.map((attempt) => ({
@@ -328,27 +288,16 @@ export class WorkerControlService {
     };
   }
 
-  async machineDiagnostics(
-    _actor: AdminActor,
-    id: string,
-    query: AdminWorkerPageQueryDto = { limit: 50 },
-  ) {
-    if (!(await this.machines.exists({ _id: id, deletedAt: null })))
+  async machineDiagnostics(_actor: AdminActor, id: string) {
+    if (!(await this.machines.exists({ _id: id })))
       throw adminError('RESOURCE_NOT_FOUND');
-    const scope = JSON.stringify(['machine-diagnostics', id, query.limit]);
-    const after = query.cursor
-      ? createdPageAfter(decodeWorkerListCursor(query.cursor, scope))
-      : null;
     const items = await this.diagnostics
-      .find(after ? { $and: [{ machineId: id }, after] } : { machineId: id })
+      .find({ machineId: id })
       .sort({ createdAt: -1, _id: -1 })
-      .limit(query.limit + 1)
-      .maxTimeMS(3000)
+      .limit(100)
       .lean();
-    const page = items.slice(0, query.limit);
-    const last = page.at(-1);
     return {
-      items: page.map((item) => ({
+      items: items.map((item) => ({
         id: item._id,
         kind: item.kind,
         sequenceStart: item.sequenceStart,
@@ -357,30 +306,17 @@ export class WorkerControlService {
         metrics: item.metrics,
         createdAt: item.createdAt,
       })),
-      nextCursor:
-        items.length > query.limit && last
-          ? encodeWorkerListCursor(scope, last._id, last.createdAt)
-          : null,
     };
   }
 
-  async listInvitations(
-    _actor: AdminActor,
-    query: AdminWorkerPageQueryDto = { limit: 50 },
-  ) {
+  async listInvitations(_actor: AdminActor) {
     const now = new Date();
-    const scope = JSON.stringify(['worker-invitations', query.limit]);
-    const after = query.cursor
-      ? createdPageAfter(decodeWorkerListCursor(query.cursor, scope))
-      : null;
     const items = await this.invitations
-      .find(after ?? {})
-      .sort({ createdAt: -1, _id: -1 })
-      .limit(query.limit + 1)
-      .maxTimeMS(3000)
+      .find()
+      .sort({ createdAt: -1 })
+      .limit(100)
       .lean();
-    const page = items.slice(0, query.limit);
-    const installationIds = page.flatMap((item) =>
+    const installationIds = items.flatMap((item) =>
       item.installationSessionId ? [item.installationSessionId] : [],
     );
     const installations = installationIds.length
@@ -393,9 +329,8 @@ export class WorkerControlService {
     const installationById = new Map(
       installations.map((installation) => [installation._id, installation]),
     );
-    const last = page.at(-1);
     return {
-      items: page.map((item) => {
+      items: items.map((item) => {
         const installation = item.installationSessionId
           ? installationById.get(item.installationSessionId)
           : null;
@@ -425,10 +360,6 @@ export class WorkerControlService {
           revision: item.revision,
         };
       }),
-      nextCursor:
-        items.length > query.limit && last
-          ? encodeWorkerListCursor(scope, last._id, last.createdAt)
-          : null,
       asOf: now,
     };
   }
@@ -573,85 +504,6 @@ export class WorkerControlService {
     return { revision: result.receipt.revision, replayed: result.replayed };
   }
 
-  async approveCapacity(
-    actor: AdminActor,
-    id: string,
-    dto: ApproveWorkerCapacityDto,
-  ) {
-    if (!isUUID(id, '4') || dto.qualificationConfirmed !== true)
-      throw adminError('INVALID_REQUEST');
-    const result = await this.operations.run(
-      actor,
-      {
-        operationId: dto.operationId,
-        route: 'POST /admin/worker-fleet/machines/:id/capacity-approvals',
-        request: {
-          id,
-          expectedRevision: dto.expectedRevision,
-          gpuId: dto.gpuId,
-          qualificationConfirmed: true,
-          maxSlots: 2,
-        },
-        action: 'workers.machine.capacity.approve',
-        resourceType: 'worker_machine',
-        reason: dto.reason,
-      },
-      async (session) => {
-        const machine = await this.machines
-          .findById(id)
-          .session(session)
-          .lean();
-        if (!machine) throw adminError('RESOURCE_NOT_FOUND');
-        if (machine.revision !== dto.expectedRevision)
-          throw adminError('REVISION_CONFLICT');
-        if (machine.status === 'revoked') throw adminError('INVALID_REQUEST');
-        const matching = machine.approvedCapabilities.filter(
-          (c) => c.gpuId === dto.gpuId,
-        );
-        if (matching.length !== 1) throw adminError('INVALID_REQUEST');
-        // This only increases an existing approved GPU's ceiling. Recipe/provider
-        // eligibility, fleet policy and the runtime's bound qualification remain gates.
-        if (matching[0].maxSlots === 2)
-          return {
-            resourceId: id,
-            previousRevision: machine.revision,
-            revision: machine.revision,
-            value: null,
-          };
-        if (matching[0].maxSlots !== 1) throw adminError('INVALID_REQUEST');
-        const updated = await this.machines.updateOne(
-          {
-            _id: id,
-            revision: machine.revision,
-            status: trusted({ $ne: 'revoked' }),
-          },
-          {
-            $set: {
-              approvedCapabilities: machine.approvedCapabilities.map((c) =>
-                c.gpuId === dto.gpuId ? { ...c, maxSlots: 2 } : c,
-              ),
-            },
-            $inc: { revision: 1 },
-          },
-          { session, runValidators: true },
-        );
-        if (updated.modifiedCount !== 1) throw adminError('REVISION_CONFLICT');
-        return {
-          resourceId: id,
-          previousRevision: machine.revision,
-          revision: machine.revision + 1,
-          value: null,
-        };
-      },
-    );
-    return {
-      machineId: id,
-      revision: result.receipt.revision,
-      maxSlots: 2,
-      replayed: result.replayed,
-    };
-  }
-
   private async requestCommand(
     actor: AdminActor,
     id: string,
@@ -756,7 +608,6 @@ function presentMachine(machine: WorkerMachine) {
     machineId: machine._id,
     status: machine.status,
     label: machine.label,
-    registeredByUserId: machine.registeredByUserId ?? null,
     groupId: machine.groupId,
     policyRevision: machine.policyRevision,
     appliedRevision: machine.appliedRevision,
@@ -836,17 +687,6 @@ function workerListAfter(cursor: WorkerListCursor) {
       { lastSeenAt: trusted({ $lt: at }) },
       { lastSeenAt: at, _id: trusted({ $gt: cursor.id }) },
       { lastSeenAt: null },
-    ],
-  };
-}
-
-function createdPageAfter(cursor: WorkerListCursor) {
-  if (cursor.at === null) throw adminError('INVALID_CURSOR');
-  const at = new Date(cursor.at);
-  return {
-    $or: [
-      { createdAt: trusted({ $lt: at }) },
-      { createdAt: at, _id: trusted({ $lt: cursor.id }) },
     ],
   };
 }

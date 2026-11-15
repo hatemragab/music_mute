@@ -1,9 +1,0 @@
-node_modules/
-dist/
-release/
-coverage/
-native-build/
-*.log
-*.tsbuildinfo
-desktop-public-config.json
-

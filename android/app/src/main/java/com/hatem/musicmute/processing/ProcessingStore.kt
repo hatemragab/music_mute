@@ -2,7 +2,6 @@ package com.hatem.musicmute.processing
 
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStore
-import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.core.Serializer
 import java.io.File
@@ -25,22 +24,10 @@ import com.hatem.musicmute.library.StoredLibraryTrack
 
 data class ProcessingSession(val uid: String, val epoch: Long)
 
-@Serializable(with = ProcessingPhaseSerializer::class)
+@Serializable
 enum class ProcessingPhase {
-    SOURCE_QUEUED, INSPECTING, PREPARING_INPUT,
+    SOURCE_INTAKE, SOURCE_QUEUED, DOWNLOADING_SOURCE, INSPECTING, PREPARING_INPUT,
     WAITING, RESERVING, UPLOADING, CONFIRMING, RETRY_WAIT, PAUSED, COMPLETE, CANCELLING,
-}
-
-/** Unknown persisted states stop recovery instead of scheduling work or hiding other jobs. */
-object ProcessingPhaseSerializer : kotlinx.serialization.KSerializer<ProcessingPhase> {
-    override val descriptor = kotlinx.serialization.descriptors.PrimitiveSerialDescriptor(
-        "ProcessingPhase", kotlinx.serialization.descriptors.PrimitiveKind.STRING)
-    override fun serialize(encoder: kotlinx.serialization.encoding.Encoder, value: ProcessingPhase) =
-        encoder.encodeString(value.name)
-    override fun deserialize(decoder: kotlinx.serialization.encoding.Decoder): ProcessingPhase {
-        val value = decoder.decodeString()
-        return ProcessingPhase.entries.firstOrNull { it.name == value } ?: ProcessingPhase.PAUSED
-    }
 }
 
 @Serializable
@@ -72,10 +59,12 @@ data class ProcessingOperation(
     val acceptedAtMillis: Long = 0,
     val transientRetryCount: Int = 0,
     val uploadGrantRequestId: String? = null,
+    val sourceDownloadedBytes: Long = 0,
+    val sourceTotalBytes: Long? = null,
     val pendingDelete: Boolean = false,
     val reservationAttempted: Boolean = false,
+    val sourceWorkRequestId: String? = null,
     val awaitingCloudConsent: Boolean = false,
-    val trimEnabled: Boolean = false,
     val sourceUri: String? = null,
     val sourceName: String? = null,
     val mediaPolicy: ProcessingMediaPolicy = ProcessingMediaPolicy.STANDARD,
@@ -86,7 +75,7 @@ data class ProcessingOperation(
 )
 
 private val processingMilestones = listOf(
-    ProcessingPhase.INSPECTING, ProcessingPhase.PREPARING_INPUT,
+    ProcessingPhase.DOWNLOADING_SOURCE, ProcessingPhase.INSPECTING, ProcessingPhase.PREPARING_INPUT,
     ProcessingPhase.RESERVING, ProcessingPhase.UPLOADING, ProcessingPhase.CONFIRMING,
 )
 
@@ -97,12 +86,6 @@ internal val ProcessingOperation.hasUploadedInput: Boolean
 // bytes. Such a probe is not evidence that the upload step was completed.
 internal val ProcessingOperation.progressPhase: ProcessingPhase
     get() = if (phase == ProcessingPhase.CONFIRMING && !hasUploadedInput) ProcessingPhase.UPLOADING else phase
-
-private val terminalCloudStatuses = setOf(
-    JobStatus.READY.wireValue,
-    JobStatus.FAILED.wireValue,
-    JobStatus.CANCELLED.wireValue,
-)
 
 private fun retainProcessingHistory(previous: ProcessingOperation?, next: ProcessingOperation): ProcessingOperation =
     next.copy(lastReachedPhase = listOfNotNull(previous?.lastReachedPhase, previous?.progressPhase, next.lastReachedPhase)
@@ -120,7 +103,6 @@ data class ProcessingDocument(
     val schemaVersion: Int = 3,
     val library: List<StoredLibraryTrack> = emptyList(),
     val deletedLibraryJobs: Set<String> = emptySet(),
-    val urlImports: List<UrlImportRecord> = emptyList(),
 )
 
 private object ProcessingSerializer : Serializer<ProcessingDocument> {
@@ -130,7 +112,7 @@ private object ProcessingSerializer : Serializer<ProcessingDocument> {
     @OptIn(ExperimentalSerializationApi::class)
     override suspend fun readFrom(input: InputStream): ProcessingDocument {
         return try {
-            json.decodeFromStream<ProcessingDocument>(input).also { com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.read", "storage", data = mapOf("store" to "processing", "result" to "completed", "operations" to it.operations.size)) }
+            json.decodeFromStream<ProcessingDocument>(input)
         } catch (error: SerializationException) {
             throw CorruptionException("Processing metadata is unreadable", error)
         } catch (error: IllegalArgumentException) {
@@ -141,13 +123,7 @@ private object ProcessingSerializer : Serializer<ProcessingDocument> {
     }
 
     override suspend fun writeTo(t: ProcessingDocument, output: OutputStream) {
-        try {
-            output.write(json.encodeToString(t).toByteArray(Charsets.UTF_8))
-            com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.write", "storage", data = mapOf("store" to "processing", "result" to "serializer_completed", "operations" to t.operations.size))
-        } catch (error: Exception) {
-            com.hatem.musicmute.diagnostics.LocalDiagnostics.emit("storage.failed", "storage", "warn", mapOf("store" to "processing", "operation" to "write", "error" to com.hatem.musicmute.diagnostics.LocalDiagnostics.error(error)))
-            throw error
-        }
+        output.write(json.encodeToString(t).toByteArray(Charsets.UTF_8))
     }
 }
 
@@ -163,14 +139,7 @@ class ProcessingStore(
     private fun store(uid: String): DataStore<ProcessingDocument> {
         require(uid.isNotBlank())
         return stores.computeIfAbsent(uid) {
-            DataStoreFactory.create(ProcessingSerializer, migrations = listOf(object : DataMigration<ProcessingDocument> {
-                override suspend fun shouldMigrate(currentData: ProcessingDocument) = currentData.snapshots.isNotEmpty()
-                override suspend fun migrate(currentData: ProcessingDocument): ProcessingDocument {
-                    validateOwner(uid, currentData)
-                    return currentData.copy(library = mergeLibrary(currentData, emptyList()), snapshots = emptyList())
-                }
-                override suspend fun cleanUp() = Unit
-            }), scope = scope) {
+            DataStoreFactory.create(ProcessingSerializer, scope = scope) {
                 File(processingOwnerDirectory(root, uid), "processing.json")
             }
         }
@@ -181,64 +150,9 @@ class ProcessingStore(
         document.operations
     }
 
-    fun urlImports(uid: String): Flow<List<UrlImportRecord>> = store(uid).data.map { document ->
+    fun snapshots(uid: String): Flow<List<Job>> = store(uid).data.map { document ->
         validateOwner(uid, document)
-        document.urlImports
-    }
-
-    /** Persist the request ID before making any network request. */
-    suspend fun addUrlImport(uid: String, value: UrlImportRecord): UrlImportRecord {
-        require(value.ownerUid == uid)
-        pruneFailedUrlImports(uid)
-        val document = store(uid).updateData { current ->
-            validateOwner(uid, current)
-            val existing = current.urlImports.firstOrNull {
-                it.url == value.url && it.status !in UrlImportRecord.terminalStatuses
-            }
-            if (existing != null) current else {
-                val retained = current.urlImports.filterNot {
-                    it.status in UrlImportRecord.terminalStatuses && it.url == value.url
-                }
-                current.copy(urlImports = retained.filter { it.status in UrlImportRecord.terminalStatuses }
-                    .takeLast(20) + retained.filterNot { it.status in UrlImportRecord.terminalStatuses } + value)
-            }
-        }
-        return document.urlImports.first { it.url == value.url && it.status !in UrlImportRecord.terminalStatuses }
-    }
-
-    suspend fun updateUrlImport(uid: String, requestId: String, transform: (UrlImportRecord) -> UrlImportRecord) {
-        store(uid).updateData { current ->
-            validateOwner(uid, current)
-            current.copy(urlImports = current.urlImports.map { record ->
-                if (record.requestId != requestId) record else transform(record).also {
-                    require(it.ownerUid == uid && it.requestId == requestId && it.url == record.url)
-                }.let {
-                    it.copy(failedAtMillis = if (it.removable) it.failedAtMillis.takeIf { time -> time > 0 }
-                        ?: System.currentTimeMillis() else 0)
-                }
-            })
-        }
-    }
-
-    suspend fun removeFailedUrlImport(uid: String, requestId: String) {
-        store(uid).updateData { current ->
-            validateOwner(uid, current)
-            current.copy(urlImports = current.urlImports.filterNot { it.requestId == requestId && it.removable })
-        }
-    }
-
-    suspend fun pruneFailedUrlImports(uid: String, nowMillis: Long = System.currentTimeMillis()) {
-        store(uid).updateData { current ->
-            validateOwner(uid, current)
-            current.copy(urlImports = current.urlImports.mapNotNull { record ->
-                when {
-                    !record.removable -> record
-                    record.failedAtMillis <= 0 -> record.copy(failedAtMillis = nowMillis)
-                    nowMillis - record.failedAtMillis >= UrlImportRecord.FAILURE_RETENTION_MILLIS -> null
-                    else -> record
-                }
-            })
-        }
+        document.snapshots
     }
 
     suspend fun get(uid: String, operationId: String): ProcessingOperation? =
@@ -267,32 +181,14 @@ class ProcessingStore(
         return document.operations.find { it.operationId == operationId }
     }
 
-    suspend fun updateLibraryJobs(uid: String, jobs: List<Job>) {
+    suspend fun saveSnapshots(uid: String, jobs: List<Job>) {
         store(uid).updateData { current ->
             validateOwner(uid, current)
             current.copy(
-                snapshots = emptyList(),
+                snapshots = jobs.distinctBy { it.id },
                 library = mergeLibrary(current, jobs),
                 schemaVersion = 3,
             )
-        }
-    }
-
-    /** Remove a confirmed upload only when this snapshot says its cloud job is finished.
-     * A missing page is not completion, and an upload still in progress stays recoverable.
-     */
-    suspend fun retireConfirmedTerminalOperations(uid: String, jobs: List<Job>) {
-        val terminalIds = jobs.asSequence()
-            .filter { it.status in terminalCloudStatuses }
-            .map { it.id }
-            .toSet()
-        if (terminalIds.isEmpty()) return
-        store(uid).updateData { current ->
-            validateOwner(uid, current)
-            val retained = current.operations.filterNot { operation ->
-                operation.phase == ProcessingPhase.COMPLETE && operation.jobId in terminalIds
-            }
-            if (retained.size == current.operations.size) current else current.copy(operations = retained)
         }
     }
 
@@ -327,17 +223,6 @@ class ProcessingStore(
         }
     }
 
-    /** Device-only, atomic listening history; never included in a job/API mutation. */
-    suspend fun incrementLibraryPlay(uid: String, jobId: String, isCurrent: () -> Boolean = { true }) {
-        store(uid).updateData { current ->
-            validateOwner(uid, current)
-            if (!isCurrent()) current else current.copy(library = mergeLibrary(current, emptyList()).map {
-                if (it.job.id != jobId) it else it.copy(playCount =
-                    if (it.playCount >= Long.MAX_VALUE) Long.MAX_VALUE else it.playCount.coerceAtLeast(0) + 1)
-            })
-        }
-    }
-
     /** Call only after authoritative deletion; page absence is never deletion evidence. */
     suspend fun removeLibraryJob(uid: String, jobId: String) {
         store(uid).updateData { current ->
@@ -360,11 +245,6 @@ class ProcessingStore(
                 if (old == null || job.updatedAt.isAfter(old.job.updatedAt) ||
                     (acceptEqual && job.updatedAt == old.job.updatedAt)) {
                     entries[job.id] = old?.copy(job = job) ?: StoredLibraryTrack(job)
-                } else if (job.updatedAt == old.job.updatedAt && job.thumbnailUrl != null &&
-                    job.thumbnailUrl != old.job.thumbnailUrl) {
-                    // Newly projected optional artwork can arrive without changing the job revision.
-                    // Preserve explicit local title mutations and all Library flags at equal timestamps.
-                    entries[job.id] = old.copy(job = old.job.copy(thumbnailUrl = job.thumbnailUrl))
                 }
             }
         }
@@ -406,8 +286,6 @@ class ProcessingStore(
 
     private fun validateOwner(uid: String, document: ProcessingDocument) {
         if (document.operations.any { it.ownerUid != uid } || document.clientErrors.any { it.ownerUid != uid } ||
-            document.urlImports.any { it.ownerUid != uid } ||
-            document.urlImports.map { it.requestId }.distinct().size != document.urlImports.size ||
             document.operations.map { it.operationId }.distinct().size != document.operations.size
         ) throw CorruptionException("Processing metadata owner is invalid")
     }

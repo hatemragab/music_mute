@@ -110,8 +110,6 @@ export function buildServiceRuntimeConfig(
     backendBaseUrl,
     machineId: options.machineId,
     credentialFile: layout.credentialPath,
-    localLifecyclePath: layout.lifecyclePath,
-    localRuntimeStatusPath: layout.runtimeStatusPath,
     workRoot: layout.workRoot,
     modelCacheRoot: layout.modelCacheRoot,
     engineRoot: release.engineRoot,
@@ -151,8 +149,9 @@ function validatedBackendBaseUrl(
     (url.protocol !== "https:" && !(allowInsecureLoopback && loopback))
   )
     throw new TypeError("Service backend URL is unsafe");
-  if (url.pathname !== "/" || url.search !== "")
-    throw new TypeError("Service backend URL must be an API origin");
+  if (!url.pathname.startsWith("/") || url.pathname.includes("//"))
+    throw new TypeError("Service backend URL path is invalid");
+  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
   return url.toString();
 }
 

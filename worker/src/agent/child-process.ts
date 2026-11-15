@@ -5,9 +5,7 @@ import {
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
-import { delimiter, isAbsolute, win32 } from "node:path";
+import { delimiter, isAbsolute } from "node:path";
 import {
   ChildFrameDecoder,
   ChildProtocolError,
@@ -21,10 +19,6 @@ import {
   parseChildProgress,
   type ChildProgress,
 } from "./ipc/child-progress.js";
-import { sanitizeDiagnostic } from "./diagnostic-redaction.js";
-export { sanitizeDiagnostic } from "./diagnostic-redaction.js";
-import { ChildCommandError } from "./ipc/child-command-error.js";
-export { ChildCommandError } from "./ipc/child-command-error.js";
 
 // Native provider startup includes verified model loading and one warm-up pass.
 // A cold MPS launch can exceed ten seconds even though steady-state jobs are
@@ -44,72 +38,7 @@ export interface ChildProcessOptions {
   startTimeoutMs?: number;
   requestTimeoutMs?: number;
   stopTimeoutMs?: number;
-  windowsJobObject?: boolean;
-  /** Trusted retained consumer mode: omit console hosts while preserving the Windows Job chain. */
-  windowsDetachedConsole?: true;
-  /** Verified consumer release engine root; embedded Python does not use cwd imports. */
-  windowsEngineModuleRoot?: string;
   onStartupStage?: (stage: "loading" | "warming") => void;
-}
-
-export function windowsGuardianArguments(
-  engineRoot: string | undefined,
-  parentPid: number,
-  arguments_: readonly string[],
-  detachedConsole = false,
-): string[] {
-  if (
-    !Number.isSafeInteger(parentPid) ||
-    parentPid < 1 ||
-    typeof detachedConsole !== "boolean" ||
-    (detachedConsole && engineRoot === undefined) ||
-    (engineRoot !== undefined &&
-      (!win32.isAbsolute(engineRoot) || engineRoot.includes("\0")))
-  )
-    throw new Error("Windows engine guardian configuration is invalid");
-  return [
-    ...(engineRoot
-      ? [
-          "-I",
-          "-B",
-          "-c",
-          "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));runpy.run_module('musicmute_engine.windows_guardian',run_name='__main__')",
-          engineRoot,
-        ]
-      : ["-B", "-m", "musicmute_engine.windows_guardian"]),
-    "--parent-pid",
-    String(parentPid),
-    ...(detachedConsole ? ["--detached-console"] : []),
-    "--",
-    ...arguments_,
-  ];
-}
-
-/** Console isolation is valid only for the verified Windows guardian-owned Job mode. */
-export function workerChildDetached(
-  options: Pick<
-    ChildProcessOptions,
-    "windowsDetachedConsole" | "windowsJobObject" | "windowsEngineModuleRoot"
-  >,
-  platform: NodeJS.Platform = process.platform,
-): boolean {
-  if (options.windowsDetachedConsole !== undefined) {
-    if (
-      options.windowsDetachedConsole !== true ||
-      platform !== "win32" ||
-      options.windowsJobObject !== true ||
-      !options.windowsEngineModuleRoot ||
-      !win32.isAbsolute(options.windowsEngineModuleRoot) ||
-      options.windowsEngineModuleRoot.includes("\0")
-    )
-      throw new TypeError(
-        "Detached Windows console requires a verified guardian-owned Job",
-      );
-    // Node's pinned libuv uses DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
-    // it does not set CREATE_BREAKAWAY_FROM_JOB and the child remains referenced.
-    return true;
-  }
-  return platform !== "win32";
 }
 
 interface PendingRequest {
@@ -120,58 +49,23 @@ interface PendingRequest {
   lastProgress?: ChildProgress;
 }
 
-const CHILD_STOP_MESSAGES = {
-  CHILD_TERMINATION_SIGNAL_FAILED: "Worker child termination signal failed",
-  CHILD_EXIT_UNCONFIRMED: "Worker child exit could not be confirmed",
-  PROCESS_GROUP_EXIT_UNCONFIRMED:
-    "Worker process group exit could not be confirmed",
-} as const;
-const CHILD_STOP_ERRNOS = new Set([
-  "EACCES",
-  "EINTR",
-  "EINVAL",
-  "EIO",
-  "EPERM",
-  "ESRCH",
-]);
-type ChildStopCode = keyof typeof CHILD_STOP_MESSAGES;
-
-/** Internal diagnostics only. Never retain arbitrary child/OS messages or causes. */
-export class ChildStopError extends Error {
-  readonly code: ChildStopCode;
-  readonly errno: string | undefined;
-
-  constructor(code: ChildStopCode, errno?: unknown) {
-    const safeCode = Object.hasOwn(CHILD_STOP_MESSAGES, code)
-      ? code
-      : "CHILD_EXIT_UNCONFIRMED";
-    super(CHILD_STOP_MESSAGES[safeCode]);
-    this.name = "ChildStopError";
-    this.code = safeCode;
-    this.errno =
-      typeof errno === "string" && CHILD_STOP_ERRNOS.has(errno)
-        ? errno
-        : undefined;
+export class ChildCommandError extends Error {
+  constructor(
+    readonly code: string,
+    readonly summary?: string,
+  ) {
+    super(
+      summary
+        ? `Worker child command failed: ${code} (${summary})`
+        : `Worker child command failed: ${code}`,
+    );
+    this.name = "ChildCommandError";
   }
-}
-
-/** Only fixed stop stages and allowlisted errno can enter a supervisor summary. */
-export function childStopFailureSummary(error: unknown): string {
-  if (
-    !(error instanceof ChildStopError) ||
-    !Object.hasOwn(CHILD_STOP_MESSAGES, error.code)
-  )
-    return "CHILD_STOP_UNCONFIRMED";
-  const errno = CHILD_STOP_ERRNOS.has(error.errno ?? "")
-    ? error.errno
-    : undefined;
-  return error.code + (errno === undefined ? "" : `:${errno}`);
 }
 
 export class WorkerChildProcess {
   private currentIncarnation = randomUUID();
   private child: ChildProcessWithoutNullStreams | null = null;
-  private processGroupPid: number | undefined;
   private decoder = new ChildFrameDecoder();
   private readonly pending = new Map<string, PendingRequest>();
   private ready: Promise<ChildResponse> | null = null;
@@ -186,25 +80,9 @@ export class WorkerChildProcess {
     return this.currentIncarnation;
   }
 
-  /** Exact spawned guardian PID; it is not an exit or descendant-idle proof. */
-  getPid(): number | undefined {
-    return this.isAlive() ? this.child?.pid : undefined;
-  }
-
-  isAlive(): boolean {
-    return (
-      this.child !== null &&
-      this.child.exitCode === null &&
-      this.child.signalCode === null &&
-      this.child.stdin.writable
-    );
-  }
-
   async start(): Promise<ChildResponse> {
     if (this.child || this.ready)
       throw new Error("Worker child has already been started");
-    const detached = workerChildDetached(this.options);
-    await this.confirmProcessGroupExit();
     this.currentIncarnation = randomUUID();
     this.decoder = new ChildFrameDecoder();
     this.stderr = "";
@@ -222,42 +100,14 @@ export class WorkerChildProcess {
       windowsHide: true,
       // Give the POSIX worker its own process group so cancellation also
       // terminates media decoders, not just the Python parent.
-      detached,
+      detached: process.platform !== "win32",
     };
-    const arguments_ = [
-      ...this.options.args,
-      "--incarnation",
-      this.incarnation,
-    ];
-    const guardian = fileURLToPath(
-      new URL(
-        import.meta.url.endsWith(".ts")
-          ? "./process-guardian.ts"
-          : "./process-guardian.js",
-        import.meta.url,
-      ),
+    const child = spawn(
+      this.options.command,
+      [...this.options.args, "--incarnation", this.incarnation],
+      spawnOptions,
     );
-    const child =
-      process.platform === "win32"
-        ? spawn(
-            this.options.command,
-            this.options.windowsJobObject
-              ? windowsGuardianArguments(
-                  this.options.windowsEngineModuleRoot,
-                  process.pid,
-                  arguments_,
-                  this.options.windowsDetachedConsole === true,
-                )
-              : arguments_,
-            spawnOptions,
-          )
-        : (spawn(
-            process.execPath,
-            [guardian, this.options.command, ...arguments_],
-            { ...spawnOptions, stdio: ["pipe", "pipe", "pipe", "ipc"] },
-          ) as ChildProcessWithoutNullStreams);
     this.child = child;
-    if (process.platform !== "win32") this.processGroupPid = child.pid;
     child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
     child.stderr.on("data", (chunk: Buffer) => this.onStderr(chunk));
     child.stdin.on("error", () =>
@@ -315,10 +165,7 @@ export class WorkerChildProcess {
 
   async stop(): Promise<void> {
     const child = this.child;
-    if (!child) {
-      await this.confirmProcessGroupExit();
-      return;
-    }
+    if (!child) return;
     const timeoutMs = boundedTimeout(
       this.options.stopTimeoutMs,
       DEFAULT_STOP_TIMEOUT_MS,
@@ -336,57 +183,13 @@ export class WorkerChildProcess {
           ),
         ]);
     } catch {
-      try {
-        killProcessingTree(child);
-      } catch (error) {
-        throw new ChildStopError(
-          "CHILD_TERMINATION_SIGNAL_FAILED",
-          (error as NodeJS.ErrnoException).code,
-        );
-      }
+      killProcessingTree(child);
       if (child.exitCode === null && child.signalCode === null) {
         await Promise.race([
           once(child, "exit"),
           new Promise((resolve) => setTimeout(resolve, timeoutMs)),
         ]);
       }
-    }
-    if (child.exitCode === null && child.signalCode === null)
-      throw new ChildStopError("CHILD_EXIT_UNCONFIRMED");
-    await this.confirmProcessGroupExit();
-  }
-
-  private async confirmProcessGroupExit(): Promise<void> {
-    const pid = this.processGroupPid;
-    if (pid === undefined || process.platform === "win32") return;
-    const deadline =
-      performance.now() +
-      boundedTimeout(this.options.stopTimeoutMs, DEFAULT_STOP_TIMEOUT_MS);
-    for (;;) {
-      try {
-        process.kill(-pid, 0);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-          if (this.processGroupPid === pid) this.processGroupPid = undefined;
-          return;
-        }
-        const errno = (error as NodeJS.ErrnoException).code;
-        // Allow a transient denied/interrupted probe to settle during shutdown.
-        // Retry within the existing deadline; only ESRCH releases the fence.
-        if (
-          (errno === "EPERM" || errno === "EINTR") &&
-          performance.now() < deadline
-        ) {
-          await delay(10);
-          continue;
-        }
-        throw new ChildStopError("PROCESS_GROUP_EXIT_UNCONFIRMED", errno);
-      }
-      // Guardian exit alone cannot prove native inference/decoder descendants
-      // have exited after a forced kill. Keep the GPU fence until the OS agrees.
-      if (performance.now() >= deadline)
-        throw new ChildStopError("PROCESS_GROUP_EXIT_UNCONFIRMED");
-      await delay(10);
     }
   }
 
@@ -624,4 +427,16 @@ function childEnvironment(
     if (value !== undefined) env[name] = value;
   }
   return env;
+}
+
+export function sanitizeDiagnostic(value: string): string {
+  return value
+    .replace(/https?:\/\/\S+/giu, "[REDACTED_URL]")
+    .replace(/Bearer\s+\S+/giu, "Bearer [REDACTED]")
+    .replace(
+      /\b(token|secret|password|credential|authorization)\s*[=:]\s*\S+/giu,
+      "$1=[REDACTED]",
+    )
+    .replace(/\/Users\/[^/\s]+/gu, "/Users/[REDACTED]")
+    .replace(/C:\\Users\\[^\\\s]+/giu, "C:\\Users\\[REDACTED]");
 }

@@ -1,7 +1,0 @@
-<resources>
-    <string name="auto_sign_in_required">سجّل الدخول إلى MusicMute على هاتفك عندما يكون ذلك آمنًا.</string>
-    <string name="auto_update_required">حدّث MusicMute على هاتفك عندما يكون ذلك آمنًا.</string>
-    <string name="auto_library_unavailable">الصوت غير متاح مؤقتًا. حاول مجددًا، أو افتح MusicMute على هاتفك عندما يكون ذلك آمنًا.</string>
-    <string name="auto_audio_unavailable">هذا الصوت غير متاح. اختر مقطعًا آخر من مكتبتك.</string>
-    <string name="auto_open_phone">فتح MusicMute على الهاتف</string>
-</resources>

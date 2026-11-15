@@ -17,7 +17,6 @@ import {
   ACCOUNT_DELETION,
   ACCOUNT_RECOVERY,
   PUBLIC_ROUTE,
-  OPTIONAL_AUTH,
   type AuthOperation,
 } from './auth.decorators.js';
 import type { AuthRequest } from './auth-request.js';
@@ -49,13 +48,7 @@ export class AuthGuard implements CanActivate {
       this.reflector.getAllAndOverride<boolean>(ADMIN_ROUTE, targets) === true;
     const workerRoute =
       this.reflector.getAllAndOverride<boolean>(WORKER_ROUTE, targets) === true;
-    const optionalAuth =
-      this.reflector.getAllAndOverride<boolean>(OPTIONAL_AUTH, targets) ===
-      true;
-    if (
-      [publicRoute, adminRoute, workerRoute, optionalAuth].filter(Boolean)
-        .length > 1
-    )
+    if ([publicRoute, adminRoute, workerRoute].filter(Boolean).length > 1)
       throw authError('UNAUTHENTICATED');
     if (publicRoute) return true;
     // WorkerRoute always installs the fail-closed WorkerAuthGuard. C2 replaces
@@ -63,9 +56,7 @@ export class AuthGuard implements CanActivate {
     if (workerRoute) return true;
     const req = context.switchToHttp().getRequest<AuthRequest>();
     const response = context.switchToHttp().getResponse<Response>();
-    const requestId = adminRoute
-      ? (req.adminRequestId ?? adminRequestId(req))
-      : undefined;
+    const requestId = adminRoute ? adminRequestId(req) : undefined;
     if (requestId) {
       req.adminRequestId = requestId;
       response.setHeader('Cache-Control', 'no-store');
@@ -85,10 +76,6 @@ export class AuthGuard implements CanActivate {
       (value, index) =>
         index % 2 === 0 && value.toLowerCase() === 'authorization',
     ).length;
-    if (optionalAuth && header === undefined && count === 0) {
-      req.user = null;
-      return true;
-    }
     if (count > 1 || typeof header !== 'string' || header.length > 8199)
       throw fail('UNAUTHENTICATED');
     const match = /^Bearer ([A-Za-z0-9._~-]+)$/i.exec(header);
@@ -137,19 +124,6 @@ export class AuthGuard implements CanActivate {
         limit: this.config.get<number>('LOGOUT_UID_PER_HOUR', 3),
         windowMs: 3600000,
       });
-    if (operation === 'worker-installation')
-      buckets.push(
-        {
-          key: this.keys.bucket('worker-installation-uid', signed.uid),
-          limit: 5,
-          windowMs: 60_000,
-        },
-        {
-          key: this.keys.bucket('worker-installation-ip', req.ip ?? 'unknown'),
-          limit: 20,
-          windowMs: 60_000,
-        },
-      );
     const processingBudget = {
       'processing-read': {
         scope: 'read',

@@ -15,18 +15,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  WORKER_LOG_ARCHIVE_COUNT,
-  WORKER_LOG_ROTATE_BYTES,
-  appendWorkerFatalError,
+  MAC_LOG_ARCHIVE_COUNT,
+  MAC_LOG_ROTATE_BYTES,
+  appendMacFatalError,
   createOperationalLogCursor,
-  clearWorkerLogs,
-  maintainWorkerLogs,
+  clearMacUserLogs,
+  maintainMacUserLogs,
   parseSince,
   readOperationalEvents,
   readNewOperationalEvents,
-  readTextLogTail,
-} from "../src/platform/shared/operational-logs.js";
-import type { OperatorLayout } from "../src/platform/shared/operator-layout.js";
+} from "../src/platform/macos/operational-logs.js";
+import {
+  createMacUserDirectories,
+  createMacUserLayout,
+} from "../src/platform/macos/user-paths.js";
 
 const roots: string[] = [];
 
@@ -36,37 +38,24 @@ afterEach(async () => {
   );
 });
 
-describe("shared operational logs", () => {
-  it.each(["\n", "\r\n"])(
-    "counts complete log lines without the trailing %j terminator",
-    async (newline) => {
-      const layout = await fixture();
-      await writeFile(layout.stdoutPath, `first${newline}last${newline}`, {
-        mode: 0o600,
-      });
-      expect(await readTextLogTail(layout.stdoutPath, 1)).toBe("last");
-      expect(await readTextLogTail(layout.stdoutPath, 2)).toBe("first\nlast");
-    },
-  );
-
+describe("macOS operational logs", () => {
   it("rotates oversized streams into a bounded private gzip history", async () => {
     const layout = await fixture();
     await writeFile(layout.stdoutPath, "start\n", { mode: 0o600 });
-    await truncate(layout.stdoutPath, WORKER_LOG_ROTATE_BYTES);
-    await maintainWorkerLogs(layout);
+    await truncate(layout.stdoutPath, MAC_LOG_ROTATE_BYTES);
+    await maintainMacUserLogs(layout);
     expect((await lstat(layout.stdoutPath)).size).toBe(0);
-    if (process.platform !== "win32")
-      expect((await lstat(`${layout.stdoutPath}.1.gz`)).mode & 0o077).toBe(0);
-    expect(WORKER_LOG_ARCHIVE_COUNT).toBe(5);
+    expect((await lstat(`${layout.stdoutPath}.1.gz`)).mode & 0o077).toBe(0);
+    expect(MAC_LOG_ARCHIVE_COUNT).toBe(5);
   });
 
   it("writes useful fatal errors without leaking secrets or private URLs", async () => {
     const layout = await fixture();
-    await appendWorkerFatalError(
+    await appendMacFatalError(
       layout.stderrPath,
       "runtime",
       new Error(
-        `credential=${"x".repeat(43)} https://storage.invalid/a?X-Amz-Signature=secret /Users/private/a`,
+        `credential=${"x".repeat(43)} https://s3.invalid/a?X-Amz-Signature=secret /Users/private/a`,
       ),
     );
     const value = await readFile(layout.stderrPath, "utf8");
@@ -207,7 +196,7 @@ describe("shared operational logs", () => {
       }),
       writeFile(join(spoolRoot, "unrelated.txt"), "preserve", { mode: 0o600 }),
     ]);
-    await expect(clearWorkerLogs(layout)).resolves.toMatchObject({
+    await expect(clearMacUserLogs(layout)).resolves.toMatchObject({
       filesCleared: 4,
       bytesCleared: 24,
     });
@@ -230,15 +219,7 @@ async function fixture() {
   const home = await mkdtemp(join(tmpdir(), "musicmute-logs-"));
   roots.push(home);
   await chmod(home, 0o700);
-  const layout: OperatorLayout = {
-    workRoot: join(home, "jobs", "attempts"),
-    runtimeStatusPath: join(home, "state", "runtime-status.json"),
-    logRoot: join(home, "logs"),
-    stdoutPath: join(home, "logs", "stdout.log"),
-    stderrPath: join(home, "logs", "stderr.log"),
-  };
-  await mkdir(join(home, "state"), { recursive: true, mode: 0o700 });
-  await mkdir(layout.workRoot, { recursive: true, mode: 0o700 });
-  await mkdir(layout.logRoot, { recursive: true, mode: 0o700 });
+  const layout = createMacUserLayout(home);
+  await createMacUserDirectories(layout);
   return layout;
 }

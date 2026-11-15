@@ -15,6 +15,11 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.hatem.musicmute.auth.*
 import com.hatem.musicmute.data.DataStorePreferencesRepository
+import com.hatem.musicmute.data.DemoWorkflowRepository
+import com.hatem.musicmute.download.DownloadRepository
+import com.hatem.musicmute.download.HistorySerializer
+import com.hatem.musicmute.download.HistoryStore
+import com.hatem.musicmute.download.YoutubeAudioDownloader
 import com.hatem.musicmute.processing.*
 import com.hatem.musicmute.playback.AudioPlaybackService
 import com.hatem.musicmute.updates.*
@@ -30,7 +35,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 
 private val Context.preferencesStore by preferencesDataStore(name = "vocal_preferences")
 
@@ -46,33 +50,9 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     override val playbackQueueStore by lazy {
         com.hatem.musicmute.playback.PlaybackQueueStore(File(noBackupFilesDir, "playback"))
     }
-    val bookmarks by lazy { com.hatem.musicmute.playback.BookmarkStore(File(noBackupFilesDir, "bookmarks")) }
-    val localAudioTools by lazy { com.hatem.musicmute.playback.LocalAudioTools(this) }
     val audioPlayback by lazy { com.hatem.musicmute.playback.AudioPlaybackController(this) }
-    override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File {
-        val expected = processingSession() ?: throw java.io.IOException("Playback account changed")
-        val file = libraryRepository.ensureLocal(key)
-        applicationScope.launch {
-            if (processingSession() != expected) return@launch
-            try { processingArtifacts.ensureOriginal(key.jobId) }
-            catch (error: CancellationException) { throw error }
-            catch (_: Exception) { /* Voice remains playable; an explicit switch can retry. */ }
-        }
-        return file
-    }
-    override suspend fun resolveOriginalFile(key: com.hatem.musicmute.library.LibraryKey): File {
-        if (processingSession()?.uid != key.ownerUid) throw java.io.IOException("Playback account changed")
-        return processingArtifacts.ensureOriginal(key.jobId)
-    }
-    override suspend fun comparisonJob(key: com.hatem.musicmute.library.LibraryKey): Job {
-        if (processingSession()?.uid != key.ownerUid) throw java.io.IOException("Playback account changed")
-        libraryRepository.storedJob(key)?.let { return it }
-        val expected = processingSession()
-        val job = jobsApi.detail(key.jobId)
-        if (processingSession() != expected) throw CancellationException("Playback account changed")
-        processingStore.updateLibraryJob(key.ownerUid, job)
-        return job
-    }
+    override suspend fun resolvePlaybackFile(key: com.hatem.musicmute.library.LibraryKey): File =
+        libraryRepository.ensureLocal(key)
     override suspend fun reportPlaybackFailure(
         key: com.hatem.musicmute.library.LibraryKey,
         diagnostic: com.hatem.musicmute.playback.PlaybackFailureDiagnostic,
@@ -87,13 +67,6 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             appVersion = BuildConfig.VERSION_NAME,
             osVersion = Build.VERSION.RELEASE,
         )
-    }
-    override suspend fun recordPlaybackStart(
-        key: com.hatem.musicmute.library.LibraryKey,
-        expected: ProcessingSession,
-    ) {
-        if (key.ownerUid != expected.uid || processingSession() != expected) return
-        processingStore.incrementLibraryPlay(expected.uid, key.jobId) { processingSession() == expected }
     }
     val googleCredentials by lazy { GoogleCredentialProvider(this) }
     private val firebaseIdentity by lazy {
@@ -135,14 +108,6 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 { firebaseIdentity.token(it) },
             )
     }
-    val urlImports by lazy {
-        UrlImportCoordinator(
-            processingStore,
-            UrlImportsApiClient(authApi, realtime) { authSession.state.value.installationId.orEmpty() },
-            applicationScope,
-            ::processingSession,
-        )
-    }
     private val updateDataStore by lazy {
         DataStoreFactory.create(UpdateStateSerializer) { dataStoreFile("app_updates.json") }
     }
@@ -164,7 +129,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     }
     val updateAdmission by lazy { UpdateAdmission(updateCoordinator.state) }
     val updateInstaller by lazy {
-        createUpdateInstaller(this)
+        createUpdateInstaller(this, updateApi) { installedBuildNumber(this) }
     }
     val authSession: AuthSessionCoordinator by lazy {
         AuthSessionCoordinator(firebaseIdentity, authApi, installations, googleCredentials,
@@ -188,16 +153,6 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             authApi,
             { authSession.state.value.installationId.orEmpty() },
             updateCoordinator::reportProcessingRejected,
-            realtime = realtime,
-        )
-    }
-    val realtime by lazy { RealtimeClient(authApi, applicationScope, { authSession.state.value.installationId.orEmpty() }) }
-    val processingPolicy by lazy {
-        ProcessingPolicyRepository(
-            applicationScope,
-            FileProcessingPolicyCache(File(noBackupFilesDir, "processing-policy.json")),
-            jobsApi::checkoutMediaPolicy,
-            { realtime.watch("policy", mapOf("schema_version" to "2")).map(ProcessingMediaPolicy::parse) },
         )
     }
     val audioInputPreparer by lazy { AudioInputPreparer(processingStagingRoot, validateDecoded = { file, policy -> com.hatem.musicmute.processing.validateDecodedProcessingAudio(file, policy) }, inspect = ::inspectProcessingAudio) }
@@ -213,7 +168,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     }
     val processingUsage by lazy { com.hatem.musicmute.processing.ProcessingUsageRepository(jobsApi, ::processingSession) }
     val audioPipelineCoordinator by lazy {
-        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, processingUsage, com.hatem.musicmute.processing.WorkManagerMediaPreparationScheduler(this), jobsApi::mediaPolicy)
+        AudioPipelineCoordinator(processingRepository, audioInputPreparer, ::processingSession, downloadRepository, processingUsage, com.hatem.musicmute.processing.WorkManagerMediaPreparationScheduler(this), jobsApi::mediaPolicy)
     }
     val clientErrorOutbox by lazy {
         val scheduler = WorkManagerClientErrorScheduler(this)
@@ -246,7 +201,6 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
     private val deletionJournal by lazy { AccountDeletionJournal(File(noBackupFilesDir, "pending-account-deletion")) }
 
     private val privateCleanupLock = Mutex()
-    private val linkImportShortcutLock = Mutex()
 
     private fun scheduleOwnerPurge(uid: String) {
         applicationScope.launch {
@@ -259,21 +213,19 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
         require(uid.isNotBlank())
         if (mutableProcessingSession.value?.uid == uid) {
             mutableProcessingSession.value = null
-            urlImports.bindSession(null)
-            processingPolicy.bindSession(null)
             stopService(android.content.Intent(this, com.hatem.musicmute.playback.AudioPlaybackService::class.java))
         }
         processingRepository.purgeOwner(uid)
         audioPipelineCoordinator.onSessionChanged(uid)
         processingArtifacts.purgeOwner(uid)
+        downloadRepository.purgeOwner(uid)
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            listOf(processingStagingRoot, File(filesDir, "processed_audio_share"), File(filesDir, "shared_audio_intake")).forEach { root ->
+            listOf(processingStagingRoot, File(filesDir, "processed_audio_share")).forEach { root ->
                 purgePrivateOwnerDirectory(root, uid)
             }
         }
         processingStore.clearOwner(uid)
-        kotlinx.coroutines.withContext(Dispatchers.IO) { playbackQueueStore.clear(uid); bookmarks.clear(uid) }
-        localAudioTools.clear(uid)
+        kotlinx.coroutines.withContext(Dispatchers.IO) { playbackQueueStore.clear(uid) }
         val notifications = getSystemService(android.app.NotificationManager::class.java)
         notifications.activeNotifications.filter { it.notification.group == audioTaskNotificationGroup(uid) }
             .forEach { notifications.cancel(it.tag, it.id) }
@@ -282,8 +234,8 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
 
     override fun onCreate() {
         super.onCreate()
-        com.hatem.musicmute.diagnostics.LocalDiagnostics.initialize(this)
         SentryMonitoring.initialize(this)
+        com.hatem.musicmute.download.ExtractorMaintenanceWorker.schedule(this)
         val connectivity = getSystemService(ConnectivityManager::class.java)
         val updateNetworkAvailable = AtomicBoolean(updatesOnline())
         connectivity.registerDefaultNetworkCallback(
@@ -312,10 +264,6 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
             }
         )
         applicationScope.launch { updateCoordinator.initialize() }
-        applicationScope.launch { processingPolicy.initialize() }
-        applicationScope.launch {
-            processingPolicy.policy.collect { updateLinkImportShortcut(it.linkImportVisible) }
-        }
         applicationScope.launch {
             var previouslyRequired = false
             var previouslyBlocked = true
@@ -360,12 +308,7 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
                 if (uid != mutableProcessingSession.value?.uid) {
                     val previousUid = mutableProcessingSession.value?.uid
                     mutableProcessingSession.value = uid?.let { ProcessingSession(it, ++processingEpoch) }
-                    realtime.bindSession(mutableProcessingSession.value)
-                    processingPolicy.bindSession(mutableProcessingSession.value)
-                    urlImports.bindSession(mutableProcessingSession.value)
                     processingArtifacts.onSessionChanged()
-                    com.hatem.musicmute.playback.PlaybackWidget.update(this@VocalApplication, null, false)
-                    if (previousUid != null) applicationScope.launch { localAudioTools.clear(previousUid) }
                     try {
                         processingRepository.onSessionChanged()
                         audioPipelineCoordinator.onSessionChanged(previousUid)
@@ -392,39 +335,15 @@ class VocalApplication : Application(), ProcessingWorkerHost, ProcessingPushHost
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
-
-    private suspend fun updateLinkImportShortcut(visible: Boolean) = linkImportShortcutLock.withLock {
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
-            if (visible != processingPolicy.policy.value.linkImportVisible) return@withContext
-            val manager = getSystemService(android.content.pm.ShortcutManager::class.java)
-            // The removed static import_link remains immutable if a user pinned it.
-            val id = "native_import_link"
-            try {
-                if (visible) {
-                    manager.addDynamicShortcuts(listOf(
-                        android.content.pm.ShortcutInfo.Builder(this@VocalApplication, id)
-                            .setShortLabel(getString(R.string.listen_import_link))
-                            .setIcon(android.graphics.drawable.Icon.createWithResource(this@VocalApplication, R.drawable.ic_vocal_monochrome))
-                            .setIntent(Intent(this@VocalApplication, MainActivity::class.java)
-                                .setAction("com.hatem.musicmute.IMPORT_LINK")
-                                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-                            .build(),
-                    ))
-                    manager.enableShortcuts(listOf(id))
-                } else {
-                    manager.removeDynamicShortcuts(listOf(id))
-                    manager.disableShortcuts(listOf(id))
-                }
-            } catch (_: IllegalStateException) {
-                // Launcher state may be unavailable while the device is locked.
-            }
-        }
-    }
-
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        super.onConfigurationChanged(newConfig)
-        applicationScope.launch { updateLinkImportShortcut(processingPolicy.policy.value.linkImportVisible) }
-    }
     val preferencesRepository by lazy { DataStorePreferencesRepository(preferencesStore) }
-
+    val workflowRepository by lazy { DemoWorkflowRepository() }
+    private val historyStore by lazy {
+        HistoryStore(
+            DataStoreFactory.create(HistorySerializer) { dataStoreFile("download_history.json") }
+        )
+    }
+    val downloadRepository by lazy {
+        DownloadRepository(this, historyStore, File(filesDir, "audio_downloads"), processingStore)
+    }
+    val audioDownloader by lazy { YoutubeAudioDownloader(this) { jobsApi.mediaPolicy() } }
 }
